@@ -1,0 +1,88 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
+import type { Request } from 'express';
+import { ContasPagarService } from './contas-pagar.service';
+import { CriarContasPagarDto } from './dto/criar-contas.dto';
+import { PrepararFolhaDto } from './dto/preparar-folha.dto';
+import { AuditoriaDto, QueryContasPagarDto } from './dto/query-contas.dto';
+
+function usuarioId(req: Request): string | undefined {
+  return (req.user as { id?: string } | undefined)?.id;
+}
+
+@Controller('contas-pagar')
+export class ContasPagarController {
+  constructor(private readonly service: ContasPagarService) {}
+
+  /** Preview dos lançamentos de uma competência (não persiste). */
+  @Post('preparar-folha')
+  @HttpCode(200)
+  prepararFolha(@Body() dto: PrepararFolhaDto) {
+    return this.service.prepararFolha(dto);
+  }
+
+  /** Cria as contas a pagar (salva localmente e envia ao IXC). */
+  @Post()
+  @HttpCode(201)
+  criar(@Body() dto: CriarContasPagarDto, @Req() req: Request) {
+    return this.service.criar(dto, usuarioId(req));
+  }
+
+  @Get()
+  listar(@Query() query: QueryContasPagarDto) {
+    return this.service.listar(query);
+  }
+
+  @Get(':id')
+  buscar(@Param('id') id: string) {
+    return this.service.buscar(id);
+  }
+
+  /** Reenvia ao IXC uma conta em rascunho/erro. */
+  @Post(':id/enviar')
+  @HttpCode(200)
+  enviar(@Param('id') id: string) {
+    return this.service.enviarIxc(id);
+  }
+
+  @Post(':id/aprovar')
+  @HttpCode(200)
+  aprovar(@Param('id') id: string, @Body() dto: AuditoriaDto, @Req() req: Request) {
+    return this.service.aprovar(id, dto.motivo, usuarioId(req));
+  }
+
+  @Post(':id/reprovar')
+  @HttpCode(200)
+  reprovar(@Param('id') id: string, @Body() dto: AuditoriaDto, @Req() req: Request) {
+    return this.service.reprovar(id, dto.motivo, usuarioId(req));
+  }
+
+  /** Consulta o status no IXC e marca como pago quando o banco retornar. */
+  @Post(':id/sincronizar')
+  @HttpCode(200)
+  sincronizar(@Param('id') id: string) {
+    return this.service.sincronizarStatus(id);
+  }
+
+  @Post('sincronizar-pendentes')
+  @HttpCode(200)
+  sincronizarPendentes() {
+    return this.service.sincronizarPendentes();
+  }
+
+  @Delete(':id')
+  @HttpCode(200)
+  async remover(@Param('id') id: string) {
+    await this.service.remover(id);
+    return { ok: true };
+  }
+}

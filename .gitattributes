@@ -1,0 +1,8 @@
+# Normaliza quebras de linha para LF (evita problemas nos builds Linux/Docker)
+* text=auto eol=lf
+
+# Binários não devem ser normalizados
+*.png binary
+*.jpg binary
+*.ico binary
+*.xlsx binary

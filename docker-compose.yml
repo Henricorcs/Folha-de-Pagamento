@@ -1,0 +1,56 @@
+# Ambiente de desenvolvimento local completo (Postgres + API + Web).
+# Uso: copie .env.example para .env, ajuste IXC_HOST/IXC_TOKEN e rode:
+#   docker compose up --build
+# Depois crie o admin: docker compose exec api npm run db:seed
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: folha
+      POSTGRES_PASSWORD: folha
+      POSTGRES_DB: folha
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U folha']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://folha:folha@db:5432/folha?schema=public
+      API_PORT: 3333
+      CORS_ORIGINS: http://localhost:8080
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-troque-em-producao-1234567890}
+      JWT_EXPIRES_IN: 8h
+      IXC_HOST: ${IXC_HOST:-}
+      IXC_TOKEN: ${IXC_TOKEN:-}
+      IXC_TIMEOUT_MS: 30000
+    ports:
+      - '3333:3333'
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      API_UPSTREAM: api:3333
+    ports:
+      - '8080:80'
+
+volumes:
+  pgdata:

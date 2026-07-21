@@ -1,0 +1,67 @@
+import { TipoPagamento } from '@prisma/client';
+import { mapAdiantamento, mapFuncionario } from './ixc.mappers';
+import type { IxcAdiantamento, IxcFuncionario } from './ixc.types';
+
+describe('mapFuncionario', () => {
+  it('mapeia campos essenciais do IXC', () => {
+    const raw: IxcFuncionario = {
+      id: '16',
+      funcionario: 'HENRICO',
+      cpf_cnpj: '123.456.789-00',
+      salario: '1412.00',
+      ativo: 'S',
+      fone_celular: '75999998888',
+      chave_pix: 'henrico@pix',
+      data_admissao: '2023-01-10',
+      filial_id: '1',
+    };
+    const { ixcId, create } = mapFuncionario(raw);
+    expect(ixcId).toBe(16);
+    expect(create.nome).toBe('HENRICO');
+    expect(create.ativo).toBe(true);
+    expect(Number(create.salarioBase)).toBe(1412);
+    expect(create.telefone).toBe('75999998888');
+    expect(create.chavePix).toBe('henrico@pix');
+    expect((create.dataAdmissao as Date).toISOString()).toBe(
+      '2023-01-10T00:00:00.000Z',
+    );
+  });
+
+  it('usa nome padrão quando vazio e trata inativo', () => {
+    const { create } = mapFuncionario({ id: '5', funcionario: '  ', ativo: 'N' });
+    expect(create.nome).toBe('Funcionário 5');
+    expect(create.ativo).toBe(false);
+  });
+
+  it('lança erro se id inválido', () => {
+    expect(() => mapFuncionario({ id: '0', funcionario: 'X' })).toThrow();
+  });
+});
+
+describe('mapAdiantamento', () => {
+  it('mapeia e resolve tipo de pagamento', () => {
+    const raw: IxcAdiantamento = {
+      id: '99',
+      id_funcionario: '2',
+      descricao: 'Contas pendentes',
+      data: '21/06/2024',
+      tipo_pagamento: 'D',
+      valor: '200',
+      conta_: '1',
+    };
+    const { ixcId, create } = mapAdiantamento(raw, 'local-uuid-2');
+    expect(ixcId).toBe(99);
+    expect(create.funcionarioId).toBe('local-uuid-2');
+    expect(create.tipoPagamento).toBe(TipoPagamento.DINHEIRO);
+    expect(Number(create.valor)).toBe(200);
+    expect((create.data as Date).toISOString()).toBe('2024-06-21T00:00:00.000Z');
+  });
+
+  it('tipo desconhecido vira OUTRO', () => {
+    const { create } = mapAdiantamento(
+      { id: '1', id_funcionario: '1', valor: '10', tipo_pagamento: 'X' },
+      'x',
+    );
+    expect(create.tipoPagamento).toBe(TipoPagamento.OUTRO);
+  });
+});

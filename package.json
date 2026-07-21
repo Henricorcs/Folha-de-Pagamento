@@ -1,0 +1,23 @@
+{
+  "name": "folha-pagamento",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Aplicação de folha de pagamento integrada ao IXC Provedor",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @folha/api & npm run dev --workspace @folha/web",
+    "dev:api": "npm run dev --workspace @folha/api",
+    "dev:web": "npm run dev --workspace @folha/web",
+    "build": "npm run build --workspace @folha/api && npm run build --workspace @folha/web",
+    "test": "npm run test --workspace @folha/api",
+    "lint": "npm run lint --workspaces --if-present",
+    "db:migrate": "npm run db:migrate --workspace @folha/api",
+    "db:generate": "npm run db:generate --workspace @folha/api"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

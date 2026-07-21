@@ -1,0 +1,301 @@
+// Schema da Folha de Pagamento
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Autenticação da aplicação
+// ---------------------------------------------------------------------------
+enum UserRole {
+  ADMIN
+  RH
+  VISUALIZADOR
+}
+
+model User {
+  id        String   @id @default(uuid())
+  nome      String
+  email     String   @unique
+  senhaHash String   @map("senha_hash")
+  role      UserRole @default(RH)
+  ativo     Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Funcionários (colaboradores) — espelham a tabela `funcionarios` do IXC
+// ---------------------------------------------------------------------------
+model Funcionario {
+  id String @id @default(uuid())
+
+  // Vínculo com o IXC. Único quando presente; null = cadastro só-local.
+  ixcId Int? @unique @map("ixc_id")
+
+  nome     String
+  cpfCnpj  String? @map("cpf_cnpj")
+  email    String?
+  telefone String?
+
+  salarioBase Decimal @default(0) @map("salario_base") @db.Decimal(14, 2)
+
+  filialId       Int?    @map("filial_id")
+  idFuncao       Int?    @map("id_funcao")
+  idDepartamento Int?    @map("id_departamento")
+  funcao         String?
+  departamento   String?
+
+  dataAdmissao DateTime? @map("data_admissao")
+  dataDemissao DateTime? @map("data_demissao")
+  ativo        Boolean   @default(true)
+
+  // Dados bancários / pagamento
+  banco    String?
+  agencia  String?
+  conta    String?
+  chavePix String? @map("chave_pix")
+
+  // Campos internos da aplicação (não vêm do IXC)
+  observacoes String? @map("observacoes")
+
+  // --- Configuração financeira / folha ---
+  // Carteira assinada (CLT): o adiantamento já é descontado pela contabilidade,
+  // então NÃO é subtraído do saldo salarial gerado aqui. Ver [[project]].
+  carteiraAssinada Boolean @default(false) @map("carteira_assinada")
+  // Opção de receber o adiantamento do dia 25
+  recebeAdiantamento Boolean @default(false) @map("recebe_adiantamento")
+
+  // Fornecedor vinculado no IXC (necessário para gerar contas a pagar)
+  idFornecedorIxc Int? @map("id_fornecedor_ixc")
+  // Cidade usada ao criar o fornecedor (senão usa a padrão da config)
+  cidadeIxc Int? @map("cidade_ixc")
+
+  // Fidelidade total: payload cru do IXC para não perder nada
+  ixcRaw       Json?     @map("ixc_raw")
+  ultimoSyncAt DateTime? @map("ultimo_sync_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  adiantamentos   Adiantamento[]
+  lancamentosFixos LancamentoFixo[]
+  contasPagar     ContaPagar[]
+
+  @@index([ativo])
+  @@index([nome])
+  @@map("funcionarios")
+}
+
+// ---------------------------------------------------------------------------
+// Adiantamentos — espelham `fl_adto_salario` do IXC
+// ---------------------------------------------------------------------------
+enum TipoPagamento {
+  DINHEIRO // D
+  CHEQUE // C
+  DEPOSITO // O (outros) — mapeado conforme retorno do IXC
+  OUTRO
+}
+
+model Adiantamento {
+  id    String @id @default(uuid())
+  ixcId Int?   @unique @map("ixc_id")
+
+  funcionario   Funcionario @relation(fields: [funcionarioId], references: [id], onDelete: Cascade)
+  funcionarioId String      @map("funcionario_id")
+
+  descricao     String
+  data          DateTime
+  valor         Decimal       @db.Decimal(14, 2)
+  tipoPagamento TipoPagamento @default(OUTRO) @map("tipo_pagamento")
+  documento     String?
+  contaId       Int?          @map("conta_id")
+
+  ixcRaw       Json?     @map("ixc_raw")
+  ultimoSyncAt DateTime? @map("ultimo_sync_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([funcionarioId])
+  @@index([data])
+  @@map("adiantamentos")
+}
+
+// ---------------------------------------------------------------------------
+// Auditoria de sincronizações com o IXC
+// ---------------------------------------------------------------------------
+enum SyncStatus {
+  EM_ANDAMENTO
+  SUCESSO
+  ERRO
+}
+
+model SyncLog {
+  id         String     @id @default(uuid())
+  recurso    String // ex.: "funcionarios", "adiantamentos"
+  status     SyncStatus @default(EM_ANDAMENTO)
+  totalLidos Int        @default(0) @map("total_lidos")
+  totalNovos Int        @default(0) @map("total_novos")
+  totalAtual Int        @default(0) @map("total_atualizados")
+  erro       String?
+  iniciadoEm DateTime   @default(now()) @map("iniciado_em")
+  concluidoEm DateTime? @map("concluido_em")
+
+  @@index([recurso, iniciadoEm])
+  @@map("sync_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Parametrização da integração financeira com o IXC (singleton id=1)
+// ---------------------------------------------------------------------------
+model ConfiguracaoFinanceira {
+  id Int @id @default(1)
+
+  // Conta de pagamento (fn_apagar.id_contas)
+  contaPagamentoId Int @default(18) @map("conta_pagamento_id")
+  // Filial (fn_apagar.filial_id)
+  filialId Int @default(1) @map("filial_id")
+
+  // Contas contábeis / planejamento analítico (fn_apagar.id_conta)
+  contaContabilSalario      Int @default(2420) @map("conta_contabil_salario")
+  contaContabilAdiantamento Int @default(2662) @map("conta_contabil_adiantamento")
+  contaContabilBonus        Int @default(13916) @map("conta_contabil_bonus")
+
+  // Cidade padrão usada ao criar fornecedores
+  cidadePadraoId Int @default(1) @map("cidade_padrao_id")
+
+  // Templates de observação ({competencia} é substituído por "MM/AAAA")
+  obsSalarioTemplate      String @default("saldo salarial referente ao mês {competencia}") @map("obs_salario_template")
+  obsAdiantamentoTemplate String @default("adiantamento") @map("obs_adiantamento_template")
+  obsBonusTemplate        String @default("bônus referente ao mês {competencia}") @map("obs_bonus_template")
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("config_financeira")
+}
+
+// ---------------------------------------------------------------------------
+// Lançamentos fixos (recorrentes) por funcionário: descontos, adiantamentos,
+// bônus que se repetem todo mês. Os avulsos são criados direto na ContaPagar.
+// ---------------------------------------------------------------------------
+enum TipoLancamento {
+  SALARIO
+  ADIANTAMENTO
+  BONUS
+  DESCONTO
+  AVULSO
+}
+
+model LancamentoFixo {
+  id String @id @default(uuid())
+
+  funcionario   Funcionario @relation(fields: [funcionarioId], references: [id], onDelete: Cascade)
+  funcionarioId String      @map("funcionario_id")
+
+  tipo      TipoLancamento // ADIANTAMENTO | DESCONTO | BONUS
+  descricao String
+  valor     Decimal        @db.Decimal(14, 2)
+  ativo     Boolean        @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([funcionarioId, tipo])
+  @@map("lancamentos_fixos")
+}
+
+// ---------------------------------------------------------------------------
+// Beneficiário avulso: alguém sem cadastro de funcionário (ex.: patrocínio)
+// ---------------------------------------------------------------------------
+model BeneficiarioAvulso {
+  id String @id @default(uuid())
+
+  nome       String
+  cpfCnpj    String? @map("cpf_cnpj")
+  tipoPessoa String  @default("F") @map("tipo_pessoa") // F | J
+  chavePix   String? @map("chave_pix")
+
+  idFornecedorIxc Int? @map("id_fornecedor_ixc")
+  cidadeIxc       Int? @map("cidade_ixc")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  contasPagar ContaPagar[]
+
+  @@map("beneficiarios_avulsos")
+}
+
+// ---------------------------------------------------------------------------
+// Conta a pagar (espelho local do fn_apagar do IXC) com o fluxo de aprovação
+// ---------------------------------------------------------------------------
+enum StatusContaPagar {
+  RASCUNHO // criada localmente, ainda não enviada ao IXC
+  AGUARDANDO_APROVACAO // salva no IXC (fn_apagar criado), pendente auditoria
+  APROVADO // auditoria aprovou (fn_apagar_auditoria = A)
+  REPROVADO // auditoria reprovou (R)
+  AGUARDANDO_PAGAMENTO // aprovada; aguardando "pagar com ModoBank" no IXC
+  PAGO // retorno do banco: paga
+  CANCELADO
+  ERRO // falha ao enviar/processar no IXC
+}
+
+model ContaPagar {
+  id String @id @default(uuid())
+
+  competencia String?        @map("competencia") // "AAAA-MM" (null p/ avulso sem competência)
+  tipo        TipoLancamento // SALARIO | ADIANTAMENTO | BONUS | AVULSO
+
+  // Beneficiário: funcionário OU avulso (exatamente um preenchido)
+  funcionario   Funcionario? @relation(fields: [funcionarioId], references: [id], onDelete: SetNull)
+  funcionarioId String?      @map("funcionario_id")
+
+  beneficiarioAvulso   BeneficiarioAvulso? @relation(fields: [beneficiarioAvulsoId], references: [id], onDelete: SetNull)
+  beneficiarioAvulsoId String?             @map("beneficiario_avulso_id")
+
+  // Snapshot do beneficiário (não muda se o cadastro mudar depois)
+  beneficiarioNome String @map("beneficiario_nome")
+  idFornecedorIxc  Int?   @map("id_fornecedor_ixc")
+
+  valor         Decimal @db.Decimal(14, 2)
+  contaContabil Int     @map("conta_contabil") // fn_apagar.id_conta
+  contaPagamento Int    @map("conta_pagamento") // fn_apagar.id_contas
+  filialId      Int     @map("filial_id")
+  dataEmissao   DateTime @map("data_emissao")
+  dataVencimento DateTime @map("data_vencimento")
+  observacao    String
+
+  status StatusContaPagar @default(RASCUNHO)
+  erro   String?
+
+  // Referências no IXC
+  idFnApagarIxc Int?  @map("id_fn_apagar_ixc")
+  ixcStatusRaw  Json? @map("ixc_status_raw")
+
+  // Auditoria (aprovação)
+  aprovadoPor     String?   @map("aprovado_por")
+  aprovadoEm      DateTime? @map("aprovado_em")
+  motivoAuditoria String?   @map("motivo_auditoria")
+
+  // Pagamento
+  pagoEm DateTime? @map("pago_em")
+
+  criadoPor String?  @map("criado_por")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([competencia])
+  @@index([funcionarioId])
+  @@index([idFnApagarIxc])
+  @@map("contas_pagar")
+}
