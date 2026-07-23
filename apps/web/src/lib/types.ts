@@ -114,6 +114,7 @@ export interface ConfigFinanceira {
   contaContabilAdiantamento: number;
   contaContabilBonus: number;
   cidadePadraoId: number;
+  tipoPagamentoPadrao: string;
   obsSalarioTemplate: string;
   obsAdiantamentoTemplate: string;
   obsBonusTemplate: string;

@@ -43,6 +43,29 @@ describe('buildContaPagarPayload', () => {
       previsao: 'N',
       liberado: 'S',
       obs: 'saldo salarial referente ao mês 07/2026',
+      tipo_pagamento: 'Dinheiro', // padrão quando não informado
+      chave_pix: '',
+    });
+  });
+
+  it('envia chave PIX e tipo de pagamento quando informados', () => {
+    const hoje = new Date(Date.UTC(2026, 6, 21));
+    const body = buildContaPagarPayload({
+      idFornecedor: 55,
+      valor: 500,
+      contaPagamentoId: 18,
+      contaContabilId: 2662,
+      filialId: 1,
+      dataEmissao: hoje,
+      dataVencimento: hoje,
+      observacao: 'adiantamento',
+      tipoPagamento: 'Pix',
+      chavePix: 'henrico@pix.com',
+    });
+    expect(body).toMatchObject({
+      tipo_pagamento: 'Pix',
+      chave_pix: 'henrico@pix.com',
+      id_conta: '2662',
     });
   });
 });

@@ -173,6 +173,10 @@ model ConfiguracaoFinanceira {
   // Cidade padrão usada ao criar fornecedores
   cidadePadraoId Int @default(1) @map("cidade_padrao_id")
 
+  // Tipo de pagamento enviado ao fn_apagar (rótulo exato usado pelo seu IXC,
+  // ex.: "Dinheiro", "Pix"). A chave PIX do beneficiário vai junto no payload.
+  tipoPagamentoPadrao String @default("Dinheiro") @map("tipo_pagamento_padrao")
+
   // Templates de observação ({competencia} é substituído por "MM/AAAA")
   obsSalarioTemplate      String @default("saldo salarial referente ao mês {competencia}") @map("obs_salario_template")
   obsAdiantamentoTemplate String @default("adiantamento") @map("obs_adiantamento_template")

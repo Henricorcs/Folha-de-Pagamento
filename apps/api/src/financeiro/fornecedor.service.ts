@@ -77,6 +77,17 @@ export class FornecedorService {
     celular?: string | null;
     obs?: string;
   }): Promise<number> {
+    // Reutiliza fornecedor existente no IXC (por CPF/CNPJ) antes de criar um
+    // novo — fornecedores já cadastrados costumam ter dados bancários/PIX que
+    // a tela de contas a pagar do IXC preenche automaticamente.
+    const existente = await this.buscarPorCpfCnpj(input.cpfCnpj);
+    if (existente) {
+      this.logger.log(
+        `Fornecedor existente vinculado: #${existente} (${input.nome})`,
+      );
+      return existente;
+    }
+
     const payload = buildFornecedorPayload(input);
     const { id } = await this.ixc.create('fornecedor', payload);
     if (!id) {
@@ -84,5 +95,27 @@ export class FornecedorService {
     }
     this.logger.log(`Fornecedor criado no IXC: #${id} (${input.nome})`);
     return id;
+  }
+
+  private async buscarPorCpfCnpj(
+    cpfCnpj?: string | null,
+  ): Promise<number | null> {
+    const doc = (cpfCnpj ?? '').trim();
+    if (!doc) return null;
+    try {
+      const res = await this.ixc.list<{ id: string }>('fornecedor', {
+        qtype: 'fornecedor.cpf_cnpj',
+        query: doc,
+        oper: '=',
+        rp: 1,
+      });
+      const id = Number(res.registros[0]?.id);
+      return Number.isInteger(id) && id > 0 ? id : null;
+    } catch (err) {
+      // Falha na busca não deve impedir a criação; loga e segue.
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Busca de fornecedor por CPF falhou: ${message}`);
+      return null;
+    }
   }
 }

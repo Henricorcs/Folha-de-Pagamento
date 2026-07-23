@@ -55,6 +55,17 @@ export function Configuracoes() {
           <CampoNum label="Conta de pagamento (id_contas)" valor={form.contaPagamentoId} onChange={(v) => num('contaPagamentoId', v)} />
           <CampoNum label="Filial (filial_id)" valor={form.filialId} onChange={(v) => num('filialId', v)} />
           <CampoNum label="Cidade padrão (fornecedor)" valor={form.cidadePadraoId} onChange={(v) => num('cidadePadraoId', v)} />
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">
+              Tipo de pagamento (fn_apagar)
+            </label>
+            <input
+              value={form.tipoPagamentoPadrao}
+              onChange={(e) => txt('tipoPagamentoPadrao', e.target.value)}
+              className={inputCls}
+              placeholder='Ex.: "Dinheiro" ou "Pix"'
+            />
+          </div>
         </Bloco>
 
         <Bloco titulo="Contas contábeis (id_conta / planejamento analítico)">

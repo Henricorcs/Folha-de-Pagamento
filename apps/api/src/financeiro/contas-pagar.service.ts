@@ -177,6 +177,9 @@ export class ContasPagarService {
         ? await this.fornecedores.garantirParaFuncionario(conta.funcionarioId)
         : await this.fornecedores.garantirParaAvulso(conta.beneficiarioAvulsoId!);
 
+      const cfg = await this.config.obter();
+      const chavePix = await this.chavePixDoBeneficiario(conta);
+
       const payload = buildContaPagarPayload({
         idFornecedor,
         valor: Number(conta.valor),
@@ -186,6 +189,8 @@ export class ContasPagarService {
         dataEmissao: conta.dataEmissao,
         dataVencimento: conta.dataVencimento,
         observacao: conta.observacao,
+        tipoPagamento: cfg.tipoPagamentoPadrao,
+        chavePix,
       });
 
       const { id: idFnApagar } = await this.ixc.create('fn_apagar', payload);
@@ -355,6 +360,28 @@ export class ContasPagarService {
       );
     }
     await this.prisma.contaPagar.delete({ where: { id } });
+  }
+
+  /** Chave PIX do funcionário (sincronizada do IXC) ou do beneficiário avulso. */
+  private async chavePixDoBeneficiario(conta: {
+    funcionarioId: string | null;
+    beneficiarioAvulsoId: string | null;
+  }): Promise<string | null> {
+    if (conta.funcionarioId) {
+      const f = await this.prisma.funcionario.findUnique({
+        where: { id: conta.funcionarioId },
+        select: { chavePix: true },
+      });
+      return f?.chavePix ?? null;
+    }
+    if (conta.beneficiarioAvulsoId) {
+      const b = await this.prisma.beneficiarioAvulso.findUnique({
+        where: { id: conta.beneficiarioAvulsoId },
+        select: { chavePix: true },
+      });
+      return b?.chavePix ?? null;
+    }
+    return null;
   }
 
   private async resolverNome(item: ItemContaPagarDto): Promise<string> {
