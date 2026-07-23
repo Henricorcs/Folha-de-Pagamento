@@ -57,7 +57,15 @@ export class ContasPagarService {
 
     const funcionarios = await this.prisma.funcionario.findMany({
       where,
-      include: { lancamentosFixos: { where: { ativo: true } } },
+      include: {
+        // Fixos (sem competência) + avulsos desta competência
+        lancamentos: {
+          where: {
+            ativo: true,
+            OR: [{ competencia: null }, { competencia: dto.competencia }],
+          },
+        },
+      },
       orderBy: { nome: 'asc' },
     });
 
@@ -72,7 +80,7 @@ export class ContasPagarService {
 
     return funcionarios.map((f) => {
       const somaTipo = (tipo: TipoLancamento) =>
-        f.lancamentosFixos
+        f.lancamentos
           .filter((l) => l.tipo === tipo)
           .reduce((s, l) => s + Number(l.valor), 0);
 
@@ -291,7 +299,11 @@ export class ContasPagarService {
   }
 
   /** Verifica todas as contas aguardando pagamento (para um job/polling). */
-  async sincronizarPendentes(): Promise<{ verificadas: number; pagas: number }> {
+  async sincronizarPendentes(): Promise<{
+    verificadas: number;
+    pagas: number;
+    erros: number;
+  }> {
     const pendentes = await this.prisma.contaPagar.findMany({
       where: {
         status: {
@@ -305,11 +317,19 @@ export class ContasPagarService {
       select: { id: true },
     });
     let pagas = 0;
+    let erros = 0;
     for (const p of pendentes) {
-      const atual = await this.sincronizarStatus(p.id);
-      if (atual.status === StatusContaPagar.PAGO) pagas++;
+      try {
+        const atual = await this.sincronizarStatus(p.id);
+        if (atual.status === StatusContaPagar.PAGO) pagas++;
+      } catch (err) {
+        // Uma conta com falha não deve abortar a verificação das demais.
+        erros++;
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Falha ao sincronizar conta ${p.id}: ${message}`);
+      }
     }
-    return { verificadas: pendentes.length, pagas };
+    return { verificadas: pendentes.length, pagas, erros };
   }
 
   // -------------------------------------------------------------------------

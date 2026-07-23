@@ -6,7 +6,7 @@ import { formatBRL, formatData } from '../lib/format';
 import { TIPO_LABEL } from '../lib/status';
 import type {
   FuncionarioDetalhe as TFunc,
-  LancamentoFixo,
+  Lancamento,
   TipoLancamento,
 } from '../lib/types';
 
@@ -92,10 +92,7 @@ export function FuncionarioDetalhe() {
 
           <ConfigFolhaBloco data={data} funcionarioId={id!} />
 
-          <LancamentosFixosBloco
-            funcionarioId={id!}
-            lancamentos={data.lancamentosFixos}
-          />
+          <LancamentosBloco funcionarioId={id!} lancamentos={data.lancamentos} />
 
           <Bloco titulo="Adiantamentos recentes">
             {data.adiantamentos.length === 0 ? (
@@ -280,18 +277,19 @@ function ConfigFolhaBloco({
   );
 }
 
-// --- Lançamentos fixos (descontos/adiantamentos/bônus recorrentes) ---
-function LancamentosFixosBloco({
+// --- Lançamentos: fixos (todo mês) e avulsos (só numa competência) ---
+function LancamentosBloco({
   funcionarioId,
   lancamentos,
 }: {
   funcionarioId: string;
-  lancamentos: LancamentoFixo[];
+  lancamentos: Lancamento[];
 }) {
   const qc = useQueryClient();
   const [tipo, setTipo] = useState<TipoLancamento>('DESCONTO');
   const [descricao, setDescricao] = useState('');
   const [valor, setValor] = useState('');
+  const [competencia, setCompetencia] = useState('');
 
   function invalidar() {
     qc.invalidateQueries({ queryKey: ['funcionario', funcionarioId] });
@@ -304,11 +302,13 @@ function LancamentosFixosBloco({
           tipo,
           descricao,
           valor: Number(valor),
+          ...(competencia ? { competencia } : {}),
         })
       ).data,
     onSuccess: () => {
       setDescricao('');
       setValor('');
+      setCompetencia('');
       invalidar();
     },
   });
@@ -320,9 +320,9 @@ function LancamentosFixosBloco({
   });
 
   return (
-    <Bloco titulo="Lançamentos fixos (mensais)">
+    <Bloco titulo="Lançamentos (fixos e avulsos)">
       {lancamentos.length === 0 ? (
-        <p className="mb-3 text-sm text-slate-400">Nenhum lançamento fixo.</p>
+        <p className="mb-3 text-sm text-slate-400">Nenhum lançamento.</p>
       ) : (
         <table className="mb-4 w-full text-sm">
           <tbody>
@@ -333,7 +333,18 @@ function LancamentosFixosBloco({
                     {TIPO_LABEL[l.tipo]}
                   </span>
                 </td>
-                <td className="py-1.5">{l.descricao}</td>
+                <td className="py-1.5">
+                  {l.descricao}{' '}
+                  <span
+                    className={`ml-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                      l.competencia
+                        ? 'bg-amber-100 text-amber-700'
+                        : 'bg-sky-100 text-sky-700'
+                    }`}
+                  >
+                    {l.competencia ? `Avulso ${formatComp(l.competencia)}` : 'Fixo'}
+                  </span>
+                </td>
                 <td className="py-1.5 text-right font-medium">{formatBRL(l.valor)}</td>
                 <td className="py-1.5 pl-2 text-right">
                   <button
@@ -373,6 +384,17 @@ function LancamentosFixosBloco({
           placeholder="Valor"
           className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm"
         />
+        <div>
+          <label className="mb-0.5 block text-[10px] text-slate-400">
+            Mês (vazio = fixo)
+          </label>
+          <input
+            type="month"
+            value={competencia}
+            onChange={(e) => setCompetencia(e.target.value)}
+            className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+          />
+        </div>
         <button
           onClick={() => adicionar.mutate()}
           disabled={
@@ -385,4 +407,9 @@ function LancamentosFixosBloco({
       </div>
     </Bloco>
   );
+}
+
+function formatComp(comp: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(comp);
+  return m ? `${m[2]}/${m[1]}` : comp;
 }

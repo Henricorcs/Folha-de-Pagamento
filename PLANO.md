@@ -30,10 +30,16 @@ Evolução planejada por fases. Cada fase entrega valor de forma incremental.
 - [x] **Pagamentos avulsos** (ex.: patrocínio a quem não é funcionário)
 - [x] Telas: Gerar Folha, Contas a Pagar (com ações), Avulsos, Configurações
 
+- [x] Lançamentos **avulsos** por funcionário (competência específica), além dos fixos
+- [x] Polling automático do retorno do banco (SYNC_PAGAMENTOS_INTERVALO_MIN, padrão 10 min)
+- [x] PIX no fn_apagar (chave do beneficiário) + tipo de pagamento configurável
+- [x] Reuso de fornecedor existente no IXC por CPF/CNPJ
+
 ### Pendências desta fase (dependem de você)
 - [ ] Automatizar o clique "pagar com ModoBank" — só se o IXC expuser esse
       endpoint (hoje é ação manual na tela do IXC; o app cria/aprova/monitora)
 - [ ] Confirmar `cidade` padrão para criação de fornecedores no seu IXC
+- [ ] Conferir o rótulo exato do tipo de pagamento PIX no seu IXC (Configurações)
 
 ## 🔜 Fase 2b — Réplica completa da planilha (proventos/descontos detalhados)
 

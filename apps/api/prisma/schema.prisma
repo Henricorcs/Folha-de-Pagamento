@@ -86,9 +86,9 @@ model Funcionario {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  adiantamentos   Adiantamento[]
-  lancamentosFixos LancamentoFixo[]
-  contasPagar     ContaPagar[]
+  adiantamentos Adiantamento[]
+  lancamentos   Lancamento[]
+  contasPagar   ContaPagar[]
 
   @@index([ativo])
   @@index([nome])
@@ -188,8 +188,9 @@ model ConfiguracaoFinanceira {
 }
 
 // ---------------------------------------------------------------------------
-// Lançamentos fixos (recorrentes) por funcionário: descontos, adiantamentos,
-// bônus que se repetem todo mês. Os avulsos são criados direto na ContaPagar.
+// Lançamentos por funcionário: descontos, adiantamentos e bônus.
+// competencia = null  -> FIXO (entra todo mês)
+// competencia = AAAA-MM -> AVULSO (entra só naquela competência)
 // ---------------------------------------------------------------------------
 enum TipoLancamento {
   SALARIO
@@ -199,7 +200,7 @@ enum TipoLancamento {
   AVULSO
 }
 
-model LancamentoFixo {
+model Lancamento {
   id String @id @default(uuid())
 
   funcionario   Funcionario @relation(fields: [funcionarioId], references: [id], onDelete: Cascade)
@@ -209,6 +210,9 @@ model LancamentoFixo {
   descricao String
   valor     Decimal        @db.Decimal(14, 2)
   ativo     Boolean        @default(true)
+
+  // null = fixo mensal; "AAAA-MM" = avulso daquela competência
+  competencia String?
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

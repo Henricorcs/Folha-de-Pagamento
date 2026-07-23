@@ -22,6 +22,9 @@ const envSchema = z.object({
   IXC_HOST: z.string().optional().default(''),
   IXC_TOKEN: z.string().optional().default(''),
   IXC_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+
+  // Intervalo (minutos) do polling de retorno do banco; 0 desliga.
+  SYNC_PAGAMENTOS_INTERVALO_MIN: z.coerce.number().int().min(0).default(10),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;
@@ -58,6 +61,7 @@ export function configuration() {
       token: env.IXC_TOKEN,
       timeoutMs: env.IXC_TIMEOUT_MS,
     },
+    pollPagamentosMin: env.SYNC_PAGAMENTOS_INTERVALO_MIN,
   };
 }
 

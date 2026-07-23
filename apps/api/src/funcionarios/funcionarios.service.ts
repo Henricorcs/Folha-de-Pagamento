@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { LancamentoFixoDto } from './dto/lancamento-fixo.dto';
+import { LancamentoDto } from './dto/lancamento.dto';
 import { QueryFuncionariosDto } from './dto/query-funcionarios.dto';
 import { UpdateFuncionarioDto } from './dto/update-funcionario.dto';
 
@@ -46,7 +46,7 @@ export class FuncionariosService {
       where: { id },
       include: {
         adiantamentos: { orderBy: { data: 'desc' }, take: 20 },
-        lancamentosFixos: { orderBy: [{ tipo: 'asc' }, { descricao: 'asc' }] },
+        lancamentos: { orderBy: [{ competencia: 'desc' }, { tipo: 'asc' }] },
       },
     });
     if (!func) throw new NotFoundException('Funcionário não encontrado');
@@ -74,48 +74,50 @@ export class FuncionariosService {
     });
   }
 
-  // --- Lançamentos fixos (descontos/adiantamentos/bônus recorrentes) ---
+  // --- Lançamentos (fixos = sem competência; avulsos = com competência) ---
   async listarLancamentos(funcionarioId: string) {
     await this.assertExiste(funcionarioId);
-    return this.prisma.lancamentoFixo.findMany({
+    return this.prisma.lancamento.findMany({
       where: { funcionarioId },
-      orderBy: [{ tipo: 'asc' }, { descricao: 'asc' }],
+      orderBy: [{ competencia: 'desc' }, { tipo: 'asc' }],
     });
   }
 
-  async criarLancamento(funcionarioId: string, dto: LancamentoFixoDto) {
+  async criarLancamento(funcionarioId: string, dto: LancamentoDto) {
     await this.assertExiste(funcionarioId);
-    return this.prisma.lancamentoFixo.create({
+    return this.prisma.lancamento.create({
       data: {
         funcionarioId,
         tipo: dto.tipo,
         descricao: dto.descricao,
         valor: new Prisma.Decimal(dto.valor),
         ativo: dto.ativo ?? true,
+        competencia: dto.competencia ?? null,
       },
     });
   }
 
-  async atualizarLancamento(lancamentoId: string, dto: LancamentoFixoDto) {
+  async atualizarLancamento(lancamentoId: string, dto: LancamentoDto) {
     await this.assertLancamentoExiste(lancamentoId);
-    return this.prisma.lancamentoFixo.update({
+    return this.prisma.lancamento.update({
       where: { id: lancamentoId },
       data: {
         tipo: dto.tipo,
         descricao: dto.descricao,
         valor: new Prisma.Decimal(dto.valor),
         ativo: dto.ativo,
+        competencia: dto.competencia ?? null,
       },
     });
   }
 
   async removerLancamento(lancamentoId: string) {
     await this.assertLancamentoExiste(lancamentoId);
-    await this.prisma.lancamentoFixo.delete({ where: { id: lancamentoId } });
+    await this.prisma.lancamento.delete({ where: { id: lancamentoId } });
   }
 
   private async assertLancamentoExiste(id: string) {
-    const existe = await this.prisma.lancamentoFixo.findUnique({
+    const existe = await this.prisma.lancamento.findUnique({
       where: { id },
       select: { id: true },
     });

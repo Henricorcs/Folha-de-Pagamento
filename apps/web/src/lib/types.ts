@@ -47,17 +47,19 @@ export type TipoLancamento =
   | 'DESCONTO'
   | 'AVULSO';
 
-export interface LancamentoFixo {
+export interface Lancamento {
   id: string;
   tipo: TipoLancamento;
   descricao: string;
   valor: string;
   ativo: boolean;
+  /** null = fixo (todo mês); "AAAA-MM" = avulso daquela competência */
+  competencia: string | null;
 }
 
 export interface FuncionarioDetalhe extends Funcionario {
   adiantamentos: Adiantamento[];
-  lancamentosFixos: LancamentoFixo[];
+  lancamentos: Lancamento[];
 }
 
 export type StatusContaPagar =

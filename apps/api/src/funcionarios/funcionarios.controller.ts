@@ -10,7 +10,7 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
-import { LancamentoFixoDto } from './dto/lancamento-fixo.dto';
+import { LancamentoDto } from './dto/lancamento.dto';
 import { QueryFuncionariosDto } from './dto/query-funcionarios.dto';
 import { UpdateFuncionarioDto } from './dto/update-funcionario.dto';
 import { FuncionariosService } from './funcionarios.service';
@@ -47,14 +47,14 @@ export class FuncionariosController {
 
   @Post(':id/lancamentos')
   @HttpCode(201)
-  criarLancamento(@Param('id') id: string, @Body() dto: LancamentoFixoDto) {
+  criarLancamento(@Param('id') id: string, @Body() dto: LancamentoDto) {
     return this.funcionarios.criarLancamento(id, dto);
   }
 
   @Put('lancamentos/:lancamentoId')
   atualizarLancamento(
     @Param('lancamentoId') lancamentoId: string,
-    @Body() dto: LancamentoFixoDto,
+    @Body() dto: LancamentoDto,
   ) {
     return this.funcionarios.atualizarLancamento(lancamentoId, dto);
   }

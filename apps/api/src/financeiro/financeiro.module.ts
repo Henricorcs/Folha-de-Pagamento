@@ -7,6 +7,7 @@ import { ConfigFinanceiraService } from './config-financeira.service';
 import { ContasPagarController } from './contas-pagar.controller';
 import { ContasPagarService } from './contas-pagar.service';
 import { FornecedorService } from './fornecedor.service';
+import { PagamentosPollerService } from './pagamentos-poller.service';
 
 @Module({
   imports: [IxcModule],
@@ -20,6 +21,7 @@ import { FornecedorService } from './fornecedor.service';
     FornecedorService,
     ContasPagarService,
     AvulsosService,
+    PagamentosPollerService,
   ],
   exports: [ContasPagarService, ConfigFinanceiraService],
 })
