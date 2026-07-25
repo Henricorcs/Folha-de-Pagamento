@@ -1,5 +1,10 @@
 import { TipoPagamento } from '@prisma/client';
-import { mapAdiantamento, mapFuncionario } from './ixc.mappers';
+import {
+  extrairChavePix,
+  extrairDadosBancarios,
+  mapAdiantamento,
+  mapFuncionario,
+} from './ixc.mappers';
 import type { IxcAdiantamento, IxcFuncionario } from './ixc.types';
 
 describe('mapFuncionario', () => {
@@ -35,6 +40,76 @@ describe('mapFuncionario', () => {
 
   it('lança erro se id inválido', () => {
     expect(() => mapFuncionario({ id: '0', funcionario: 'X' })).toThrow();
+  });
+
+  it('no update, não sobrescreve dados bancários quando o IXC não informa', () => {
+    const { create, update } = mapFuncionario({ id: '7', funcionario: 'X' });
+    // Sem dados no IXC: create fixa null, mas update não toca nesses campos.
+    expect(create.chavePix).toBeNull();
+    expect(create.banco).toBeNull();
+    expect(create.agencia).toBeNull();
+    expect(create.conta).toBeNull();
+    expect('chavePix' in update).toBe(false);
+    expect('banco' in update).toBe(false);
+    expect('agencia' in update).toBe(false);
+    expect('conta' in update).toBe(false);
+  });
+
+  it('no update, sobrescreve dados bancários que o IXC informa', () => {
+    const { update } = mapFuncionario({
+      id: '7',
+      funcionario: 'X',
+      chave_pix: 'x@pix',
+      banco: '001',
+      agencia: '1234',
+      conta: '',
+    });
+    expect(update.chavePix).toBe('x@pix');
+    expect(update.banco).toBe('001');
+    expect(update.agencia).toBe('1234');
+    // conta vazia: preserva o valor local (não entra no update).
+    expect('conta' in update).toBe(false);
+  });
+});
+
+describe('extrairChavePix', () => {
+  it('lê o campo chave_pix', () => {
+    expect(extrairChavePix({ chave_pix: 'ana@pix' })).toBe('ana@pix');
+  });
+
+  it('acha qualquer campo com "pix" no nome', () => {
+    expect(extrairChavePix({ pix_chave: '  123  ' })).toBe('123');
+  });
+
+  it('retorna null quando não há PIX', () => {
+    expect(extrairChavePix({ chave_pix: '', razao: 'ACME' })).toBeNull();
+  });
+});
+
+describe('extrairDadosBancarios', () => {
+  it('extrai banco/agência/conta/PIX preenchidos', () => {
+    expect(
+      extrairDadosBancarios({
+        banco: '001',
+        agencia: '1234',
+        conta: '56789-0',
+        chave_pix: 'joao@pix',
+      }),
+    ).toEqual({
+      banco: '001',
+      agencia: '1234',
+      conta: '56789-0',
+      chavePix: 'joao@pix',
+    });
+  });
+
+  it('vazios viram null', () => {
+    expect(extrairDadosBancarios({ banco: '  ', razao: 'ACME' })).toEqual({
+      banco: null,
+      agencia: null,
+      conta: null,
+      chavePix: null,
+    });
   });
 });
 

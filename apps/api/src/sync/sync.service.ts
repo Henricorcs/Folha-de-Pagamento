@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SyncStatus } from '@prisma/client';
+import { Prisma, SyncStatus } from '@prisma/client';
 import { IxcClient } from '../ixc/ixc.client';
-import { mapAdiantamento, mapFuncionario } from '../ixc/ixc.mappers';
+import {
+  extrairDadosBancarios,
+  mapAdiantamento,
+  mapFuncionario,
+} from '../ixc/ixc.mappers';
 import type { IxcAdiantamento, IxcFuncionario } from '../ixc/ixc.types';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -62,6 +66,10 @@ export class SyncService {
         });
         existente ? atualizados++ : novos++;
       }
+
+      // Os dados bancários (banco/agência/conta/PIX) do funcionário costumam
+      // estar no fornecedor, não na tabela `funcionarios`. Completa o que faltou.
+      await this.enriquecerDadosBancarios();
 
       await this.prisma.syncLog.update({
         where: { id: log.id },
@@ -166,6 +174,76 @@ export class SyncService {
     }
   }
 
+  /**
+   * Completa os dados bancários (banco/agência/conta/PIX) dos funcionários a
+   * partir do fornecedor no IXC. Para cada funcionário com algum campo bancário
+   * vazio e com CPF/CNPJ, busca o fornecedor pelo documento e copia só os
+   * campos que estão vazios no local — nunca apaga valor já existente (manual
+   * ou de sync anterior). Falha em um funcionário não aborta os demais.
+   */
+  private async enriquecerDadosBancarios(): Promise<number> {
+    const incompletos = await this.prisma.funcionario.findMany({
+      where: {
+        cpfCnpj: { not: null },
+        OR: [
+          { banco: null },
+          { banco: '' },
+          { agencia: null },
+          { agencia: '' },
+          { conta: null },
+          { conta: '' },
+          { chavePix: null },
+          { chavePix: '' },
+        ],
+      },
+      select: {
+        id: true,
+        cpfCnpj: true,
+        banco: true,
+        agencia: true,
+        conta: true,
+        chavePix: true,
+      },
+    });
+
+    let preenchidos = 0;
+    for (const f of incompletos) {
+      const doc = (f.cpfCnpj ?? '').trim();
+      if (!doc) continue;
+      try {
+        const fornecedor = await this.ixc.getById<Record<string, unknown>>(
+          'fornecedor',
+          'fornecedor.cpf_cnpj',
+          doc,
+        );
+        if (!fornecedor) continue;
+        const dados = extrairDadosBancarios(fornecedor);
+
+        const data: Prisma.FuncionarioUpdateInput = {};
+        if (vazio(f.banco) && dados.banco) data.banco = dados.banco;
+        if (vazio(f.agencia) && dados.agencia) data.agencia = dados.agencia;
+        if (vazio(f.conta) && dados.conta) data.conta = dados.conta;
+        if (vazio(f.chavePix) && dados.chavePix) data.chavePix = dados.chavePix;
+        if (Object.keys(data).length === 0) continue;
+
+        await this.prisma.funcionario.update({ where: { id: f.id }, data });
+        preenchidos++;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Falha ao buscar dados bancários do fornecedor (CPF/CNPJ ${doc}): ${message}`,
+        );
+      }
+    }
+
+    if (preenchidos > 0) {
+      this.logger.log(
+        `Dados bancários preenchidos a partir do fornecedor: ${preenchidos} funcionário(s)`,
+      );
+    }
+    return preenchidos;
+  }
+
   private async marcarErro(logId: string, err: unknown): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     this.logger.error(`Falha na sincronização: ${message}`);
@@ -182,4 +260,9 @@ export class SyncService {
       take: limite,
     });
   }
+}
+
+/** true quando a string é nula/vazia (só espaços). */
+function vazio(valor: string | null): boolean {
+  return !valor || valor.trim() === '';
 }

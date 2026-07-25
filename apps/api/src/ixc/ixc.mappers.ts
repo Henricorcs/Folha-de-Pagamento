@@ -18,6 +18,8 @@ export function mapFuncionario(raw: IxcFuncionario): {
     throw new Error(`Funcionário do IXC sem id válido: ${JSON.stringify(raw.id)}`);
   }
 
+  const bancarios = extrairDadosBancarios(raw);
+
   const common = {
     nome: (raw.funcionario ?? '').trim() || `Funcionário ${ixcId}`,
     cpfCnpj: emptyToNull(raw.cpf_cnpj),
@@ -30,19 +32,63 @@ export function mapFuncionario(raw: IxcFuncionario): {
     dataAdmissao: parseIxcDate(raw.data_admissao),
     dataDemissao: parseIxcDate(raw.data_demissao),
     ativo: parseIxcBool(raw.ativo),
-    banco: emptyToNull(raw.banco),
-    agencia: emptyToNull(raw.agencia),
-    conta: emptyToNull(raw.conta),
-    chavePix: emptyToNull(raw.chave_pix),
     ixcRaw: raw as unknown as Prisma.InputJsonValue,
     ultimoSyncAt: new Date(),
   };
 
+  // Dados bancários (banco/agência/conta/PIX) da tabela `funcionarios` do IXC
+  // costumam vir vazios — o real fica no fornecedor. No update só sobrescreve
+  // o campo que o IXC informou; senão preserva o valor local (vindo do
+  // fornecedor ou digitado à mão), que antes era zerado a cada sync. Ver
+  // [[project]].
+  const bancariosUpdate = {
+    ...(bancarios.banco ? { banco: bancarios.banco } : {}),
+    ...(bancarios.agencia ? { agencia: bancarios.agencia } : {}),
+    ...(bancarios.conta ? { conta: bancarios.conta } : {}),
+    ...(bancarios.chavePix ? { chavePix: bancarios.chavePix } : {}),
+  };
+
   return {
     ixcId,
-    create: { ixcId, ...common },
-    update: { ...common },
+    create: { ixcId, ...common, ...bancarios },
+    update: { ...common, ...bancariosUpdate },
   };
+}
+
+export interface DadosBancariosIxc {
+  banco: string | null;
+  agencia: string | null;
+  conta: string | null;
+  chavePix: string | null;
+}
+
+/** Extrai banco/agência/conta/PIX de um registro cru (funcionário/fornecedor). */
+export function extrairDadosBancarios(
+  raw: Record<string, unknown>,
+): DadosBancariosIxc {
+  return {
+    banco: emptyToNull(raw.banco),
+    agencia: emptyToNull(raw.agencia),
+    conta: emptyToNull(raw.conta),
+    chavePix: extrairChavePix(raw),
+  };
+}
+
+/**
+ * Extrai a chave PIX de um registro cru do IXC (fornecedor/funcionário).
+ * O IXC costuma usar o campo `chave_pix`, mas por robustez procura qualquer
+ * campo cujo nome contenha "pix" com valor preenchido.
+ */
+export function extrairChavePix(raw: Record<string, unknown>): string | null {
+  const direto = emptyToNull(raw.chave_pix);
+  if (direto) return direto;
+  for (const [chave, valor] of Object.entries(raw)) {
+    if (/pix/i.test(chave)) {
+      const s = emptyToNull(valor);
+      if (s) return s;
+    }
+  }
+  return null;
 }
 
 const TIPO_PAGAMENTO_MAP: Record<string, TipoPagamento> = {
