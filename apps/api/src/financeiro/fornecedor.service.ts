@@ -88,13 +88,65 @@ export class FornecedorService {
       return existente;
     }
 
-    const payload = buildFornecedorPayload(input);
+    // O cadastro de fornecedor do IXC exige "Classificação de ISS" (e possíveis
+    // outros defaults tributários). Como o código válido é específico da base,
+    // copia-o de um fornecedor já existente em vez de adivinhar.
+    const extrasIss = await this.camposClassificacaoIss();
+    const payload = { ...buildFornecedorPayload(input), ...extrasIss };
     const { id } = await this.ixc.create('fornecedor', payload);
     if (!id) {
       throw new Error('IXC não retornou o id do fornecedor criado');
     }
     this.logger.log(`Fornecedor criado no IXC: #${id} (${input.nome})`);
     return id;
+  }
+
+  /**
+   * Lê a classificação de ISS de um fornecedor já existente para reaproveitar
+   * num cadastro novo (campo obrigatório no IXC). Copia os campos cujo nome
+   * contém "iss" + "class" (ex.: `id_class_iss`), preenchidos. Falha aqui não
+   * impede a tentativa de criação — apenas loga.
+   */
+  private async camposClassificacaoIss(): Promise<Record<string, string>> {
+    try {
+      const res = await this.ixc.list<Record<string, unknown>>('fornecedor', {
+        qtype: 'fornecedor.ativo',
+        query: 'S',
+        oper: '=',
+        rp: 1,
+        sortname: 'fornecedor.id',
+        sortorder: 'desc',
+      });
+      const modelo = res.registros[0];
+      if (!modelo) {
+        this.logger.warn(
+          'Nenhum fornecedor modelo encontrado para copiar a Classificação de ISS',
+        );
+        return {};
+      }
+      const extras: Record<string, string> = {};
+      for (const [chave, valor] of Object.entries(modelo)) {
+        const k = chave.toLowerCase();
+        if (k.includes('iss') && k.includes('class')) {
+          const s = String(valor ?? '').trim();
+          if (s) extras[chave] = s;
+        }
+      }
+      if (Object.keys(extras).length === 0) {
+        this.logger.warn(
+          `Fornecedor modelo #${String(modelo.id)} sem Classificação de ISS preenchida`,
+        );
+      } else {
+        this.logger.log(
+          `Classificação de ISS copiada do fornecedor #${String(modelo.id)}: ${JSON.stringify(extras)}`,
+        );
+      }
+      return extras;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Falha ao ler Classificação de ISS modelo: ${message}`);
+      return {};
+    }
   }
 
   private async buscarPorCpfCnpj(
