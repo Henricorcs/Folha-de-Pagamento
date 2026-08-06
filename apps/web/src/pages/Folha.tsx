@@ -14,19 +14,46 @@ interface ItemGerar extends LancamentoCalculado {
   cltComAdiantamento: boolean;
 }
 
+function BotaoModo({
+  ativo,
+  onClick,
+  children,
+}: {
+  ativo: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+        ativo
+          ? 'bg-brand-600 text-white'
+          : 'text-slate-600 hover:bg-slate-100'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 function competenciaAtual(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+/** Os dois pagamentos do mês. */
+type ModoPagamento = 'DIA_25' | 'QUINTO_DIA';
+
+/** Perto do dia 25 a folha provável é a do adiantamento. */
+function modoInicial(): ModoPagamento {
+  return new Date().getDate() >= 20 ? 'DIA_25' : 'QUINTO_DIA';
+}
+
 export function Folha() {
   const navigate = useNavigate();
   const [competencia, setCompetencia] = useState(competenciaAtual());
-  const [incluir, setIncluir] = useState({
-    adiantamento: true,
-    salario: true,
-    bonus: true,
-  });
+  const [modo, setModo] = useState<ModoPagamento>(modoInicial());
   const [itens, setItens] = useState<ItemGerar[]>([]);
   const [feedback, setFeedback] = useState<string | null>(null);
   /** Funcionários com o detalhamento aberto. */
@@ -34,11 +61,13 @@ export function Folha() {
 
   const preview = useMutation({
     mutationFn: async () => {
+      // Dia 25 paga só o adiantamento; no quinto dia sai o salário (já com o
+      // adiantamento descontado de quem recebeu) mais os bônus.
       const body = {
         competencia,
-        incluirAdiantamento: incluir.adiantamento,
-        incluirSalario: incluir.salario,
-        incluirBonus: incluir.bonus,
+        incluirAdiantamento: modo === 'DIA_25',
+        incluirSalario: modo === 'QUINTO_DIA',
+        incluirBonus: modo === 'QUINTO_DIA',
       };
       return (
         await api.post<PreviewFuncionario[]>('/contas-pagar/preparar-folha', body)
@@ -59,9 +88,11 @@ export function Folha() {
       }
       setItens(flat);
       setFeedback(
-        flat.length === 0
-          ? 'Nenhum lançamento gerado para os filtros selecionados.'
-          : null,
+        flat.length > 0
+          ? null
+          : modo === 'DIA_25'
+            ? 'Ninguém está marcado para receber adiantamento no dia 25.'
+            : 'Nenhum salário ou bônus a gerar nesta competência.',
       );
     },
     onError: (err) => setFeedback(mensagemErro(err)),
@@ -131,6 +162,14 @@ export function Folha() {
       prev.map((it, i) => (alvo.has(i) ? { ...it, selecionado } : it)),
     );
   }
+  /** Trocar de pagamento invalida a prévia anterior. */
+  function trocarModo(novo: ModoPagamento) {
+    if (novo === modo) return;
+    setModo(novo);
+    setItens([]);
+    setAbertos({});
+    setFeedback(null);
+  }
   function alternarDetalhe(funcionarioId: string) {
     setAbertos((prev) => ({ ...prev, [funcionarioId]: !prev[funcionarioId] }));
   }
@@ -149,37 +188,51 @@ export function Folha() {
         Calcule os lançamentos da competência e gere as contas a pagar no IXC.
       </p>
 
-      <div className="mb-5 flex flex-wrap items-end gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">
-            Competência
-          </label>
-          <input
-            type="month"
-            value={competencia}
-            onChange={(e) => setCompetencia(e.target.value)}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          />
-        </div>
-        <div className="flex gap-4 text-sm">
-          {(['adiantamento', 'salario', 'bonus'] as const).map((k) => (
-            <label key={k} className="flex items-center gap-1.5">
-              <input
-                type="checkbox"
-                checked={incluir[k]}
-                onChange={(e) => setIncluir({ ...incluir, [k]: e.target.checked })}
-              />
-              {k === 'adiantamento' ? 'Adiantamento' : k === 'salario' ? 'Salário' : 'Bônus'}
+      <div className="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">
+              Pagamento
             </label>
-          ))}
+            <div className="inline-flex rounded-lg border border-slate-300 p-0.5">
+              <BotaoModo
+                ativo={modo === 'DIA_25'}
+                onClick={() => trocarModo('DIA_25')}
+              >
+                Dia 25 · adiantamento
+              </BotaoModo>
+              <BotaoModo
+                ativo={modo === 'QUINTO_DIA'}
+                onClick={() => trocarModo('QUINTO_DIA')}
+              >
+                Quinto dia · salário
+              </BotaoModo>
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">
+              Competência
+            </label>
+            <input
+              type="month"
+              value={competencia}
+              onChange={(e) => setCompetencia(e.target.value)}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <button
+            onClick={() => preview.mutate()}
+            disabled={preview.isPending}
+            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+          >
+            {preview.isPending ? 'Calculando…' : 'Calcular prévia'}
+          </button>
         </div>
-        <button
-          onClick={() => preview.mutate()}
-          disabled={preview.isPending}
-          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
-        >
-          {preview.isPending ? 'Calculando…' : 'Calcular prévia'}
-        </button>
+        <p className="mt-3 text-xs text-slate-500">
+          {modo === 'DIA_25'
+            ? 'Só o adiantamento de quem recebe no dia 25.'
+            : 'Salário e bônus. Quem recebeu no dia 25 vem com o adiantamento descontado; quem não recebe, com o salário cheio.'}
+        </p>
       </div>
 
       {feedback && (
