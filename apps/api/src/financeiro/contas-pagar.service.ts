@@ -20,10 +20,17 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ConfigFinanceiraService } from './config-financeira.service';
 import { FornecedorService } from './fornecedor.service';
 import {
+  ValesService,
+  type AcertoValeCompetencia,
+} from '../vales/vales.service';
+import {
   calcularAdiantamento,
   competenciaAnterior,
+  detalharSalario,
   montarLancamentosFolha,
   renderObs,
+  type ComposicaoSalario,
+  type DadosFolhaFuncionario,
   type LancamentoCalculado,
 } from './folha.calc';
 import { CriarContasPagarDto, ItemContaPagarDto } from './dto/criar-contas.dto';
@@ -50,6 +57,10 @@ export interface PreviewFuncionario {
   recebeAdiantamento: boolean;
   /** null para quem não recebe adiantamento no dia 25. */
   adiantamento: SituacaoAdiantamento | null;
+  /** Como o saldo salarial foi montado (proventos e descontos do mês). */
+  composicao: ComposicaoSalario;
+  /** Parcelas de vale/acerto que mexeram nesta competência. */
+  vales: AcertoValeCompetencia['parcelas'];
   lancamentos: LancamentoCalculado[];
 }
 
@@ -62,6 +73,7 @@ export class ContasPagarService {
     private readonly ixc: IxcClient,
     private readonly config: ConfigFinanceiraService,
     private readonly fornecedores: FornecedorService,
+    private readonly vales: ValesService,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -74,6 +86,11 @@ export class ContasPagarService {
     const where: Prisma.FuncionarioWhereInput = { ativo: true, isentoIcms: true };
     if (dto.funcionarioIds?.length) where.id = { in: dto.funcionarioIds };
 
+    // Salário e bônus se referem ao mês trabalhado (o anterior); só o
+    // adiantamento do dia 25 fala do mês corrente. Vendas e horas extras são
+    // do mês trabalhado; a parcela do vale é do mês em que se paga.
+    const mesTrabalhado = competenciaAnterior(dto.competencia);
+
     const funcionarios = await this.prisma.funcionario.findMany({
       where,
       include: {
@@ -84,13 +101,11 @@ export class ContasPagarService {
             OR: [{ competencia: null }, { competencia: dto.competencia }],
           },
         },
+        variaveisMes: { where: { competencia: mesTrabalhado } },
       },
       orderBy: { nome: 'asc' },
     });
 
-    // Salário e bônus se referem ao mês trabalhado (o anterior); só o
-    // adiantamento do dia 25 fala do mês corrente.
-    const mesTrabalhado = competenciaAnterior(dto.competencia);
     const params = {
       contaContabilSalario: cfg.contaContabilSalario,
       contaContabilAdiantamento: cfg.contaContabilAdiantamento,
@@ -103,10 +118,13 @@ export class ContasPagarService {
 
     // Situação do adiantamento do dia 25 desta competência, para mostrar na
     // folha do quinto dia se o valor descontado do salário já foi mesmo pago.
-    const contasDia25 = await this.contasDoAdiantamento(
-      dto.competencia,
-      funcionarios.map((f) => f.id),
-    );
+    const ids = funcionarios.map((f) => f.id);
+    const contasDia25 = await this.contasDoAdiantamento(dto.competencia, ids);
+    // Vales e acertos só mexem no salário; no dia 25 não há o que abater.
+    const acertosVale: Map<string, AcertoValeCompetencia> =
+      (dto.incluirSalario ?? true)
+        ? await this.vales.acertosDaCompetencia(dto.competencia, ids)
+        : new Map();
 
     return funcionarios.map((f) => {
       const somaTipo = (tipo: TipoLancamento) =>
@@ -114,7 +132,10 @@ export class ContasPagarService {
           .filter((l) => l.tipo === tipo)
           .reduce((s, l) => s + Number(l.valor), 0);
 
-      const dados = {
+      const variaveis = f.variaveisMes[0];
+      const vale = acertosVale.get(f.id);
+
+      const dados: DadosFolhaFuncionario = {
         salarioBase: Number(f.salarioBase),
         carteiraAssinada: f.carteiraAssinada,
         recebeAdiantamento: f.recebeAdiantamento,
@@ -123,6 +144,14 @@ export class ContasPagarService {
         adiantamentoFixo: somaTipo(TipoLancamento.ADIANTAMENTO),
         descontosFixos: somaTipo(TipoLancamento.DESCONTO),
         bonusFixo: somaTipo(TipoLancamento.BONUS),
+        vendas: variaveis?.vendas ?? 0,
+        // O valor por venda do mês vence o do cadastro (ex.: campanha).
+        valorPorVenda: Number(
+          variaveis?.valorPorVenda ?? f.valorPorVenda ?? 0,
+        ),
+        horasExtras: Number(variaveis?.horasExtras ?? 0),
+        descontoVales: vale?.desconto ?? 0,
+        creditoVales: vale?.credito ?? 0,
       };
 
       const lancamentos = montarLancamentosFolha(dados, params, {
@@ -150,6 +179,8 @@ export class ContasPagarService {
                 contasDia25.get(f.id) ?? null,
               )
             : null,
+        composicao: detalharSalario(dados, cfg.percentualAdiantamento),
+        vales: vale?.parcelas ?? [],
         lancamentos,
       };
     });
@@ -199,7 +230,24 @@ export class ContasPagarService {
       const conta = await this.criarItem(item, usuarioId);
       criadas.push(conta);
     }
+    // O salário do mês saiu com a parcela do vale já abatida: dá baixa nela.
+    await this.baixarParcelasDeVale(criadas);
     return criadas;
+  }
+
+  /** Fecha as parcelas de vale que entraram nos salários recém-gerados. */
+  private async baixarParcelasDeVale(contas: ContaPagar[]): Promise<void> {
+    const porCompetencia = new Map<string, string[]>();
+    for (const c of contas) {
+      if (c.tipo !== TipoLancamento.SALARIO) continue;
+      if (!c.funcionarioId || !c.competencia) continue;
+      const ids = porCompetencia.get(c.competencia) ?? [];
+      ids.push(c.funcionarioId);
+      porCompetencia.set(c.competencia, ids);
+    }
+    for (const [competencia, ids] of porCompetencia) {
+      await this.vales.marcarDescontadas(competencia, ids);
+    }
   }
 
   private async criarItem(

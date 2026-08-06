@@ -7,6 +7,8 @@ import { IxcModule } from './ixc/ixc.module';
 import { SyncModule } from './sync/sync.module';
 import { FuncionariosModule } from './funcionarios/funcionarios.module';
 import { FinanceiroModule } from './financeiro/financeiro.module';
+import { ValesModule } from './vales/vales.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { HealthController } from './health/health.controller';
@@ -24,6 +26,8 @@ import { HealthController } from './health/health.controller';
     SyncModule,
     FuncionariosModule,
     FinanceiroModule,
+    ValesModule,
+    DashboardModule,
   ],
   controllers: [HealthController],
   providers: [

@@ -41,11 +41,22 @@ Evolução planejada por fases. Cada fase entrega valor de forma incremental.
 - [ ] Confirmar `cidade` padrão para criação de fornecedores no seu IXC
 - [ ] Conferir o rótulo exato do tipo de pagamento PIX no seu IXC (Configurações)
 
-## 🔜 Fase 2b — Réplica completa da planilha (proventos/descontos detalhados)
+## 🚧 Fase 2b — Réplica completa da planilha (proventos/descontos detalhados)
 
-- [ ] **Proventos** extras: comissão, bônus de metas, férias, 13º, salário
-      família, horas extras
-- [ ] **Descontos** extras: INSS, vales, faltas (com tabela de horas/periculosidade),
+- [x] **Comissão de vendas**: valor por venda no cadastro (R$ 5 / R$ 50 / outro)
+      e quantidade de vendas por mês trabalhado
+- [x] **Horas extras** por mês trabalhado, só para quem **não** tem carteira
+      assinada (quem tem recebe pela contabilidade)
+- [x] **Vales e acertos** nos dois sentidos (funcionário paga a empresa ×
+      empresa paga o funcionário), avulsos ou parcelados, com opção de lançar
+      ou não na folha
+- [x] Saldo salarial = base + comissão + horas extras + acertos − descontos −
+      vales − adiantamento, detalhado na observação da conta a pagar
+      (`HORAS EXTRAS: R$ …· COMISSÃO: 12 x R$ 50,00 · VALE: -R$ …`)
+- [x] **Dashboard** com folha base, situação da competência, série de 6 meses,
+      saldos de vales e pontos de atenção
+- [ ] **Proventos** que faltam: bônus de metas, férias, 13º, salário família
+- [ ] **Descontos** que faltam: INSS, faltas (tabela de horas/periculosidade),
       celular, internet
 - [ ] Parâmetros de hora (normal/50%/100%) e falta/periculosidade
 - [ ] Divisão do pagamento: **depositar** × **pagar em mãos** + receitas extras

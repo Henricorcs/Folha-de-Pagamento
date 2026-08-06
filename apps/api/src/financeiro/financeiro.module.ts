@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { IxcModule } from '../ixc/ixc.module';
+import { ValesModule } from '../vales/vales.module';
 import { AvulsosController } from './avulsos.controller';
 import { AvulsosService } from './avulsos.service';
 import { ConfigFinanceiraController } from './config-financeira.controller';
@@ -10,7 +11,7 @@ import { FornecedorService } from './fornecedor.service';
 import { PagamentosPollerService } from './pagamentos-poller.service';
 
 @Module({
-  imports: [IxcModule],
+  imports: [IxcModule, ValesModule],
   controllers: [
     ConfigFinanceiraController,
     ContasPagarController,

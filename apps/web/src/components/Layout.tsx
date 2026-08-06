@@ -2,7 +2,9 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 
 const navItems = [
+  { to: '/dashboard', label: 'Dashboard', icon: '📊' },
   { to: '/funcionarios', label: 'Funcionários', icon: '👥' },
+  { to: '/vales', label: 'Vales e Acertos', icon: '🪙' },
   { to: '/folha', label: 'Gerar Folha', icon: '🧮' },
   { to: '/contas-pagar', label: 'Contas a Pagar', icon: '💸' },
   { to: '/avulsos', label: 'Pagamentos Avulsos', icon: '🧾' },

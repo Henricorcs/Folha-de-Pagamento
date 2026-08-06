@@ -1,4 +1,4 @@
-import type { StatusContaPagar, TipoLancamento } from './types';
+import type { SentidoVale, StatusContaPagar, TipoLancamento } from './types';
 
 export const STATUS_LABEL: Record<StatusContaPagar, string> = {
   RASCUNHO: 'Rascunho',
@@ -28,4 +28,20 @@ export const TIPO_LABEL: Record<TipoLancamento, string> = {
   BONUS: 'Bônus',
   DESCONTO: 'Desconto',
   AVULSO: 'Avulso',
+};
+
+/** Quem deve a quem num vale/acerto. */
+export const SENTIDO_LABEL: Record<SentidoVale, string> = {
+  DESCONTO: 'Funcionário paga a empresa',
+  CREDITO: 'Empresa paga o funcionário',
+};
+
+export const SENTIDO_CURTO: Record<SentidoVale, string> = {
+  DESCONTO: 'Desconta da folha',
+  CREDITO: 'Soma na folha',
+};
+
+export const SENTIDO_CLASSE: Record<SentidoVale, string> = {
+  DESCONTO: 'bg-amber-100 text-amber-700',
+  CREDITO: 'bg-emerald-100 text-emerald-700',
 };

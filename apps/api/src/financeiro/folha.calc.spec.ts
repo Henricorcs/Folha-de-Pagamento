@@ -1,11 +1,17 @@
 import { TipoLancamento } from '@prisma/client';
 import {
   calcularAdiantamento,
+  calcularComissao,
+  calcularHorasExtras,
   calcularSaldoSalarial,
   competenciaAnterior,
+  competenciaSeguinte,
+  detalharSalario,
   formatCompetencia,
+  formatValorBR,
   montarLancamentosFolha,
   renderObs,
+  sufixoObservacaoSalario,
   type DadosFolhaFuncionario,
   type ParametrosLancamento,
 } from './folha.calc';
@@ -53,6 +59,27 @@ describe('competenciaAnterior', () => {
 
   it('devolve como veio quando não é AAAA-MM', () => {
     expect(competenciaAnterior('')).toBe('');
+  });
+});
+
+describe('competenciaSeguinte', () => {
+  it('avança um mês', () => {
+    expect(competenciaSeguinte('2026-08')).toBe('2026-09');
+  });
+
+  it('vira o ano em dezembro', () => {
+    expect(competenciaSeguinte('2026-12')).toBe('2027-01');
+  });
+
+  it('devolve como veio quando não é AAAA-MM', () => {
+    expect(competenciaSeguinte('x')).toBe('x');
+  });
+});
+
+describe('formatValorBR', () => {
+  it('formata com milhar e centavos', () => {
+    expect(formatValorBR(1234.5)).toBe('R$ 1.234,50');
+    expect(formatValorBR(50)).toBe('R$ 50,00');
   });
 });
 
@@ -118,6 +145,122 @@ describe('calcularSaldoSalarial', () => {
   });
 });
 
+describe('comissão de vendas', () => {
+  it('comissão = vendas × valor por venda', () => {
+    expect(calcularComissao(base({ vendas: 12, valorPorVenda: 50 }))).toBe(600);
+    expect(calcularComissao(base({ vendas: 12, valorPorVenda: 5 }))).toBe(60);
+  });
+
+  it('sem vendas ou sem valor por venda, não há comissão', () => {
+    expect(calcularComissao(base({ vendas: 0, valorPorVenda: 50 }))).toBe(0);
+    expect(calcularComissao(base({ vendas: 10 }))).toBe(0);
+  });
+
+  it('entra como provento no saldo salarial', () => {
+    // 2000 + 600 comissão - 200 desconto - 800 adiantamento = 1600
+    expect(
+      calcularSaldoSalarial(base({ vendas: 12, valorPorVenda: 50 })),
+    ).toBe(1600);
+  });
+});
+
+describe('horas extras', () => {
+  it('sem carteira assinada: entram no saldo', () => {
+    expect(calcularHorasExtras(base({ horasExtras: 320 }))).toBe(320);
+    // 2000 + 320 - 200 desconto - 800 adiantamento = 1320
+    expect(calcularSaldoSalarial(base({ horasExtras: 320 }))).toBe(1320);
+  });
+
+  it('com carteira assinada: ignoradas (a contabilidade paga)', () => {
+    const d = base({ horasExtras: 320, carteiraAssinada: true });
+    expect(calcularHorasExtras(d)).toBe(0);
+    // 2000 - 200 desconto (sem adiantamento, sem horas extras)
+    expect(calcularSaldoSalarial(d)).toBe(1800);
+  });
+});
+
+describe('vales e acertos', () => {
+  it('funcionário deve à empresa: sai do saldo salarial', () => {
+    // 2000 - 200 desconto - 150 vale - 800 adiantamento = 850
+    expect(calcularSaldoSalarial(base({ descontoVales: 150 }))).toBe(850);
+  });
+
+  it('empresa deve ao funcionário: entra no saldo salarial', () => {
+    // 2000 + 250 acerto - 200 desconto - 800 adiantamento = 1250
+    expect(calcularSaldoSalarial(base({ creditoVales: 250 }))).toBe(1250);
+  });
+
+  it('os dois sentidos no mesmo mês se compensam', () => {
+    // 2000 + 250 - 150 - 200 - 800 = 1100
+    expect(
+      calcularSaldoSalarial(base({ creditoVales: 250, descontoVales: 150 })),
+    ).toBe(1100);
+  });
+});
+
+describe('detalharSalario', () => {
+  it('abre o saldo em proventos e descontos', () => {
+    const c = detalharSalario(
+      base({
+        vendas: 4,
+        valorPorVenda: 50,
+        horasExtras: 100,
+        descontoVales: 150,
+      }),
+    );
+    expect(c).toMatchObject({
+      salarioBase: 2000,
+      comissao: 200,
+      horasExtras: 100,
+      descontos: 200,
+      vales: 150,
+      adiantamento: 800,
+      adiantamentoDescontado: 800,
+    });
+    // 2000 + 200 + 100 - 200 - 150 - 800
+    expect(c.saldo).toBe(1150);
+  });
+
+  it('carteira assinada: adiantamento apurado, mas não descontado', () => {
+    const c = detalharSalario(base({ carteiraAssinada: true }));
+    expect(c.adiantamento).toBe(800);
+    expect(c.adiantamentoDescontado).toBe(0);
+  });
+});
+
+describe('sufixoObservacaoSalario', () => {
+  it('detalha horas extras, comissão e vale', () => {
+    expect(
+      sufixoObservacaoSalario(
+        base({
+          horasExtras: 500,
+          vendas: 12,
+          valorPorVenda: 50,
+          descontoVales: 100,
+        }),
+      ),
+    ).toBe(
+      ' (HORAS EXTRAS: R$ 500,00 · COMISSÃO: 12 x R$ 50,00 = R$ 600,00 · VALE: -R$ 100,00)',
+    );
+  });
+
+  it('mostra o que a empresa está pagando a mais', () => {
+    expect(sufixoObservacaoSalario(base({ creditoVales: 250 }))).toBe(
+      ' (REEMBOLSO: +R$ 250,00)',
+    );
+  });
+
+  it('sem nada disso, não muda a observação', () => {
+    expect(sufixoObservacaoSalario(base())).toBe('');
+  });
+
+  it('carteira assinada não mostra horas extras', () => {
+    expect(
+      sufixoObservacaoSalario(base({ horasExtras: 500, carteiraAssinada: true })),
+    ).toBe('');
+  });
+});
+
 describe('montarLancamentosFolha', () => {
   it('gera adiantamento (2662) + salário (2420) para não-CLT', () => {
     const l = montarLancamentosFolha(base(), params);
@@ -168,6 +311,20 @@ describe('montarLancamentosFolha', () => {
     });
     expect(l.find((x) => x.tipo === TipoLancamento.ADIANTAMENTO)!.valor).toBe(
       1000,
+    );
+  });
+
+  it('salário sai com a observação detalhando horas extras e comissão', () => {
+    const l = montarLancamentosFolha(
+      base({ horasExtras: 500, vendas: 12, valorPorVenda: 50 }),
+      params,
+    );
+    const sal = l.find((x) => x.tipo === TipoLancamento.SALARIO)!;
+    // 2000 + 500 + 600 - 200 - 800
+    expect(sal.valor).toBe(2100);
+    expect(sal.observacao).toBe(
+      'saldo salarial referente ao mês 07/2026' +
+        ' (HORAS EXTRAS: R$ 500,00 · COMISSÃO: 12 x R$ 50,00 = R$ 600,00)',
     );
   });
 

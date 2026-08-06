@@ -5,6 +5,7 @@ import { api, mensagemErro } from '../lib/api';
 import { formatBRL, formatData } from '../lib/format';
 import { TIPO_LABEL } from '../lib/status';
 import type {
+  ComposicaoSalario,
   ContaPagar,
   LancamentoCalculado,
   PreviewFuncionario,
@@ -19,6 +20,68 @@ interface ItemGerar extends LancamentoCalculado {
   cltComAdiantamento: boolean;
   /** Situação do dia 25 desta pessoa nesta competência. */
   adiantamento: SituacaoAdiantamento | null;
+  /** Como o saldo salarial foi montado. */
+  composicao: ComposicaoSalario;
+}
+
+/** Abre o saldo salarial: o que somou e o que saiu. */
+function ComposicaoSaldo({ c }: { c: ComposicaoSalario }) {
+  const partes: { rotulo: string; valor: number; sinal: '+' | '-' }[] = [
+    { rotulo: 'Salário base', valor: c.salarioBase, sinal: '+' },
+  ];
+  if (c.comissao > 0) {
+    partes.push({
+      rotulo: `Comissão (${c.vendas} × ${formatBRL(c.valorPorVenda)})`,
+      valor: c.comissao,
+      sinal: '+',
+    });
+  }
+  if (c.horasExtras > 0) {
+    partes.push({ rotulo: 'Horas extras', valor: c.horasExtras, sinal: '+' });
+  }
+  if (c.valesCredito > 0) {
+    partes.push({
+      rotulo: 'Acerto a favor da pessoa',
+      valor: c.valesCredito,
+      sinal: '+',
+    });
+  }
+  if (c.descontos > 0) {
+    partes.push({ rotulo: 'Descontos fixos', valor: c.descontos, sinal: '-' });
+  }
+  if (c.vales > 0) {
+    partes.push({ rotulo: 'Vale (parcela do mês)', valor: c.vales, sinal: '-' });
+  }
+  if (c.adiantamentoDescontado > 0) {
+    partes.push({
+      rotulo: 'Adiantamento do dia 25',
+      valor: c.adiantamentoDescontado,
+      sinal: '-',
+    });
+  }
+
+  // Só salário base: não há o que explicar.
+  if (partes.length === 1) return null;
+
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
+      {partes.map((p, i) => (
+        <span key={p.rotulo} className="whitespace-nowrap">
+          {i > 0 && <span className="mr-1 text-slate-400">{p.sinal}</span>}
+          {p.rotulo}{' '}
+          <strong
+            className={p.sinal === '-' ? 'text-red-600' : 'text-slate-800'}
+          >
+            {formatBRL(p.valor)}
+          </strong>
+        </span>
+      ))}
+      <span className="whitespace-nowrap">
+        <span className="mr-1 text-slate-400">=</span>
+        <strong className="text-slate-800">{formatBRL(c.saldo)}</strong>
+      </span>
+    </div>
+  );
 }
 
 /**
@@ -177,6 +240,7 @@ export function Folha() {
             selecionado: true,
             cltComAdiantamento: f.carteiraAssinada && f.recebeAdiantamento,
             adiantamento: f.adiantamento,
+            composicao: f.composicao,
           });
         }
       }
@@ -406,7 +470,14 @@ export function Folha() {
 
                     {aberto && (
                       <tr>
-                        <td colSpan={3} className="bg-slate-50 px-4 pb-4 pt-1">
+                        <td colSpan={3} className="bg-slate-50 px-4 pb-4 pt-2">
+                          {g.indices.some(
+                            (i) => itens[i].tipo === 'SALARIO',
+                          ) && (
+                            <ComposicaoSaldo
+                              c={itens[g.indices[0]].composicao}
+                            />
+                          )}
                           <table className="w-full text-sm">
                             <thead className="text-left text-[11px] uppercase text-slate-400">
                               <tr>

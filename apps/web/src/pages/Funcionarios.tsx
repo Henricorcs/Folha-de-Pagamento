@@ -89,6 +89,11 @@ export function Funcionarios() {
         <Card
           titulo="Folha base mensal"
           valor={formatBRL(resumo.data?.folhaBaseMensal)}
+          detalhe={
+            Number(resumo.data?.bonusFixoMensal ?? 0) > 0
+              ? `salários ${formatBRL(resumo.data?.salarioBaseMensal)} + bônus fixos ${formatBRL(resumo.data?.bonusFixoMensal)}`
+              : 'soma dos salários base dos ativos'
+          }
         />
       </div>
 
@@ -214,13 +219,22 @@ export function Funcionarios() {
   );
 }
 
-function Card({ titulo, valor }: { titulo: string; valor: React.ReactNode }) {
+function Card({
+  titulo,
+  valor,
+  detalhe,
+}: {
+  titulo: string;
+  valor: React.ReactNode;
+  detalhe?: string;
+}) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
         {titulo}
       </div>
       <div className="mt-1 text-2xl font-semibold text-slate-800">{valor}</div>
+      {detalhe && <div className="mt-0.5 text-xs text-slate-400">{detalhe}</div>}
     </div>
   );
 }

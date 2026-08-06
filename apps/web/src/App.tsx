@@ -4,10 +4,12 @@ import { useAuth } from './lib/auth';
 import { Avulsos } from './pages/Avulsos';
 import { Configuracoes } from './pages/Configuracoes';
 import { ContasPagar } from './pages/ContasPagar';
+import { Dashboard } from './pages/Dashboard';
 import { Folha } from './pages/Folha';
 import { FuncionarioDetalhe } from './pages/FuncionarioDetalhe';
 import { Funcionarios } from './pages/Funcionarios';
 import { Login } from './pages/Login';
+import { Vales } from './pages/Vales';
 import type { ReactNode } from 'react';
 
 function Protegida({ children }: { children: ReactNode }) {
@@ -34,9 +36,11 @@ export default function App() {
           </Protegida>
         }
       >
-        <Route index element={<Navigate to="/funcionarios" replace />} />
+        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route path="dashboard" element={<Dashboard />} />
         <Route path="funcionarios" element={<Funcionarios />} />
         <Route path="funcionarios/:id" element={<FuncionarioDetalhe />} />
+        <Route path="vales" element={<Vales />} />
         <Route path="folha" element={<Folha />} />
         <Route path="contas-pagar" element={<ContasPagar />} />
         <Route path="avulsos" element={<Avulsos />} />

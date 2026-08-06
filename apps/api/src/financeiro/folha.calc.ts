@@ -26,6 +26,16 @@ export function competenciaAnterior(competencia: string): string {
   return `${anterior.ano}-${String(anterior.mes).padStart(2, '0')}`;
 }
 
+/** Mês seguinte a "AAAA-MM" ("2026-12" → "2027-01"). */
+export function competenciaSeguinte(competencia: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(competencia);
+  if (!m) return competencia;
+  const ano = Number(m[1]);
+  const mes = Number(m[2]);
+  const seguinte = mes === 12 ? { ano: ano + 1, mes: 1 } : { ano, mes: mes + 1 };
+  return `${seguinte.ano}-${String(seguinte.mes).padStart(2, '0')}`;
+}
+
 /** Percentual do salário adiantado no dia 25 quando não há valor fixo. */
 export const PERCENTUAL_ADIANTAMENTO_PADRAO = 40;
 
@@ -41,6 +51,35 @@ export interface DadosFolhaFuncionario {
   adiantamentoFixo: number;
   descontosFixos: number;
   bonusFixo: number;
+  /** vendas do mês; a comissão é vendas × valorPorVenda */
+  vendas?: number;
+  /** quanto a pessoa ganha por venda (na prática R$ 5 ou R$ 50) */
+  valorPorVenda?: number;
+  /** horas extras do mês — só para quem NÃO tem carteira assinada */
+  horasExtras?: number;
+  /** parcelas de vale a descontar nesta competência (funcionário deve) */
+  descontoVales?: number;
+  /** parcelas de acerto a pagar a mais nesta competência (empresa deve) */
+  creditoVales?: number;
+}
+
+/** Saldo salarial aberto em cada parcela, para mostrar e conferir. */
+export interface ComposicaoSalario {
+  salarioBase: number;
+  vendas: number;
+  valorPorVenda: number;
+  comissao: number;
+  horasExtras: number;
+  descontos: number;
+  /** vales descontados (o funcionário devia à empresa) */
+  vales: number;
+  /** acertos somados (a empresa devia ao funcionário) */
+  valesCredito: number;
+  /** valor apurado para o dia 25 (mesmo quando não é abatido aqui) */
+  adiantamento: number;
+  /** o que de fato saiu do saldo: 0 para quem tem carteira assinada */
+  adiantamentoDescontado: number;
+  saldo: number;
 }
 
 export interface ParametrosLancamento {
@@ -84,6 +123,60 @@ export interface LancamentoCalculado {
   observacao: string;
 }
 
+/** Comissão do mês: quantas vendas a pessoa fez × o valor de cada venda. */
+export function calcularComissao(d: DadosFolhaFuncionario): number {
+  return arredondar((d.vendas ?? 0) * (d.valorPorVenda ?? 0));
+}
+
+/**
+ * Horas extras que entram na folha. Quem tem carteira assinada recebe pela
+ * contabilidade, então aqui fica zero mesmo que haja valor lançado.
+ */
+export function calcularHorasExtras(d: DadosFolhaFuncionario): number {
+  if (d.carteiraAssinada) return 0;
+  return arredondar(d.horasExtras ?? 0);
+}
+
+/**
+ * Abre o saldo salarial em proventos e descontos. Proventos do mês (comissão
+ * de vendas e horas extras) entram aqui em vez de virar contas a pagar
+ * separadas: a pessoa recebe um pagamento só, detalhado na observação.
+ */
+export function detalharSalario(
+  d: DadosFolhaFuncionario,
+  percentual = PERCENTUAL_ADIANTAMENTO_PADRAO,
+): ComposicaoSalario {
+  const adiantamento = calcularAdiantamento(d, percentual);
+  const adiantamentoDescontado = d.carteiraAssinada ? 0 : adiantamento;
+  const comissao = calcularComissao(d);
+  const horasExtras = calcularHorasExtras(d);
+  const descontos = arredondar(d.descontosFixos);
+  const vales = arredondar(d.descontoVales ?? 0);
+  const valesCredito = arredondar(d.creditoVales ?? 0);
+
+  return {
+    salarioBase: arredondar(d.salarioBase),
+    vendas: d.vendas ?? 0,
+    valorPorVenda: arredondar(d.valorPorVenda ?? 0),
+    comissao,
+    horasExtras,
+    descontos,
+    vales,
+    valesCredito,
+    adiantamento,
+    adiantamentoDescontado,
+    saldo: arredondar(
+      d.salarioBase +
+        comissao +
+        horasExtras +
+        valesCredito -
+        descontos -
+        vales -
+        adiantamentoDescontado,
+    ),
+  };
+}
+
 /**
  * Saldo salarial (valor da conta a pagar de SALÁRIO).
  * Para funcionário SEM carteira assinada, o adiantamento é subtraído aqui.
@@ -93,10 +186,42 @@ export function calcularSaldoSalarial(
   d: DadosFolhaFuncionario,
   percentual = PERCENTUAL_ADIANTAMENTO_PADRAO,
 ): number {
-  const adiantamento = calcularAdiantamento(d, percentual);
-  const saldo =
-    d.salarioBase - d.descontosFixos - (d.carteiraAssinada ? 0 : adiantamento);
-  return arredondar(saldo);
+  return detalharSalario(d, percentual).saldo;
+}
+
+/** "1234.5" → "R$ 1.234,50" (sem espaço estranho, o IXC lê como texto). */
+export function formatValorBR(valor: number): string {
+  const [inteiro, centavos] = Math.abs(valor).toFixed(2).split('.');
+  const comMilhar = inteiro.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `${valor < 0 ? '-' : ''}R$ ${comMilhar},${centavos}`;
+}
+
+/**
+ * O que explica o saldo salarial na observação da conta a pagar, no formato
+ * pedido pelo usuário: " (HORAS EXTRAS: R$ 500,00 · COMISSÃO: 12 x R$ 50,00)".
+ * Sem proventos nem vale, devolve string vazia.
+ */
+export function sufixoObservacaoSalario(d: DadosFolhaFuncionario): string {
+  const partes: string[] = [];
+
+  const horasExtras = calcularHorasExtras(d);
+  if (horasExtras > 0) partes.push(`HORAS EXTRAS: ${formatValorBR(horasExtras)}`);
+
+  const comissao = calcularComissao(d);
+  if (comissao > 0) {
+    partes.push(
+      `COMISSÃO: ${d.vendas} x ${formatValorBR(d.valorPorVenda ?? 0)} = ` +
+        formatValorBR(comissao),
+    );
+  }
+
+  const credito = arredondar(d.creditoVales ?? 0);
+  if (credito > 0) partes.push(`REEMBOLSO: +${formatValorBR(credito)}`);
+
+  const vales = arredondar(d.descontoVales ?? 0);
+  if (vales > 0) partes.push(`VALE: -${formatValorBR(vales)}`);
+
+  return partes.length > 0 ? ` (${partes.join(' · ')})` : '';
 }
 
 /**
@@ -135,7 +260,7 @@ export function montarLancamentosFolha(
         tipo: TipoLancamento.SALARIO,
         valor: saldo,
         contaContabil: params.contaContabilSalario,
-        observacao: params.obsSalario,
+        observacao: params.obsSalario + sufixoObservacaoSalario(d),
       });
     }
   }

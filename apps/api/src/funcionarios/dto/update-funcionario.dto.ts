@@ -64,6 +64,13 @@ export class UpdateFuncionarioDto {
   @Min(0)
   valorAdiantamento?: number | null;
 
+  /** Quanto a pessoa ganha por venda (R$ 5 ou R$ 50); vazio = sem comissão. */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value == null ? null : Number(value)))
+  @IsNumber()
+  @Min(0)
+  valorPorVenda?: number | null;
+
   @IsOptional()
   @Transform(({ value }) => (value === '' || value == null ? undefined : Number(value)))
   @IsNumber()

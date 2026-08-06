@@ -84,6 +84,9 @@ model Funcionario {
   // Quanto essa pessoa recebe no dia 25. Vazio = percentual da configuração
   // (40% do salário base). O que sair aqui é abatido do saldo salarial.
   valorAdiantamento Decimal? @map("valor_adiantamento") @db.Decimal(14, 2)
+  // Quanto a pessoa ganha por venda (na prática R$ 5 ou R$ 50). A comissão do
+  // mês = vendas do mês × este valor, e entra no saldo salarial.
+  valorPorVenda Decimal? @map("valor_por_venda") @db.Decimal(14, 2)
 
   // Fornecedor vinculado no IXC (necessário para gerar contas a pagar)
   idFornecedorIxc Int? @map("id_fornecedor_ixc")
@@ -100,6 +103,8 @@ model Funcionario {
   adiantamentos Adiantamento[]
   lancamentos   Lancamento[]
   contasPagar   ContaPagar[]
+  variaveisMes  VariavelMes[]
+  vales         Vale[]
 
   @@index([ativo])
   @@index([nome])
@@ -248,6 +253,107 @@ model Lancamento {
 
   @@index([funcionarioId, tipo])
   @@map("lancamentos_fixos")
+}
+
+// ---------------------------------------------------------------------------
+// Variáveis do mês: o que muda de competência para competência e compõe o
+// saldo salarial — vendas (comissão) e horas extras.
+// ---------------------------------------------------------------------------
+model VariavelMes {
+  id String @id @default(uuid())
+
+  funcionario   Funcionario @relation(fields: [funcionarioId], references: [id], onDelete: Cascade)
+  funcionarioId String      @map("funcionario_id")
+
+  /// "AAAA-MM" da folha em que essas variáveis entram
+  competencia String
+
+  /// Quantas vendas a pessoa fez no mês
+  vendas Int @default(0)
+  /// Valor por venda desta competência; vazio = o do cadastro do funcionário
+  valorPorVenda Decimal? @map("valor_por_venda") @db.Decimal(14, 2)
+
+  /// Só vale para quem NÃO tem carteira assinada (quem tem recebe pela
+  /// contabilidade). Entra como provento no saldo salarial.
+  horasExtras Decimal @default(0) @map("horas_extras") @db.Decimal(14, 2)
+
+  observacao String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([funcionarioId, competencia])
+  @@index([competencia])
+  @@map("variaveis_mes")
+}
+
+// ---------------------------------------------------------------------------
+// Vales e acertos: acerto de contas entre a pessoa e a empresa, avulso ou
+// parcelado. Cada um gera as parcelas de uma vez (1 por competência); a folha
+// abate ou soma a parcela do mês quando `descontarDaFolha` está ligado.
+// ---------------------------------------------------------------------------
+enum SentidoVale {
+  /// O funcionário deve à empresa (vale, compra parcelada) → sai do salário
+  DESCONTO
+  /// A empresa deve ao funcionário (reembolso, serviço extra) → entra no salário
+  CREDITO
+}
+
+model Vale {
+  id String @id @default(uuid())
+
+  funcionario   Funcionario @relation(fields: [funcionarioId], references: [id], onDelete: Cascade)
+  funcionarioId String      @map("funcionario_id")
+
+  sentido   SentidoVale @default(DESCONTO)
+  descricao String
+  /// Data em que o vale foi concedido
+  data DateTime @default(now())
+
+  valorTotal         Decimal @map("valor_total") @db.Decimal(14, 2)
+  quantidadeParcelas Int     @default(1) @map("quantidade_parcelas")
+  valorParcela       Decimal @map("valor_parcela") @db.Decimal(14, 2)
+
+  /// Desligado: fica só registrado, sem mexer na folha (acerto por fora).
+  descontarDaFolha Boolean @default(true) @map("descontar_da_folha")
+  /// "AAAA-MM" da primeira parcela
+  competenciaInicio String @map("competencia_inicio")
+
+  /// Cancelado: para de descontar e some dos saldos (histórico preservado).
+  cancelado  Boolean @default(false)
+  observacao String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  parcelas ValeParcela[]
+
+  @@index([funcionarioId])
+  @@index([cancelado])
+  @@index([sentido])
+  @@map("vales")
+}
+
+model ValeParcela {
+  id String @id @default(uuid())
+
+  vale   Vale   @relation(fields: [valeId], references: [id], onDelete: Cascade)
+  valeId String @map("vale_id")
+
+  numero      Int
+  competencia String
+  valor       Decimal @db.Decimal(14, 2)
+
+  /// Marcada quando a folha daquela competência é gerada.
+  descontada   Boolean   @default(false)
+  descontadaEm DateTime? @map("descontada_em")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([valeId, numero])
+  @@index([competencia])
+  @@map("vale_parcelas")
 }
 
 // ---------------------------------------------------------------------------

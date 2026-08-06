@@ -1,13 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, mensagemErro } from '../lib/api';
 import { formatBRL, formatData } from '../lib/format';
-import { TIPO_LABEL } from '../lib/status';
+import { SENTIDO_CLASSE, SENTIDO_CURTO, TIPO_LABEL } from '../lib/status';
 import type {
   FuncionarioDetalhe as TFunc,
   Lancamento,
   TipoLancamento,
+  ValeComSaldo,
+  VariavelMes,
 } from '../lib/types';
 
 export function FuncionarioDetalhe() {
@@ -91,6 +93,15 @@ export function FuncionarioDetalhe() {
           </Bloco>
 
           <ConfigFolhaBloco data={data} funcionarioId={id!} />
+
+          <VariaveisMesBloco
+            funcionarioId={id!}
+            variaveis={data.variaveisMes ?? []}
+            valorPorVendaPadrao={data.valorPorVenda ?? null}
+            carteiraAssinada={!!data.carteiraAssinada}
+          />
+
+          <ValesBloco funcionarioId={id!} />
 
           <LancamentosBloco funcionarioId={id!} lancamentos={data.lancamentos} />
 
@@ -215,7 +226,17 @@ function ConfigFolhaBloco({
   const [recebeAdto, setRecebeAdto] = useState(!!data.recebeAdiantamento);
   const [salario, setSalario] = useState(String(data.salarioBase ?? '0'));
   const [valorAdto, setValorAdto] = useState(data.valorAdiantamento ?? '');
+  const [comissao, setComissao] = useState(() =>
+    opcaoComissao(data.valorPorVenda),
+  );
+  const [comissaoOutro, setComissaoOutro] = useState(() =>
+    opcaoComissao(data.valorPorVenda) === 'outro'
+      ? String(Number(data.valorPorVenda))
+      : '',
+  );
   const [ok, setOk] = useState(false);
+
+  const valorPorVenda = comissao === 'outro' ? comissaoOutro : comissao;
 
   const salvar = useMutation({
     mutationFn: async () =>
@@ -226,6 +247,7 @@ function ConfigFolhaBloco({
           recebeAdiantamento: recebeAdto,
           salarioBase: Number(salario),
           valorAdiantamento: recebeAdto ? valorAdto : '',
+          valorPorVenda,
         })
       ).data,
     onSuccess: () => {
@@ -303,6 +325,35 @@ function ConfigFolhaBloco({
               />
             </div>
           )}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">
+              Comissão por venda
+            </label>
+            <select
+              value={comissao}
+              onChange={(e) => setComissao(e.target.value)}
+              className="w-44 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            >
+              <option value="">Não comissiona</option>
+              <option value="5">R$ 5,00 por venda</option>
+              <option value="50">R$ 50,00 por venda</option>
+              <option value="outro">Outro valor…</option>
+            </select>
+          </div>
+          {comissao === 'outro' && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-500">
+                Valor por venda (R$)
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={comissaoOutro}
+                onChange={(e) => setComissaoOutro(e.target.value)}
+                className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+          )}
           <button
             onClick={() => salvar.mutate()}
             disabled={salvar.isPending}
@@ -312,6 +363,310 @@ function ConfigFolhaBloco({
           </button>
           {ok && <span className="text-xs text-green-600">Salvo.</span>}
         </div>
+      </div>
+    </Bloco>
+  );
+}
+
+/** Qual opção do select representa o valor por venda salvo. */
+function opcaoComissao(valor: string | null | undefined): string {
+  const n = Number(valor ?? 0);
+  if (!n) return '';
+  if (n === 5) return '5';
+  if (n === 50) return '50';
+  return 'outro';
+}
+
+/** "AAAA-MM" do mês passado — é o mês trabalhado que a folha atual paga. */
+function mesTrabalhadoPadrao(): string {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// --- Vendas e horas extras do mês trabalhado ---
+function VariaveisMesBloco({
+  funcionarioId,
+  variaveis,
+  valorPorVendaPadrao,
+  carteiraAssinada,
+}: {
+  funcionarioId: string;
+  variaveis: VariavelMes[];
+  valorPorVendaPadrao: string | null;
+  carteiraAssinada: boolean;
+}) {
+  const qc = useQueryClient();
+  const [competencia, setCompetencia] = useState(mesTrabalhadoPadrao());
+  const [vendas, setVendas] = useState('');
+  const [valorVenda, setValorVenda] = useState('');
+  const [horasExtras, setHorasExtras] = useState('');
+  const [observacao, setObservacao] = useState('');
+  const [ok, setOk] = useState(false);
+
+  const doMes = useMemo(
+    () => variaveis.find((v) => v.competencia === competencia) ?? null,
+    [variaveis, competencia],
+  );
+
+  // Trocar de mês carrega o que já estava lançado nele (ou limpa o formulário).
+  useEffect(() => {
+    setVendas(doMes && doMes.vendas ? String(doMes.vendas) : '');
+    setValorVenda(doMes?.valorPorVenda ? String(Number(doMes.valorPorVenda)) : '');
+    setHorasExtras(
+      doMes && Number(doMes.horasExtras) ? String(Number(doMes.horasExtras)) : '',
+    );
+    setObservacao(doMes?.observacao ?? '');
+  }, [doMes]);
+
+  const salvar = useMutation({
+    mutationFn: async () =>
+      (
+        await api.put(`/funcionarios/${funcionarioId}/variaveis`, {
+          competencia,
+          vendas: Number(vendas) || 0,
+          valorPorVenda: valorVenda,
+          horasExtras: carteiraAssinada ? 0 : Number(horasExtras) || 0,
+          observacao,
+        })
+      ).data,
+    onSuccess: () => {
+      setOk(true);
+      qc.invalidateQueries({ queryKey: ['funcionario', funcionarioId] });
+      setTimeout(() => setOk(false), 2000);
+    },
+  });
+
+  const remover = useMutation({
+    mutationFn: async (comp: string) =>
+      (await api.delete(`/funcionarios/${funcionarioId}/variaveis/${comp}`)).data,
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ['funcionario', funcionarioId] }),
+  });
+
+  const unitario = Number(valorVenda) || Number(valorPorVendaPadrao ?? 0);
+  const comissaoPrevista = (Number(vendas) || 0) * unitario;
+
+  return (
+    <Bloco titulo="Vendas e horas extras do mês">
+      <p className="mb-3 text-xs text-slate-500">
+        Lançamento por <strong>mês trabalhado</strong>: o que você registrar em{' '}
+        {formatComp(competencia)} entra no saldo salarial da folha do mês
+        seguinte, detalhado na observação da conta a pagar.
+      </p>
+
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-500">
+            Mês trabalhado
+          </label>
+          <input
+            type="month"
+            value={competencia}
+            onChange={(e) => setCompetencia(e.target.value)}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-500">
+            Vendas no mês
+          </label>
+          <input
+            type="number"
+            min={0}
+            value={vendas}
+            onChange={(e) => setVendas(e.target.value)}
+            placeholder="0"
+            className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-500">
+            Valor por venda (R$)
+          </label>
+          <input
+            type="number"
+            step="0.01"
+            value={valorVenda}
+            onChange={(e) => setValorVenda(e.target.value)}
+            placeholder={
+              valorPorVendaPadrao
+                ? `padrão ${formatBRL(valorPorVendaPadrao)}`
+                : 'sem padrão'
+            }
+            className="w-36 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+        </div>
+        {!carteiraAssinada && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">
+              Horas extras (R$)
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              value={horasExtras}
+              onChange={(e) => setHorasExtras(e.target.value)}
+              placeholder="0,00"
+              className="w-36 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+          </div>
+        )}
+        <div className="min-w-[160px] flex-1">
+          <label className="mb-1 block text-xs font-medium text-slate-500">
+            Observação
+          </label>
+          <input
+            value={observacao}
+            onChange={(e) => setObservacao(e.target.value)}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+        </div>
+        <button
+          onClick={() => salvar.mutate()}
+          disabled={salvar.isPending}
+          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+        >
+          {salvar.isPending ? 'Salvando…' : 'Salvar mês'}
+        </button>
+        {ok && <span className="text-xs text-green-600">Salvo.</span>}
+      </div>
+
+      {carteiraAssinada && (
+        <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          Carteira assinada: as horas extras saem pela contabilidade, então não
+          entram no cálculo daqui.
+        </p>
+      )}
+      {comissaoPrevista > 0 && (
+        <p className="mt-3 text-sm text-slate-600">
+          Comissão de {formatComp(competencia)}:{' '}
+          <strong className="text-slate-800">
+            {formatBRL(comissaoPrevista)}
+          </strong>{' '}
+          ({vendas} × {formatBRL(unitario)})
+        </p>
+      )}
+
+      {variaveis.length > 0 && (
+        <table className="mt-4 w-full text-sm">
+          <thead className="text-left text-xs uppercase text-slate-400">
+            <tr>
+              <th className="py-1">Mês</th>
+              <th className="py-1 text-right">Vendas</th>
+              <th className="py-1 text-right">Comissão</th>
+              <th className="py-1 text-right">Horas extras</th>
+              <th className="py-1"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {variaveis.map((v) => {
+              const unit = Number(v.valorPorVenda ?? valorPorVendaPadrao ?? 0);
+              return (
+                <tr key={v.id} className="border-t border-slate-100">
+                  <td className="py-1.5">{formatComp(v.competencia)}</td>
+                  <td className="py-1.5 text-right">{v.vendas}</td>
+                  <td className="py-1.5 text-right">
+                    {formatBRL(v.vendas * unit)}
+                  </td>
+                  <td className="py-1.5 text-right">
+                    {formatBRL(v.horasExtras)}
+                  </td>
+                  <td className="py-1.5 text-right">
+                    <button
+                      onClick={() => remover.mutate(v.competencia)}
+                      className="text-xs text-red-500 hover:underline"
+                    >
+                      remover
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </Bloco>
+  );
+}
+
+// --- Vales e acertos desta pessoa ---
+function ValesBloco({ funcionarioId }: { funcionarioId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['vales', 'funcionario', funcionarioId],
+    queryFn: async () =>
+      (
+        await api.get<ValeComSaldo[]>('/vales', {
+          params: { funcionarioId, situacao: 'TODOS' },
+        })
+      ).data,
+  });
+
+  const abertos = (data ?? []).filter(
+    (v) => !v.vale.cancelado && !v.quitado,
+  );
+
+  return (
+    <Bloco titulo="Vales e acertos">
+      {isLoading && <p className="text-sm text-slate-400">Carregando…</p>}
+      {data && data.length === 0 && (
+        <p className="text-sm text-slate-400">
+          Nenhum vale ou acerto registrado.
+        </p>
+      )}
+      {data && data.length > 0 && (
+        <table className="w-full text-sm">
+          <thead className="text-left text-xs uppercase text-slate-400">
+            <tr>
+              <th className="py-1">Descrição</th>
+              <th className="py-1 text-center">Parcelas</th>
+              <th className="py-1 text-right">Saldo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((v) => (
+              <tr
+                key={v.vale.id}
+                className={`border-t border-slate-100 ${
+                  v.vale.cancelado ? 'opacity-50' : ''
+                }`}
+              >
+                <td className="py-1.5">
+                  {v.vale.descricao}
+                  <span
+                    className={`ml-2 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                      SENTIDO_CLASSE[v.vale.sentido]
+                    }`}
+                  >
+                    {SENTIDO_CURTO[v.vale.sentido]}
+                  </span>
+                  {!v.vale.descontarDaFolha && (
+                    <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
+                      fora da folha
+                    </span>
+                  )}
+                </td>
+                <td className="py-1.5 text-center text-slate-600">
+                  {v.parcelasDescontadas}/{v.vale.quantidadeParcelas}
+                </td>
+                <td className="py-1.5 text-right font-medium">
+                  {formatBRL(v.saldo)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+        <Link to="/vales" className="text-brand-700 hover:underline">
+          Registrar vale ou acerto →
+        </Link>
+        {abertos.length > 0 && (
+          <span className="text-xs text-slate-500">
+            {abertos.length} em aberto
+          </span>
+        )}
       </div>
     </Bloco>
   );
