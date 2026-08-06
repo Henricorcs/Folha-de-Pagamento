@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, mensagemErro } from '../lib/api';
 import { formatBRL } from '../lib/format';
@@ -29,6 +29,8 @@ export function Folha() {
   });
   const [itens, setItens] = useState<ItemGerar[]>([]);
   const [feedback, setFeedback] = useState<string | null>(null);
+  /** Funcionários com o detalhamento aberto. */
+  const [abertos, setAbertos] = useState<Record<string, boolean>>({});
 
   const preview = useMutation({
     mutationFn: async () => {
@@ -96,6 +98,25 @@ export function Folha() {
     .filter((i) => i.selecionado)
     .reduce((s, i) => s + i.valor, 0);
 
+  // Uma linha por pessoa (com o total), preservando os índices dos lançamentos
+  // que a compõem para o detalhamento e para a geração.
+  const grupos = useMemo(() => {
+    const porFuncionario = new Map<
+      string,
+      { funcionarioId: string; nome: string; indices: number[] }
+    >();
+    itens.forEach((it, idx) => {
+      const grupo = porFuncionario.get(it.funcionarioId) ?? {
+        funcionarioId: it.funcionarioId,
+        nome: it.nome,
+        indices: [],
+      };
+      grupo.indices.push(idx);
+      porFuncionario.set(it.funcionarioId, grupo);
+    });
+    return [...porFuncionario.values()];
+  }, [itens]);
+
   function toggle(idx: number) {
     setItens((prev) =>
       prev.map((it, i) => (i === idx ? { ...it, selecionado: !it.selecionado } : it)),
@@ -103,6 +124,22 @@ export function Folha() {
   }
   function editarValor(idx: number, valor: number) {
     setItens((prev) => prev.map((it, i) => (i === idx ? { ...it, valor } : it)));
+  }
+  function selecionarGrupo(indices: number[], selecionado: boolean) {
+    const alvo = new Set(indices);
+    setItens((prev) =>
+      prev.map((it, i) => (alvo.has(i) ? { ...it, selecionado } : it)),
+    );
+  }
+  function alternarDetalhe(funcionarioId: string) {
+    setAbertos((prev) => ({ ...prev, [funcionarioId]: !prev[funcionarioId] }));
+  }
+  /** Total que a pessoa recebe: só o que está marcado. */
+  function totalDoGrupo(indices: number[]): number {
+    return indices.reduce(
+      (s, i) => s + (itens[i].selecionado ? itens[i].valor : 0),
+      0,
+    );
   }
 
   return (
@@ -157,50 +194,129 @@ export function Folha() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">✓</th>
+                  <th className="w-10 px-4 py-3">✓</th>
                   <th className="px-4 py-3">Funcionário</th>
-                  <th className="px-4 py-3">Tipo</th>
-                  <th className="px-4 py-3">Conta contábil</th>
-                  <th className="px-4 py-3">Observação</th>
-                  <th className="px-4 py-3 text-right">Valor</th>
+                  <th className="px-4 py-3 text-right">Total a pagar</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
-                {itens.map((it, idx) => (
-                  <tr key={idx} className={it.selecionado ? '' : 'opacity-40'}>
-                    <td className="px-4 py-2">
-                      <input
-                        type="checkbox"
-                        checked={it.selecionado}
-                        onChange={() => toggle(idx)}
-                      />
-                    </td>
-                    <td className="px-4 py-2 font-medium text-slate-700">
-                      {it.nome}
-                      {it.tipo === 'SALARIO' && it.cltComAdiantamento && (
-                        <span
-                          title="Carteira assinada: a contabilidade já desconta o adiantamento, então o saldo salarial não é reduzido aqui."
-                          className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
-                        >
-                          carteira assinada · sem desconto do dia 25
+              {grupos.map((g) => {
+                const marcados = g.indices.filter((i) => itens[i].selecionado);
+                const todos = marcados.length === g.indices.length;
+                const aberto = !!abertos[g.funcionarioId];
+                return (
+                  <tbody
+                    key={g.funcionarioId}
+                    className="border-t border-slate-100"
+                  >
+                    <tr
+                      onClick={() => alternarDetalhe(g.funcionarioId)}
+                      className={`cursor-pointer hover:bg-slate-50 ${
+                        marcados.length === 0 ? 'opacity-40' : ''
+                      }`}
+                    >
+                      <td
+                        className="px-4 py-3"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={todos}
+                          ref={(el) => {
+                            if (el) {
+                              el.indeterminate = marcados.length > 0 && !todos;
+                            }
+                          }}
+                          onChange={() => selecionarGrupo(g.indices, !todos)}
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="mr-2 inline-block w-3 text-slate-400">
+                          {aberto ? '▾' : '▸'}
                         </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2">{TIPO_LABEL[it.tipo]}</td>
-                    <td className="px-4 py-2 text-slate-500">{it.contaContabil}</td>
-                    <td className="px-4 py-2 text-slate-500">{it.observacao}</td>
-                    <td className="px-4 py-2 text-right">
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={it.valor}
-                        onChange={(e) => editarValor(idx, Number(e.target.value))}
-                        className="w-28 rounded border border-slate-300 px-2 py-1 text-right"
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
+                        <span className="font-medium text-slate-700">
+                          {g.nome}
+                        </span>
+                        <span className="ml-2 text-xs text-slate-400">
+                          {g.indices
+                            .map((i) => TIPO_LABEL[itens[i].tipo])
+                            .join(' · ')}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right font-semibold text-slate-800">
+                        {formatBRL(totalDoGrupo(g.indices))}
+                      </td>
+                    </tr>
+
+                    {aberto && (
+                      <tr>
+                        <td colSpan={3} className="bg-slate-50 px-4 pb-4 pt-1">
+                          <table className="w-full text-sm">
+                            <thead className="text-left text-[11px] uppercase text-slate-400">
+                              <tr>
+                                <th className="w-10 py-1"></th>
+                                <th className="py-1">Tipo</th>
+                                <th className="py-1">Conta contábil</th>
+                                <th className="py-1">Observação</th>
+                                <th className="py-1 text-right">Valor</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {g.indices.map((idx) => {
+                                const it = itens[idx];
+                                return (
+                                  <tr
+                                    key={idx}
+                                    className={`border-t border-slate-200 ${
+                                      it.selecionado ? '' : 'opacity-40'
+                                    }`}
+                                  >
+                                    <td className="py-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={it.selecionado}
+                                        onChange={() => toggle(idx)}
+                                      />
+                                    </td>
+                                    <td className="py-2">
+                                      {TIPO_LABEL[it.tipo]}
+                                      {it.tipo === 'SALARIO' &&
+                                        it.cltComAdiantamento && (
+                                          <span
+                                            title="Carteira assinada: a contabilidade já desconta o adiantamento, então o saldo salarial não é reduzido aqui."
+                                            className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
+                                          >
+                                            carteira assinada · sem desconto do dia 25
+                                          </span>
+                                        )}
+                                    </td>
+                                    <td className="py-2 text-slate-500">
+                                      {it.contaContabil}
+                                    </td>
+                                    <td className="py-2 text-slate-500">
+                                      {it.observacao}
+                                    </td>
+                                    <td className="py-2 text-right">
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        value={it.valor}
+                                        onChange={(e) =>
+                                          editarValor(idx, Number(e.target.value))
+                                        }
+                                        className="w-28 rounded border border-slate-300 px-2 py-1 text-right"
+                                      />
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                );
+              })}
             </table>
           </div>
           <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3">
