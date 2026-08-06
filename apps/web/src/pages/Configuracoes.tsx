@@ -55,6 +55,7 @@ export function Configuracoes() {
           <CampoNum label="Conta de pagamento (id_contas)" valor={form.contaPagamentoId} onChange={(v) => num('contaPagamentoId', v)} />
           <CampoNum label="Filial (filial_id)" valor={form.filialId} onChange={(v) => num('filialId', v)} />
           <CampoNum label="Cidade padrão (fornecedor)" valor={form.cidadePadraoId} onChange={(v) => num('cidadePadraoId', v)} />
+          <CampoNum label="Adiantamento dia 25 (% do salário)" valor={form.percentualAdiantamento} onChange={(v) => num('percentualAdiantamento', v)} />
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-500">
               Tipo de pagamento (fn_apagar)

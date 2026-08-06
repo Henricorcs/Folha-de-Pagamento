@@ -78,6 +78,9 @@ model Funcionario {
   carteiraAssinada Boolean @default(false) @map("carteira_assinada")
   // Opção de receber o adiantamento do dia 25
   recebeAdiantamento Boolean @default(false) @map("recebe_adiantamento")
+  // Quanto essa pessoa recebe no dia 25. Vazio = percentual da configuração
+  // (40% do salário base). O que sair aqui é abatido do saldo salarial.
+  valorAdiantamento Decimal? @map("valor_adiantamento") @db.Decimal(14, 2)
 
   // Fornecedor vinculado no IXC (necessário para gerar contas a pagar)
   idFornecedorIxc Int? @map("id_fornecedor_ixc")
@@ -178,6 +181,10 @@ model ConfiguracaoFinanceira {
 
   // Cidade padrão usada ao criar fornecedores
   cidadePadraoId Int @default(1) @map("cidade_padrao_id")
+
+  // % do salário base pago no adiantamento do dia 25, para quem recebe
+  // adiantamento e não tem um lançamento de valor fixo cadastrado.
+  percentualAdiantamento Int @default(40) @map("percentual_adiantamento")
 
   // --- Filtro que identifica funcionários no cadastro de `fornecedor` ---
   // Regra: fornecedor ativo com "Contribuinte ICMS" = Isento é funcionário.

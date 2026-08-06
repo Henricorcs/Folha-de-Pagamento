@@ -1,6 +1,8 @@
 import { TipoLancamento } from '@prisma/client';
 import {
+  calcularAdiantamento,
   calcularSaldoSalarial,
+  competenciaAnterior,
   formatCompetencia,
   montarLancamentosFolha,
   renderObs,
@@ -40,6 +42,52 @@ describe('formatCompetencia / renderObs', () => {
   });
 });
 
+describe('competenciaAnterior', () => {
+  it('volta um mês', () => {
+    expect(competenciaAnterior('2026-08')).toBe('2026-07');
+  });
+
+  it('vira o ano em janeiro', () => {
+    expect(competenciaAnterior('2026-01')).toBe('2025-12');
+  });
+
+  it('devolve como veio quando não é AAAA-MM', () => {
+    expect(competenciaAnterior('')).toBe('');
+  });
+});
+
+describe('calcularAdiantamento', () => {
+  it('sem lançamento fixo, usa 40% do salário base', () => {
+    expect(calcularAdiantamento(base({ adiantamentoFixo: 0 }))).toBe(800);
+  });
+
+  it('respeita outro percentual', () => {
+    expect(calcularAdiantamento(base({ adiantamentoFixo: 0 }), 30)).toBe(600);
+  });
+
+  it('lançamento fixo cadastrado vence o percentual', () => {
+    expect(calcularAdiantamento(base({ adiantamentoFixo: 500 }))).toBe(500);
+  });
+
+  it('valor do cadastro vence o lançamento e o percentual', () => {
+    expect(
+      calcularAdiantamento(base({ valorAdiantamento: 700, adiantamentoFixo: 500 })),
+    ).toBe(700);
+  });
+
+  it('valor do cadastro zerado cai no percentual', () => {
+    expect(
+      calcularAdiantamento(base({ valorAdiantamento: 0, adiantamentoFixo: 0 })),
+    ).toBe(800);
+  });
+
+  it('quem não recebe adiantamento fica em zero', () => {
+    expect(
+      calcularAdiantamento(base({ recebeAdiantamento: false, adiantamentoFixo: 0 })),
+    ).toBe(0);
+  });
+});
+
 describe('calcularSaldoSalarial', () => {
   it('NÃO carteira assinada: desconta adiantamento do saldo', () => {
     // 2000 - 200 desconto - 800 adiantamento = 1000
@@ -55,6 +103,18 @@ describe('calcularSaldoSalarial', () => {
     expect(
       calcularSaldoSalarial(base({ recebeAdiantamento: false })),
     ).toBe(1800);
+  });
+
+  it('sem valor cadastrado: desconta os 40% do dia 25', () => {
+    // 2000 - 200 desconto - 800 (40% de 2000) = 1000
+    expect(calcularSaldoSalarial(base({ adiantamentoFixo: 0 }))).toBe(1000);
+  });
+
+  it('com valor do cadastro: desconta exatamente esse valor', () => {
+    // 2000 - 200 desconto - 700 = 1100
+    expect(
+      calcularSaldoSalarial(base({ adiantamentoFixo: 0, valorAdiantamento: 700 })),
+    ).toBe(1100);
   });
 });
 
@@ -91,6 +151,24 @@ describe('montarLancamentosFolha', () => {
     });
     expect(l).toHaveLength(1);
     expect(l[0].tipo).toBe(TipoLancamento.ADIANTAMENTO);
+  });
+
+  it('gera o adiantamento de 40% mesmo sem lançamento cadastrado', () => {
+    const l = montarLancamentosFolha(base({ adiantamentoFixo: 0 }), params);
+    const ad = l.find((x) => x.tipo === TipoLancamento.ADIANTAMENTO)!;
+    const sal = l.find((x) => x.tipo === TipoLancamento.SALARIO)!;
+    expect(ad.valor).toBe(800); // 40% de 2000
+    expect(sal.valor).toBe(1000); // 2000 - 200 desconto - 800
+  });
+
+  it('usa o percentual configurado', () => {
+    const l = montarLancamentosFolha(base({ adiantamentoFixo: 0 }), {
+      ...params,
+      percentualAdiantamento: 50,
+    });
+    expect(l.find((x) => x.tipo === TipoLancamento.ADIANTAMENTO)!.valor).toBe(
+      1000,
+    );
   });
 
   it('não gera itens com valor zero/negativo', () => {

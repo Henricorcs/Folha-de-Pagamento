@@ -71,6 +71,14 @@ export class FuncionariosService {
         carteiraAssinada: dto.carteiraAssinada,
         recebeAdiantamento: dto.recebeAdiantamento,
         cidadeIxc: dto.cidadeIxc,
+        // 0 ou vazio limpa o valor: volta a valer o percentual da configuração.
+        ...(dto.valorAdiantamento !== undefined
+          ? {
+              valorAdiantamento: dto.valorAdiantamento
+                ? new Prisma.Decimal(dto.valorAdiantamento)
+                : null,
+            }
+          : {}),
         ...(dto.salarioBase !== undefined
           ? { salarioBase: new Prisma.Decimal(dto.salarioBase) }
           : {}),

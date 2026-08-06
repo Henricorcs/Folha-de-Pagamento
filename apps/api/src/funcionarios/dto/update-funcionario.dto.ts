@@ -52,6 +52,13 @@ export class UpdateFuncionarioDto {
   @IsBoolean()
   recebeAdiantamento?: boolean;
 
+  /** Valor do dia 25; 0 ou vazio volta ao percentual da configuração. */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value == null ? null : Number(value)))
+  @IsNumber()
+  @Min(0)
+  valorAdiantamento?: number | null;
+
   @IsOptional()
   @Transform(({ value }) => (value === '' || value == null ? undefined : Number(value)))
   @IsNumber()

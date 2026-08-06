@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class UpdateConfigFinanceiraDto {
   @IsOptional() @IsInt() @Min(1) contaPagamentoId?: number;
@@ -7,6 +7,7 @@ export class UpdateConfigFinanceiraDto {
   @IsOptional() @IsInt() @Min(1) contaContabilAdiantamento?: number;
   @IsOptional() @IsInt() @Min(1) contaContabilBonus?: number;
   @IsOptional() @IsInt() @Min(1) cidadePadraoId?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(100) percentualAdiantamento?: number;
   @IsOptional() @IsString() tipoPagamentoPadrao?: string;
   @IsOptional() @IsString() obsSalarioTemplate?: string;
   @IsOptional() @IsString() obsAdiantamentoTemplate?: string;

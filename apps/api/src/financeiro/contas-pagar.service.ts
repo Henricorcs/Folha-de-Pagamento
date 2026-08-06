@@ -20,6 +20,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ConfigFinanceiraService } from './config-financeira.service';
 import { FornecedorService } from './fornecedor.service';
 import {
+  competenciaAnterior,
   montarLancamentosFolha,
   renderObs,
   type LancamentoCalculado,
@@ -71,13 +72,17 @@ export class ContasPagarService {
       orderBy: { nome: 'asc' },
     });
 
+    // Salário e bônus se referem ao mês trabalhado (o anterior); só o
+    // adiantamento do dia 25 fala do mês corrente.
+    const mesTrabalhado = competenciaAnterior(dto.competencia);
     const params = {
       contaContabilSalario: cfg.contaContabilSalario,
       contaContabilAdiantamento: cfg.contaContabilAdiantamento,
       contaContabilBonus: cfg.contaContabilBonus,
-      obsSalario: renderObs(cfg.obsSalarioTemplate, dto.competencia),
+      obsSalario: renderObs(cfg.obsSalarioTemplate, mesTrabalhado),
       obsAdiantamento: renderObs(cfg.obsAdiantamentoTemplate, dto.competencia),
-      obsBonus: renderObs(cfg.obsBonusTemplate, dto.competencia),
+      obsBonus: renderObs(cfg.obsBonusTemplate, mesTrabalhado),
+      percentualAdiantamento: cfg.percentualAdiantamento,
     };
 
     return funcionarios.map((f) => {
@@ -91,6 +96,8 @@ export class ContasPagarService {
           salarioBase: Number(f.salarioBase),
           carteiraAssinada: f.carteiraAssinada,
           recebeAdiantamento: f.recebeAdiantamento,
+          valorAdiantamento:
+            f.valorAdiantamento === null ? null : Number(f.valorAdiantamento),
           adiantamentoFixo: somaTipo(TipoLancamento.ADIANTAMENTO),
           descontosFixos: somaTipo(TipoLancamento.DESCONTO),
           bonusFixo: somaTipo(TipoLancamento.BONUS),
@@ -453,12 +460,13 @@ function obsPorTipo(
   },
 ): string {
   const comp = competencia ?? '';
+  // Adiantamento é do mês corrente; salário e bônus, do mês trabalhado.
   switch (tipo) {
     case TipoLancamento.ADIANTAMENTO:
       return renderObs(cfg.obsAdiantamentoTemplate, comp);
     case TipoLancamento.BONUS:
-      return renderObs(cfg.obsBonusTemplate, comp);
+      return renderObs(cfg.obsBonusTemplate, competenciaAnterior(comp));
     default:
-      return renderObs(cfg.obsSalarioTemplate, comp);
+      return renderObs(cfg.obsSalarioTemplate, competenciaAnterior(comp));
   }
 }

@@ -213,6 +213,7 @@ function ConfigFolhaBloco({
   const [carteira, setCarteira] = useState(!!data.carteiraAssinada);
   const [recebeAdto, setRecebeAdto] = useState(!!data.recebeAdiantamento);
   const [salario, setSalario] = useState(String(data.salarioBase ?? '0'));
+  const [valorAdto, setValorAdto] = useState(data.valorAdiantamento ?? '');
   const [ok, setOk] = useState(false);
 
   const salvar = useMutation({
@@ -222,6 +223,7 @@ function ConfigFolhaBloco({
           carteiraAssinada: carteira,
           recebeAdiantamento: recebeAdto,
           salarioBase: Number(salario),
+          valorAdiantamento: recebeAdto ? valorAdto : '',
         })
       ).data,
     onSuccess: () => {
@@ -250,7 +252,7 @@ function ConfigFolhaBloco({
           />
           Recebe adiantamento (dia 25)
         </label>
-        <div className="flex items-end gap-3">
+        <div className="flex flex-wrap items-end gap-3">
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-500">
               Salário base (R$)
@@ -263,6 +265,21 @@ function ConfigFolhaBloco({
               className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
             />
           </div>
+          {recebeAdto && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-500">
+                Valor do dia 25 (R$)
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={valorAdto}
+                onChange={(e) => setValorAdto(e.target.value)}
+                placeholder="vazio = 40%"
+                className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+          )}
           <button
             onClick={() => salvar.mutate()}
             disabled={salvar.isPending}

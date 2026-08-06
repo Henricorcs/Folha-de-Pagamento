@@ -37,6 +37,8 @@ export interface Adiantamento {
 export interface Funcionario {
   carteiraAssinada?: boolean;
   recebeAdiantamento?: boolean;
+  /** Valor que a pessoa recebe no dia 25 (null = percentual da configuração) */
+  valorAdiantamento?: string | null;
   idFornecedorIxc?: number | null;
 }
 
@@ -116,6 +118,8 @@ export interface ConfigFinanceira {
   contaContabilAdiantamento: number;
   contaContabilBonus: number;
   cidadePadraoId: number;
+  /** % do salário base no adiantamento do dia 25 (padrão 40) */
+  percentualAdiantamento: number;
   tipoPagamentoPadrao: string;
   obsSalarioTemplate: string;
   obsAdiantamentoTemplate: string;

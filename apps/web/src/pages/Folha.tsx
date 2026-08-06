@@ -10,6 +10,8 @@ interface ItemGerar extends LancamentoCalculado {
   funcionarioId: string;
   nome: string;
   selecionado: boolean;
+  /** CLT que recebe adiantamento: o saldo salarial sai cheio de propósito. */
+  cltComAdiantamento: boolean;
 }
 
 function competenciaAtual(): string {
@@ -44,7 +46,13 @@ export function Folha() {
       const flat: ItemGerar[] = [];
       for (const f of data) {
         for (const l of f.lancamentos) {
-          flat.push({ ...l, funcionarioId: f.funcionarioId, nome: f.nome, selecionado: true });
+          flat.push({
+            ...l,
+            funcionarioId: f.funcionarioId,
+            nome: f.nome,
+            selecionado: true,
+            cltComAdiantamento: f.carteiraAssinada && f.recebeAdiantamento,
+          });
         }
       }
       setItens(flat);
@@ -167,7 +175,17 @@ export function Folha() {
                         onChange={() => toggle(idx)}
                       />
                     </td>
-                    <td className="px-4 py-2 font-medium text-slate-700">{it.nome}</td>
+                    <td className="px-4 py-2 font-medium text-slate-700">
+                      {it.nome}
+                      {it.tipo === 'SALARIO' && it.cltComAdiantamento && (
+                        <span
+                          title="CLT: a contabilidade já desconta o adiantamento, então o saldo salarial não é reduzido aqui."
+                          className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
+                        >
+                          CLT · sem desconto do dia 25
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-2">{TIPO_LABEL[it.tipo]}</td>
                     <td className="px-4 py-2 text-slate-500">{it.contaContabil}</td>
                     <td className="px-4 py-2 text-slate-500">{it.observacao}</td>
