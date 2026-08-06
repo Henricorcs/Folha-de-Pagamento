@@ -1,9 +1,12 @@
 import {
+  consolidarDadosBancarios,
+  detectarCampoFornecedor,
   detectarCampoIcms,
   distribuicaoIcms,
   ehIcmsIsento,
   filtrarFuncionariosIsentos,
   mapFornecedorParaFuncionario,
+  mapLinhaDadosBancarios,
   montarUpdateDoFornecedor,
   parseValoresIsento,
   somenteDigitos,
@@ -219,6 +222,57 @@ describe('montarUpdateDoFornecedor', () => {
       mapFornecedorParaFuncionario({ id: '30', razao: 'Maria' })!,
     );
     expect(update).toEqual({});
+  });
+});
+
+describe('dados bancários (aba do fornecedor)', () => {
+  // Colunas do grid: ID, Código do banco, Banco, Código da agência, Código da
+  // conta, Tipo conta, Titular, CNPJ/CPF, Pix CPF/CNPJ, Pix celular, Pix e-mail.
+  const LINHA = {
+    id: '6',
+    id_fornecedor: '2672',
+    codigo_banco: '',
+    banco: 'Banco Inter',
+    codigo_agencia: '',
+    codigo_conta: '',
+    tipo_conta: 'Corrente',
+    titular: 'Henrico Santos Sousa',
+    pix_cpf_cnpj: '',
+    pix_celular: '(99) 98107-4450',
+    pix_email: '',
+  };
+
+  it('lê banco e a chave PIX da coluna preenchida', () => {
+    expect(mapLinhaDadosBancarios(LINHA)).toEqual({
+      banco: 'Banco Inter',
+      agencia: null,
+      conta: null,
+      chavePix: '(99) 98107-4450',
+    });
+  });
+
+  it('não confunde "Tipo conta" com o número da conta', () => {
+    expect(mapLinhaDadosBancarios(LINHA).conta).toBeNull();
+  });
+
+  it('prefere a linha que tem PIX e completa com as demais', () => {
+    const consolidado = consolidarDadosBancarios([
+      { id: '1', banco: 'Bradesco', agencia: '1234', conta: '5678' },
+      { id: '2', banco: 'Banco Inter', pix_email: 'ana@pix' },
+    ]);
+    expect(consolidado).toEqual({
+      banco: 'Banco Inter',
+      agencia: '1234',
+      conta: '5678',
+      chavePix: 'ana@pix',
+    });
+  });
+
+  it('acha o vínculo com o fornecedor', () => {
+    expect(detectarCampoFornecedor(LINHA)).toBe('id_fornecedor');
+    expect(detectarCampoFornecedor({ id: '1', id_cadastro: '9' })).toBe(
+      'id_cadastro',
+    );
   });
 });
 

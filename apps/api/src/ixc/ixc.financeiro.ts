@@ -55,20 +55,69 @@ export interface ContaPagarInput {
   chavePix?: string | null;
 }
 
+/** Tipos da chave PIX, como aparecem na tela de contas a pagar do IXC. */
+export type TipoChavePix =
+  | 'CPF/CNPJ'
+  | 'Celular'
+  | 'E-mail'
+  | 'Aleatória'
+  | 'Código copia e cola';
+
+/**
+ * Deduz o tipo da chave PIX pelo formato, para marcar o rádio "Tipo da chave
+ * Pix" junto do pagamento. Celular e CPF têm 11 dígitos: o desempate é o DDD
+ * válido seguido do 9 do celular (CPF não começa com DDD + 9).
+ */
+export function inferirTipoChavePix(chave?: string | null): TipoChavePix | null {
+  const s = String(chave ?? '').trim();
+  if (!s) return null;
+  if (s.includes('@')) return 'E-mail';
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) {
+    return 'Aleatória';
+  }
+
+  const digitos = s.replace(/\D/g, '');
+  if (digitos.length === 13 && digitos.startsWith('55')) return 'Celular';
+  if (digitos.length === 11 && /^[1-9]{2}9/.test(digitos)) return 'Celular';
+  if (digitos.length === 11 || digitos.length === 14) return 'CPF/CNPJ';
+  if (s.length > 40) return 'Código copia e cola';
+  return null;
+}
+
+/**
+ * Normaliza a chave PIX para o formato que o banco aceita. Celular vira
+ * +55DDDNNNNNNNNN (o IXC guarda com máscara, ex.: "(99) 98107-4450"); as
+ * demais seguem como estão.
+ */
+export function normalizarChavePix(
+  chave: string,
+  tipo: TipoChavePix | null,
+): string {
+  if (tipo !== 'Celular') return chave.trim();
+  const digitos = chave.replace(/\D/g, '');
+  const comPais = digitos.startsWith('55') ? digitos : `55${digitos}`;
+  return `+${comPais}`;
+}
+
 /** Monta o corpo do POST /fn_apagar (conta a pagar). */
 export function buildContaPagarPayload(
   input: ContaPagarInput,
 ): Record<string, unknown> {
+  const chave = (input.chavePix ?? '').trim();
+  const tipoChave = inferirTipoChavePix(chave);
+
   return {
     id_fornecedor: String(input.idFornecedor),
     data_emissao: formatDataIxc(input.dataEmissao),
     data_vencimento: formatDataIxc(input.dataVencimento),
     valor: formatValorIxc(input.valor),
     id_contas: String(input.contaPagamentoId), // conta de pagamento (18)
-    tipo_pagamento: input.tipoPagamento ?? 'Dinheiro',
+    tipo_pagamento: input.tipoPagamento ?? 'Pix',
     id_conta: String(input.contaContabilId), // conta contábil (2420/2662/13916)
     filial_id: String(input.filialId),
-    chave_pix: input.chavePix ?? '',
+    chave_pix: chave ? normalizarChavePix(chave, tipoChave) : '',
+    // Rádio "Tipo da chave Pix" da tela de contas a pagar.
+    tipo_chave_pix: tipoChave ?? '',
     previsao: 'N',
     liberado: 'S',
     obs: input.observacao,

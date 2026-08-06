@@ -12,6 +12,10 @@ export class FuncionariosService {
   async listar(q: QueryFuncionariosDto) {
     const where: Prisma.FuncionarioWhereInput = {};
 
+    // Funcionário é quem o filtro do IXC marcou (fornecedor ativo + ICMS
+    // isento). Os demais cadastros ficam no banco, mas fora da listagem.
+    if (q.todos !== 'true') where.isentoIcms = true;
+
     if (q.busca) {
       where.OR = [
         { nome: { contains: q.busca, mode: 'insensitive' } },
@@ -126,11 +130,13 @@ export class FuncionariosService {
 
   /** Resumo para dashboard: total, ativos, folha base mensal. */
   async resumo() {
+    // Conta o mesmo universo da listagem: só fornecedores isentos de ICMS.
+    const funcionario = { isentoIcms: true };
     const [total, ativos, agg] = await this.prisma.$transaction([
-      this.prisma.funcionario.count(),
-      this.prisma.funcionario.count({ where: { ativo: true } }),
+      this.prisma.funcionario.count({ where: funcionario }),
+      this.prisma.funcionario.count({ where: { ...funcionario, ativo: true } }),
       this.prisma.funcionario.aggregate({
-        where: { ativo: true },
+        where: { ...funcionario, ativo: true },
         _sum: { salarioBase: true },
       }),
     ]);

@@ -11,6 +11,14 @@ export class QueryFuncionariosDto {
   @IsBooleanString()
   ativo?: string;
 
+  /**
+   * "true" traz também quem não é fornecedor isento de ICMS. Por padrão a
+   * listagem mostra só os funcionários (fornecedor ativo + ICMS isento).
+   */
+  @IsOptional()
+  @IsBooleanString()
+  todos?: string;
+
   @IsOptional()
   @Transform(({ value }) => parseInt(value, 10))
   @IsInt()

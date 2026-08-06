@@ -58,6 +58,11 @@ model Funcionario {
   dataDemissao DateTime? @map("data_demissao")
   ativo        Boolean   @default(true)
 
+  // Marcado pelo sync quando o fornecedor vinculado está ativo e é isento de
+  // ICMS — é isso que define "é funcionário" (regra do usuário). As telas de
+  // folha e a listagem só mostram quem está marcado. Ver [[project]].
+  isentoIcms Boolean @default(false) @map("isento_icms")
+
   // Dados bancários / pagamento
   banco    String?
   agencia  String?
@@ -92,6 +97,7 @@ model Funcionario {
 
   @@index([ativo])
   @@index([nome])
+  @@index([isentoIcms])
   @@map("funcionarios")
 }
 
@@ -181,10 +187,14 @@ model ConfiguracaoFinanceira {
   // Valores que significam "Isento" nesse campo, separados por vírgula.
   // Texto contendo "isent" sempre conta; códigos numéricos variam por base.
   fornecedorIcmsIsento String @default("I,ISENTO") @map("fornecedor_icms_isento")
+  // Tabela da aba "Dados bancários" do fornecedor (banco/agência/conta/PIX).
+  // Vazio = descobre sozinho testando os nomes conhecidos.
+  fornecedorTabelaBanco String @default("") @map("fornecedor_tabela_banco")
 
   // Tipo de pagamento enviado ao fn_apagar (rótulo exato usado pelo seu IXC,
-  // ex.: "Dinheiro", "Pix"). A chave PIX do beneficiário vai junto no payload.
-  tipoPagamentoPadrao String @default("Dinheiro") @map("tipo_pagamento_padrao")
+  // ex.: "Pix", "Dinheiro"). A chave PIX do beneficiário vai junto no payload,
+  // com o tipo da chave deduzido do formato.
+  tipoPagamentoPadrao String @default("Pix") @map("tipo_pagamento_padrao")
 
   // Templates de observação ({competencia} é substituído por "MM/AAAA")
   obsSalarioTemplate      String @default("saldo salarial referente ao mês {competencia}") @map("obs_salario_template")

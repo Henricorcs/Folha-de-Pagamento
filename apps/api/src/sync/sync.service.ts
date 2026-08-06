@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, SyncStatus } from '@prisma/client';
 import { ConfigFinanceiraService } from '../financeiro/config-financeira.service';
+import { DadosBancariosService } from '../ixc/dados-bancarios.service';
 import { IxcClient } from '../ixc/ixc.client';
 import {
   distribuicaoIcms,
@@ -12,11 +13,7 @@ import {
   type FuncionarioLocal,
   type OcorrenciaIcms,
 } from '../ixc/ixc.fornecedor';
-import {
-  extrairDadosBancarios,
-  mapAdiantamento,
-  mapFuncionario,
-} from '../ixc/ixc.mappers';
+import { mapAdiantamento, mapFuncionario } from '../ixc/ixc.mappers';
 import type {
   IxcAdiantamento,
   IxcFornecedor,
@@ -37,6 +34,8 @@ export interface PreviewFornecedores {
   campoIcms: string | null;
   /** Valores considerados "Isento" (configuráveis). */
   valoresIsento: string[];
+  /** Tabela da aba "Dados bancários" em uso (null = nenhuma encontrada). */
+  tabelaBanco: string | null;
   totalFornecedoresAtivos: number;
   /** Todos os valores do campo de ICMS na base, para conferência. */
   distribuicao: OcorrenciaIcms[];
@@ -55,6 +54,7 @@ export class SyncService {
     private readonly ixc: IxcClient,
     private readonly prisma: PrismaService,
     private readonly config: ConfigFinanceiraService,
+    private readonly dadosBancarios: DadosBancariosService,
   ) {}
 
   /**
@@ -99,9 +99,8 @@ export class SyncService {
         existente ? atualizados++ : novos++;
       }
 
-      // Os dados bancários (banco/agência/conta/PIX) do funcionário costumam
-      // estar no fornecedor, não na tabela `funcionarios`. Completa o que faltou.
-      await this.enriquecerDadosBancarios();
+      // Os dados bancários (banco/agência/conta/PIX) não vêm daqui: são lidos
+      // da aba "Dados bancários" do fornecedor em syncFuncionariosDoFornecedor.
 
       await this.prisma.syncLog.update({
         where: { id: log.id },
@@ -213,7 +212,9 @@ export class SyncService {
    * no fornecedor, e já vincula o `id_fornecedor` usado nas contas a pagar.
    *
    * Casamento com o cadastro local, nesta ordem: `idFornecedorIxc` → CPF/CNPJ
-   * (só dígitos) → cria novo. Não desativa ninguém que saia do filtro.
+   * (só dígitos) → cria novo. Quem entra no filtro fica marcado com
+   * `isentoIcms` (é o que faz aparecer na listagem e na folha); quem sai perde
+   * a marca, mas continua no banco e nunca é desativado.
    */
   async syncFuncionariosDoFornecedor(): Promise<SyncResult> {
     const log = await this.prisma.syncLog.create({
@@ -237,6 +238,7 @@ export class SyncService {
       }
 
       const indice = await this.indiceFuncionarios();
+      const marcados: string[] = [];
       let novos = 0;
       let atualizados = 0;
 
@@ -246,13 +248,15 @@ export class SyncService {
           indice.porDoc.get(somenteDigitos(dados.cpfCnpj));
 
         if (local) {
-          const data = montarUpdateDoFornecedor(local, dados);
-          if (Object.keys(data).length > 0) {
-            await this.prisma.funcionario.update({
-              where: { id: local.id },
-              data,
-            });
-          }
+          const data = {
+            ...montarUpdateDoFornecedor(local, dados),
+            isentoIcms: true,
+          };
+          await this.prisma.funcionario.update({
+            where: { id: local.id },
+            data,
+          });
+          marcados.push(local.id);
           atualizados++;
           continue;
         }
@@ -270,10 +274,28 @@ export class SyncService {
             cidadeIxc: dados.cidadeIxc,
             idFornecedorIxc: dados.idFornecedor,
             ativo: true,
+            isentoIcms: true,
           },
         });
         this.indexar(indice, criado);
+        marcados.push(criado.id);
         novos++;
+      }
+
+      // Quem deixou de ser fornecedor isento sai da folha e da listagem — mas
+      // só quando o filtro realmente rodou (senão desmarcaria todo mundo).
+      let desmarcados = 0;
+      if (campoIcms) {
+        const res = await this.prisma.funcionario.updateMany({
+          where: { isentoIcms: true, id: { notIn: marcados } },
+          data: { isentoIcms: false },
+        });
+        desmarcados = res.count;
+        if (desmarcados > 0) {
+          this.logger.log(
+            `${desmarcados} funcionário(s) saíram do filtro de ICMS isento`,
+          );
+        }
       }
 
       await this.prisma.syncLog.update({
@@ -309,7 +331,7 @@ export class SyncService {
    * qual código significa "Isento" quando o resultado vier vazio ou inflado.
    */
   async previewFuncionariosDoFornecedor(): Promise<PreviewFornecedores> {
-    const { campoIcms, funcionarios, registros, valoresIsento } =
+    const { campoIcms, funcionarios, registros, valoresIsento, tabelaBanco } =
       await this.lerFuncionariosDoFornecedor();
 
     const indice = await this.indiceFuncionarios();
@@ -317,6 +339,7 @@ export class SyncService {
     return {
       campoIcms,
       valoresIsento,
+      tabelaBanco: tabelaBanco ?? null,
       totalFornecedoresAtivos: registros.length,
       distribuicao: distribuicaoIcms(registros, campoIcms),
       funcionarios: funcionarios.map((f) => ({
@@ -335,6 +358,7 @@ export class SyncService {
     valoresIsento: string[];
     funcionarios: FuncionarioDoFornecedor[];
     totalAtivos: number;
+    tabelaBanco: string | null | undefined;
   }> {
     const cfg = await this.config.obter();
     const valoresIsento = parseValoresIsento(cfg.fornecedorIcmsIsento);
@@ -352,13 +376,45 @@ export class SyncService {
       valoresIsento,
     });
 
+    await this.completarDadosBancarios(funcionarios, cfg.fornecedorTabelaBanco);
+
     return {
       registros,
       campoIcms,
       valoresIsento,
       funcionarios,
       totalAtivos: registros.length,
+      tabelaBanco: this.dadosBancarios.tabelaEmUso,
     };
+  }
+
+  /**
+   * Busca banco/agência/conta/PIX na aba "Dados bancários" de cada fornecedor
+   * do filtro. É uma consulta por funcionário, mas o filtro já reduziu a lista
+   * a quem é funcionário de fato. O grid vence o registro do fornecedor, que
+   * costuma vir sem esses campos.
+   */
+  private async completarDadosBancarios(
+    funcionarios: FuncionarioDoFornecedor[],
+    tabelaConfigurada: string,
+  ): Promise<void> {
+    let comPix = 0;
+    for (const f of funcionarios) {
+      const grid = await this.dadosBancarios.doFornecedor(
+        f.idFornecedor,
+        tabelaConfigurada,
+      );
+      f.banco = grid.banco ?? f.banco;
+      f.agencia = grid.agencia ?? f.agencia;
+      f.conta = grid.conta ?? f.conta;
+      f.chavePix = grid.chavePix ?? f.chavePix;
+      if (f.chavePix) comPix++;
+    }
+    if (funcionarios.length > 0) {
+      this.logger.log(
+        `Dados bancários lidos: ${comPix} de ${funcionarios.length} funcionário(s) com chave PIX`,
+      );
+    }
   }
 
   /** Índice dos funcionários locais por id de fornecedor e por CPF/CNPJ. */
@@ -394,76 +450,6 @@ export class SyncService {
     if (doc && !indice.porDoc.has(doc)) indice.porDoc.set(doc, local);
   }
 
-  /**
-   * Completa os dados bancários (banco/agência/conta/PIX) dos funcionários a
-   * partir do fornecedor no IXC. Para cada funcionário com algum campo bancário
-   * vazio e com CPF/CNPJ, busca o fornecedor pelo documento e copia só os
-   * campos que estão vazios no local — nunca apaga valor já existente (manual
-   * ou de sync anterior). Falha em um funcionário não aborta os demais.
-   */
-  private async enriquecerDadosBancarios(): Promise<number> {
-    const incompletos = await this.prisma.funcionario.findMany({
-      where: {
-        cpfCnpj: { not: null },
-        OR: [
-          { banco: null },
-          { banco: '' },
-          { agencia: null },
-          { agencia: '' },
-          { conta: null },
-          { conta: '' },
-          { chavePix: null },
-          { chavePix: '' },
-        ],
-      },
-      select: {
-        id: true,
-        cpfCnpj: true,
-        banco: true,
-        agencia: true,
-        conta: true,
-        chavePix: true,
-      },
-    });
-
-    let preenchidos = 0;
-    for (const f of incompletos) {
-      const doc = (f.cpfCnpj ?? '').trim();
-      if (!doc) continue;
-      try {
-        const fornecedor = await this.ixc.getById<Record<string, unknown>>(
-          'fornecedor',
-          'fornecedor.cpf_cnpj',
-          doc,
-        );
-        if (!fornecedor) continue;
-        const dados = extrairDadosBancarios(fornecedor);
-
-        const data: Prisma.FuncionarioUpdateInput = {};
-        if (vazio(f.banco) && dados.banco) data.banco = dados.banco;
-        if (vazio(f.agencia) && dados.agencia) data.agencia = dados.agencia;
-        if (vazio(f.conta) && dados.conta) data.conta = dados.conta;
-        if (vazio(f.chavePix) && dados.chavePix) data.chavePix = dados.chavePix;
-        if (Object.keys(data).length === 0) continue;
-
-        await this.prisma.funcionario.update({ where: { id: f.id }, data });
-        preenchidos++;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.warn(
-          `Falha ao buscar dados bancários do fornecedor (CPF/CNPJ ${doc}): ${message}`,
-        );
-      }
-    }
-
-    if (preenchidos > 0) {
-      this.logger.log(
-        `Dados bancários preenchidos a partir do fornecedor: ${preenchidos} funcionário(s)`,
-      );
-    }
-    return preenchidos;
-  }
-
   private async marcarErro(logId: string, err: unknown): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     this.logger.error(`Falha na sincronização: ${message}`);
@@ -480,11 +466,6 @@ export class SyncService {
       take: limite,
     });
   }
-}
-
-/** true quando a string é nula/vazia (só espaços). */
-function vazio(valor: string | null): boolean {
-  return !valor || valor.trim() === '';
 }
 
 /** Funcionários locais indexados para casar com os fornecedores lidos. */

@@ -33,9 +33,23 @@ function montarServico(opts: {
   fornecedores?: IxcFornecedor[];
   locais?: Array<Record<string, unknown>>;
   config?: Record<string, unknown>;
+  /** Dados bancários por id de fornecedor (aba "Dados bancários" do IXC). */
+  banco?: Record<number, Record<string, string | null>>;
 }) {
   const listAll = jest.fn().mockResolvedValue(opts.fornecedores ?? FORNECEDORES);
   const ixc = { listAll } as any;
+
+  const dadosBancarios = {
+    tabelaEmUso: 'fornecedor_dados_bancarios',
+    doFornecedor: jest.fn(async (id: number) =>
+      opts.banco?.[id] ?? {
+        banco: null,
+        agencia: null,
+        conta: null,
+        chavePix: null,
+      },
+    ),
+  } as any;
 
   const create = jest
     .fn()
@@ -46,6 +60,7 @@ function montarServico(opts: {
       ...data,
     }));
   const update = jest.fn().mockResolvedValue({});
+  const updateMany = jest.fn().mockResolvedValue({ count: 0 });
   const prisma = {
     syncLog: {
       create: jest.fn().mockResolvedValue({ id: 'log-1' }),
@@ -55,6 +70,7 @@ function montarServico(opts: {
       findMany: jest.fn().mockResolvedValue(opts.locais ?? []),
       create,
       update,
+      updateMany,
     },
   } as any;
 
@@ -62,15 +78,18 @@ function montarServico(opts: {
     obter: jest.fn().mockResolvedValue({
       fornecedorCampoIcms: '',
       fornecedorIcmsIsento: 'I,ISENTO',
+      fornecedorTabelaBanco: '',
       ...opts.config,
     }),
   } as any;
 
   return {
-    service: new SyncService(ixc, prisma, config),
+    service: new SyncService(ixc, prisma, config, dadosBancarios),
     listAll,
     create,
     update,
+    updateMany,
+    dadosBancarios,
     prisma,
   };
 }
@@ -99,6 +118,54 @@ describe('SyncService.syncFuncionariosDoFornecedor', () => {
       chavePix: 'henrico@pix',
       banco: '001',
       ativo: true,
+      isentoIcms: true,
+    });
+  });
+
+  it('traz a chave PIX da aba "Dados bancários" do fornecedor', async () => {
+    const { service, create, dadosBancarios } = montarServico({
+      fornecedores: [{ ...FORNECEDORES[0], chave_pix: '', banco: '' }],
+      banco: {
+        2672: {
+          banco: 'Banco Inter',
+          agencia: null,
+          conta: null,
+          chavePix: '(99) 98107-4450',
+        },
+      },
+    });
+
+    await service.syncFuncionariosDoFornecedor();
+
+    expect(dadosBancarios.doFornecedor).toHaveBeenCalledWith(2672, '');
+    expect(create.mock.calls[0][0].data).toMatchObject({
+      banco: 'Banco Inter',
+      chavePix: '(99) 98107-4450',
+    });
+  });
+
+  it('desmarca quem saiu do filtro, sem desativar', async () => {
+    const { service, updateMany } = montarServico({
+      fornecedores: [FORNECEDORES[0]],
+      locais: [
+        {
+          id: 'local-1',
+          ixcId: null,
+          nome: 'Henrico Santos Sousa',
+          cpfCnpj: '08293575301',
+          email: null,
+          telefone: null,
+          cidadeIxc: null,
+          idFornecedorIxc: 2672,
+        },
+      ],
+    });
+
+    await service.syncFuncionariosDoFornecedor();
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { isentoIcms: true, id: { notIn: ['local-1'] } },
+      data: { isentoIcms: false },
     });
   });
 
@@ -192,6 +259,7 @@ describe('SyncService.previewFuncionariosDoFornecedor', () => {
     const preview = await service.previewFuncionariosDoFornecedor();
 
     expect(preview.campoIcms).toBe('contribuinte_icms');
+    expect(preview.tabelaBanco).toBe('fornecedor_dados_bancarios');
     expect(preview.valoresIsento).toEqual(['I', 'ISENTO']);
     expect(preview.totalFornecedoresAtivos).toBe(3);
     expect(preview.distribuicao.map((d) => d.valor).sort()).toEqual([

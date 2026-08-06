@@ -4,6 +4,7 @@ import {
   buildFornecedorPayload,
   formatDataIxc,
   formatValorIxc,
+  inferirTipoChavePix,
   lerSituacaoContaPagar,
 } from './ixc.financeiro';
 
@@ -43,8 +44,9 @@ describe('buildContaPagarPayload', () => {
       previsao: 'N',
       liberado: 'S',
       obs: 'saldo salarial referente ao mês 07/2026',
-      tipo_pagamento: 'Dinheiro', // padrão quando não informado
+      tipo_pagamento: 'Pix', // padrão quando não informado
       chave_pix: '',
+      tipo_chave_pix: '',
     });
   });
 
@@ -65,8 +67,51 @@ describe('buildContaPagarPayload', () => {
     expect(body).toMatchObject({
       tipo_pagamento: 'Pix',
       chave_pix: 'henrico@pix.com',
+      tipo_chave_pix: 'E-mail',
       id_conta: '2662',
     });
+  });
+
+  it('normaliza chave PIX de celular para +55DDD9XXXXXXXX', () => {
+    const hoje = new Date(Date.UTC(2026, 6, 21));
+    const body = buildContaPagarPayload({
+      idFornecedor: 55,
+      valor: 500,
+      contaPagamentoId: 18,
+      contaContabilId: 2420,
+      filialId: 1,
+      dataEmissao: hoje,
+      dataVencimento: hoje,
+      observacao: 'saldo salarial',
+      chavePix: '(99) 98107-4450',
+    });
+    expect(body).toMatchObject({
+      tipo_chave_pix: 'Celular',
+      chave_pix: '+5599981074450',
+    });
+  });
+});
+
+describe('inferirTipoChavePix', () => {
+  it('distingue celular de CPF (ambos com 11 dígitos)', () => {
+    expect(inferirTipoChavePix('(99) 98107-4450')).toBe('Celular');
+    expect(inferirTipoChavePix('99981074450')).toBe('Celular');
+    expect(inferirTipoChavePix('082.935.753-01')).toBe('CPF/CNPJ');
+    expect(inferirTipoChavePix('638.302.843-06')).toBe('CPF/CNPJ');
+  });
+
+  it('reconhece e-mail, CNPJ, aleatória e telefone com DDI', () => {
+    expect(inferirTipoChavePix('ana@pix.com')).toBe('E-mail');
+    expect(inferirTipoChavePix('12.345.678/0001-00')).toBe('CPF/CNPJ');
+    expect(inferirTipoChavePix('+55 99 98107-4450')).toBe('Celular');
+    expect(
+      inferirTipoChavePix('3f2504e0-4f89-11d3-9a0c-0305e82c3301'),
+    ).toBe('Aleatória');
+  });
+
+  it('sem chave, sem tipo', () => {
+    expect(inferirTipoChavePix('')).toBeNull();
+    expect(inferirTipoChavePix(null)).toBeNull();
   });
 });
 

@@ -14,4 +14,5 @@ export class UpdateConfigFinanceiraDto {
   // Filtro fornecedor → funcionário (vazio no campo = detecção automática)
   @IsOptional() @IsString() fornecedorCampoIcms?: string;
   @IsOptional() @IsString() fornecedorIcmsIsento?: string;
+  @IsOptional() @IsString() fornecedorTabelaBanco?: string;
 }

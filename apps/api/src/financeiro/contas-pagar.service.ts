@@ -52,7 +52,9 @@ export class ContasPagarService {
   // -------------------------------------------------------------------------
   async prepararFolha(dto: PrepararFolhaDto): Promise<PreviewFuncionario[]> {
     const cfg = await this.config.obter();
-    const where: Prisma.FuncionarioWhereInput = { ativo: true };
+    // Só entra na folha quem o filtro do IXC marcou como funcionário
+    // (fornecedor ativo + ICMS isento). Ver [[project]].
+    const where: Prisma.FuncionarioWhereInput = { ativo: true, isentoIcms: true };
     if (dto.funcionarioIds?.length) where.id = { in: dto.funcionarioIds };
 
     const funcionarios = await this.prisma.funcionario.findMany({

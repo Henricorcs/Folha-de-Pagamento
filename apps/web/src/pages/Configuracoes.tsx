@@ -91,15 +91,26 @@ export function Configuracoes() {
               placeholder="Ex.: contribuinte_icms"
             />
           </div>
-          <div className="sm:col-span-2">
+          <div>
             <label className="mb-1 block text-xs font-medium text-slate-500">
-              Valores que significam Isento (separados por vírgula)
+              Valores que significam Isento
             </label>
             <input
               value={form.fornecedorIcmsIsento}
               onChange={(e) => txt('fornecedorIcmsIsento', e.target.value)}
               className={inputCls}
               placeholder="Ex.: I,ISENTO"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">
+              Tabela dos dados bancários (vazio = descobrir)
+            </label>
+            <input
+              value={form.fornecedorTabelaBanco}
+              onChange={(e) => txt('fornecedorTabelaBanco', e.target.value)}
+              className={inputCls}
+              placeholder="Ex.: fornecedor_dados_bancarios"
             />
           </div>
         </Bloco>

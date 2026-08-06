@@ -124,6 +124,8 @@ export interface ConfigFinanceira {
   fornecedorCampoIcms: string;
   /** Valores desse campo que significam "Isento", separados por vírgula */
   fornecedorIcmsIsento: string;
+  /** Tabela da aba "Dados bancários" do fornecedor ("" = descobrir sozinho) */
+  fornecedorTabelaBanco: string;
 }
 
 export interface BeneficiarioAvulso {
@@ -178,6 +180,7 @@ export interface OcorrenciaIcms {
 export interface PreviewFornecedores {
   campoIcms: string | null;
   valoresIsento: string[];
+  tabelaBanco: string | null;
   totalFornecedoresAtivos: number;
   distribuicao: OcorrenciaIcms[];
   funcionarios: FuncionarioDoFornecedor[];

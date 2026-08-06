@@ -179,6 +179,141 @@ export function distribuicaoIcms(
   return [...mapa.values()].sort((a, b) => b.quantidade - a.quantidade);
 }
 
+// ---------------------------------------------------------------------------
+// Dados bancários: ficam na aba "Dados bancários" do fornecedor, que é uma
+// tabela própria (grid com banco, agência, conta, titular e três colunas de
+// PIX) — e NÃO no registro do fornecedor. Por isso banco/agência/conta/PIX
+// vinham vazios ao ler só `fornecedor`.
+// ---------------------------------------------------------------------------
+
+/** Nomes prováveis da tabela do grid, tentados em ordem até um responder. */
+export const TABELAS_DADOS_BANCARIOS = [
+  'fornecedor_dados_bancarios',
+  'fornecedores_dados_bancarios',
+  'dados_bancarios_fornecedor',
+  'fornecedor_conta_bancaria',
+  'fornecedor_banco',
+  'fn_dados_bancarios',
+  'dados_bancarios',
+];
+
+const CAMPOS_BANCO = [
+  'banco',
+  'nome_banco',
+  'banco_nome',
+  'descricao_banco',
+  'codigo_banco',
+  'cod_banco',
+];
+const CAMPOS_AGENCIA = [
+  'agencia',
+  'codigo_agencia',
+  'cod_agencia',
+  'agencia_codigo',
+  'numero_agencia',
+];
+const CAMPOS_CONTA = [
+  'conta',
+  'codigo_conta',
+  'cod_conta',
+  'conta_codigo',
+  'numero_conta',
+  'conta_corrente',
+];
+/** Ordem de preferência da chave PIX (o IXC separa em três colunas). */
+const CAMPOS_PIX = [
+  'chave_pix',
+  'pix_cpf_cnpj',
+  'pix_cnpj_cpf',
+  'pix_email',
+  'pix_e_mail',
+  'pix_celular',
+  'pix_telefone',
+  'pix',
+];
+
+/** Descobre o campo que liga a linha do grid ao fornecedor. */
+export function detectarCampoFornecedor(
+  raw: Record<string, unknown>,
+): string | null {
+  const chaves = Object.keys(raw);
+  return (
+    chaves.find((k) => /^id_fornecedor$/i.test(k)) ??
+    chaves.find((k) => /fornecedor/i.test(k)) ??
+    chaves.find((k) => /^id_cadastro$/i.test(k)) ??
+    null
+  );
+}
+
+/** Converte uma linha do grid de dados bancários. */
+export function mapLinhaDadosBancarios(
+  raw: Record<string, unknown>,
+): DadosBancariosFornecedor {
+  return {
+    banco: primeiroCampo(raw, CAMPOS_BANCO),
+    agencia: primeiroCampo(raw, CAMPOS_AGENCIA),
+    conta: primeiroCampo(raw, CAMPOS_CONTA),
+    chavePix: primeiroCampo(raw, CAMPOS_PIX) ?? pixPorNomeDeCampo(raw),
+  };
+}
+
+export interface DadosBancariosFornecedor {
+  banco: string | null;
+  agencia: string | null;
+  conta: string | null;
+  chavePix: string | null;
+}
+
+/**
+ * Consolida as linhas do grid de um fornecedor: prioriza a que tem PIX e
+ * completa os campos que faltarem com as demais.
+ */
+export function consolidarDadosBancarios(
+  linhas: Array<Record<string, unknown>>,
+): DadosBancariosFornecedor {
+  const mapeadas = linhas.map(mapLinhaDadosBancarios);
+  const comPix = mapeadas.filter((l) => l.chavePix);
+  const ordenadas = [...comPix, ...mapeadas.filter((l) => !l.chavePix)];
+
+  const out: DadosBancariosFornecedor = {
+    banco: null,
+    agencia: null,
+    conta: null,
+    chavePix: null,
+  };
+  for (const linha of ordenadas) {
+    out.banco ??= linha.banco;
+    out.agencia ??= linha.agencia;
+    out.conta ??= linha.conta;
+    out.chavePix ??= linha.chavePix;
+  }
+  return out;
+}
+
+function primeiroCampo(
+  raw: Record<string, unknown>,
+  candidatos: string[],
+): string | null {
+  const porNome = new Map(
+    Object.entries(raw).map(([k, v]) => [k.toLowerCase(), v]),
+  );
+  for (const nome of candidatos) {
+    const valor = textoOuNull(porNome.get(nome));
+    if (valor) return valor;
+  }
+  return null;
+}
+
+/** Último recurso: qualquer coluna com "pix" no nome e valor preenchido. */
+function pixPorNomeDeCampo(raw: Record<string, unknown>): string | null {
+  for (const [chave, valor] of Object.entries(raw)) {
+    if (!/pix/i.test(chave)) continue;
+    const s = textoOuNull(valor);
+    if (s) return s;
+  }
+  return null;
+}
+
 /** Projeção local usada para decidir o que atualizar. */
 export interface FuncionarioLocal {
   id: string;
