@@ -35,6 +35,8 @@ export interface Adiantamento {
 }
 
 export interface Funcionario {
+  /** Contratado como CLT (informativo; a folha olha a carteira assinada) */
+  clt?: boolean;
   carteiraAssinada?: boolean;
   recebeAdiantamento?: boolean;
   /** Valor que a pessoa recebe no dia 25 (null = percentual da configuração) */

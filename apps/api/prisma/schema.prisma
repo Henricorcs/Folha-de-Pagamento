@@ -73,8 +73,11 @@ model Funcionario {
   observacoes String? @map("observacoes")
 
   // --- Configuração financeira / folha ---
-  // Carteira assinada (CLT): o adiantamento já é descontado pela contabilidade,
-  // então NÃO é subtraído do saldo salarial gerado aqui. Ver [[project]].
+  // Contratado como CLT. É só informativo: enquanto a carteira não estiver
+  // assinada, a folha trata a pessoa como qualquer outra.
+  clt Boolean @default(false) @map("clt")
+  // Carteira assinada: aí sim o adiantamento já é descontado pela
+  // contabilidade e NÃO é subtraído do saldo salarial aqui. Ver [[project]].
   carteiraAssinada Boolean @default(false) @map("carteira_assinada")
   // Opção de receber o adiantamento do dia 25
   recebeAdiantamento Boolean @default(false) @map("recebe_adiantamento")

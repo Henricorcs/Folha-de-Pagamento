@@ -68,6 +68,7 @@ export class FuncionariosService {
         agencia: dto.agencia,
         conta: dto.conta,
         ativo: dto.ativo,
+        clt: dto.clt,
         carteiraAssinada: dto.carteiraAssinada,
         recebeAdiantamento: dto.recebeAdiantamento,
         cidadeIxc: dto.cidadeIxc,

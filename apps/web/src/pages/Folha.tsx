@@ -10,7 +10,7 @@ interface ItemGerar extends LancamentoCalculado {
   funcionarioId: string;
   nome: string;
   selecionado: boolean;
-  /** CLT que recebe adiantamento: o saldo salarial sai cheio de propósito. */
+  /** Carteira assinada + adiantamento: o saldo sai cheio de propósito. */
   cltComAdiantamento: boolean;
 }
 
@@ -179,10 +179,10 @@ export function Folha() {
                       {it.nome}
                       {it.tipo === 'SALARIO' && it.cltComAdiantamento && (
                         <span
-                          title="CLT: a contabilidade já desconta o adiantamento, então o saldo salarial não é reduzido aqui."
+                          title="Carteira assinada: a contabilidade já desconta o adiantamento, então o saldo salarial não é reduzido aqui."
                           className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
                         >
-                          CLT · sem desconto do dia 25
+                          carteira assinada · sem desconto do dia 25
                         </span>
                       )}
                     </td>

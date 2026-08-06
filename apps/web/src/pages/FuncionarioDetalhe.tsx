@@ -210,6 +210,7 @@ function ConfigFolhaBloco({
   funcionarioId: string;
 }) {
   const qc = useQueryClient();
+  const [clt, setClt] = useState(!!data.clt);
   const [carteira, setCarteira] = useState(!!data.carteiraAssinada);
   const [recebeAdto, setRecebeAdto] = useState(!!data.recebeAdiantamento);
   const [salario, setSalario] = useState(String(data.salarioBase ?? '0'));
@@ -220,6 +221,7 @@ function ConfigFolhaBloco({
     mutationFn: async () =>
       (
         await api.patch(`/funcionarios/${funcionarioId}`, {
+          clt,
           carteiraAssinada: carteira,
           recebeAdiantamento: recebeAdto,
           salarioBase: Number(salario),
@@ -239,11 +241,32 @@ function ConfigFolhaBloco({
         <label className="flex items-center gap-2 text-sm text-slate-700">
           <input
             type="checkbox"
+            checked={clt}
+            onChange={(e) => {
+              setClt(e.target.checked);
+              if (!e.target.checked) setCarteira(false);
+            }}
+          />
+          Contratado como CLT
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
             checked={carteira}
+            disabled={!clt}
             onChange={(e) => setCarteira(e.target.checked)}
           />
-          Carteira assinada (CLT) — adiantamento já descontado pela contabilidade
+          <span className={clt ? '' : 'text-slate-400'}>
+            Carteira assinada — a contabilidade já desconta o adiantamento
+          </span>
         </label>
+        {clt && !carteira && (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            CLT com carteira ainda não assinada: o adiantamento do dia 25
+            continua sendo descontado do saldo salarial. Marque “Carteira
+            assinada” quando o registro sair.
+          </p>
+        )}
         <label className="flex items-center gap-2 text-sm text-slate-700">
           <input
             type="checkbox"

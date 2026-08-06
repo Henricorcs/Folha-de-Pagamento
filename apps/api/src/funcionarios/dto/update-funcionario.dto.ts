@@ -44,6 +44,11 @@ export class UpdateFuncionarioDto {
   ativo?: boolean;
 
   // --- Configuração da folha ---
+  /** Contratado como CLT (informativo; quem manda na folha é a carteira). */
+  @IsOptional()
+  @IsBoolean()
+  clt?: boolean;
+
   @IsOptional()
   @IsBoolean()
   carteiraAssinada?: boolean;
