@@ -2,9 +2,14 @@ import { useMutation } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, mensagemErro } from '../lib/api';
-import { formatBRL } from '../lib/format';
+import { formatBRL, formatData } from '../lib/format';
 import { TIPO_LABEL } from '../lib/status';
-import type { ContaPagar, LancamentoCalculado, PreviewFuncionario } from '../lib/types';
+import type {
+  ContaPagar,
+  LancamentoCalculado,
+  PreviewFuncionario,
+  SituacaoAdiantamento,
+} from '../lib/types';
 
 interface ItemGerar extends LancamentoCalculado {
   funcionarioId: string;
@@ -12,6 +17,94 @@ interface ItemGerar extends LancamentoCalculado {
   selecionado: boolean;
   /** Carteira assinada + adiantamento: o saldo sai cheio de propósito. */
   cltComAdiantamento: boolean;
+  /** Situação do dia 25 desta pessoa nesta competência. */
+  adiantamento: SituacaoAdiantamento | null;
+}
+
+/**
+ * Diz se o adiantamento do dia 25 daquela pessoa já saiu. No quinto dia é o
+ * que justifica (ou desmente) o desconto no salário; no dia 25 serve de aviso
+ * para não gerar o mesmo pagamento duas vezes.
+ */
+function SeloAdiantamento({
+  modo,
+  adiantamento,
+}: {
+  modo: ModoPagamento;
+  adiantamento: SituacaoAdiantamento | null;
+}) {
+  if (!adiantamento) return null;
+  const { situacao, descontado, valor, pagoEm } = adiantamento;
+
+  if (modo === 'DIA_25') {
+    if (situacao === 'NAO_GERADO') return null;
+    return (
+      <Selo
+        cor={situacao === 'PAGO' ? 'verde' : 'ambar'}
+        titulo="Este adiantamento já foi gerado nesta competência — gerar de novo duplica o pagamento."
+      >
+        {situacao === 'PAGO'
+          ? `já pago${pagoEm ? ` em ${formatData(pagoEm)}` : ''}`
+          : 'já gerado · aguardando pagamento'}
+      </Selo>
+    );
+  }
+
+  if (situacao === 'PAGO') {
+    return (
+      <Selo cor="verde" titulo="Adiantamento do dia 25 confirmado pelo banco.">
+        dia 25 pago{pagoEm ? ` em ${formatData(pagoEm)}` : ''}
+      </Selo>
+    );
+  }
+  if (situacao === 'PENDENTE') {
+    return (
+      <Selo
+        cor="ambar"
+        titulo="A conta do dia 25 existe, mas o banco ainda não confirmou o pagamento."
+      >
+        dia 25 ainda não pago
+      </Selo>
+    );
+  }
+  return (
+    <Selo
+      cor={descontado ? 'vermelho' : 'cinza'}
+      titulo={
+        descontado
+          ? `Não há conta a pagar do dia 25 nesta competência, mas ${formatBRL(valor)} estão sendo descontados do salário. Confira antes de gerar.`
+          : 'Não há conta a pagar do dia 25 nesta competência.'
+      }
+    >
+      dia 25 não gerado{descontado ? ` · ${formatBRL(valor)} descontados` : ''}
+    </Selo>
+  );
+}
+
+const CORES_SELO = {
+  verde: 'bg-green-100 text-green-700',
+  ambar: 'bg-amber-100 text-amber-700',
+  vermelho: 'bg-red-100 text-red-700',
+  cinza: 'bg-slate-100 text-slate-500',
+} as const;
+
+function Selo({
+  cor,
+  titulo,
+  children,
+}: {
+  cor: keyof typeof CORES_SELO;
+  titulo: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <span
+      title={titulo}
+      className={`ml-2 rounded px-1.5 py-0.5 text-[10px] font-medium ${CORES_SELO[cor]}`}
+    >
+      {children}
+    </span>
+  );
 }
 
 function BotaoModo({
@@ -83,6 +176,7 @@ export function Folha() {
             nome: f.nome,
             selecionado: true,
             cltComAdiantamento: f.carteiraAssinada && f.recebeAdiantamento,
+            adiantamento: f.adiantamento,
           });
         }
       }
@@ -134,13 +228,19 @@ export function Folha() {
   const grupos = useMemo(() => {
     const porFuncionario = new Map<
       string,
-      { funcionarioId: string; nome: string; indices: number[] }
+      {
+        funcionarioId: string;
+        nome: string;
+        indices: number[];
+        adiantamento: SituacaoAdiantamento | null;
+      }
     >();
     itens.forEach((it, idx) => {
       const grupo = porFuncionario.get(it.funcionarioId) ?? {
         funcionarioId: it.funcionarioId,
         nome: it.nome,
         indices: [],
+        adiantamento: it.adiantamento,
       };
       grupo.indices.push(idx);
       porFuncionario.set(it.funcionarioId, grupo);
@@ -294,6 +394,10 @@ export function Folha() {
                             .map((i) => TIPO_LABEL[itens[i].tipo])
                             .join(' · ')}
                         </span>
+                        <SeloAdiantamento
+                          modo={modo}
+                          adiantamento={g.adiantamento}
+                        />
                       </td>
                       <td className="px-4 py-3 text-right font-semibold text-slate-800">
                         {formatBRL(totalDoGrupo(g.indices))}
@@ -334,12 +438,22 @@ export function Folha() {
                                       {TIPO_LABEL[it.tipo]}
                                       {it.tipo === 'SALARIO' &&
                                         it.cltComAdiantamento && (
-                                          <span
-                                            title="Carteira assinada: a contabilidade já desconta o adiantamento, então o saldo salarial não é reduzido aqui."
-                                            className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
+                                          <Selo
+                                            cor="ambar"
+                                            titulo="Carteira assinada: a contabilidade já desconta o adiantamento, então o saldo salarial não é reduzido aqui."
                                           >
                                             carteira assinada · sem desconto do dia 25
-                                          </span>
+                                          </Selo>
+                                        )}
+                                      {it.tipo === 'SALARIO' &&
+                                        it.adiantamento?.descontado && (
+                                          <Selo
+                                            cor="cinza"
+                                            titulo="Valor do dia 25 já abatido deste saldo salarial."
+                                          >
+                                            − {formatBRL(it.adiantamento.valor)} do
+                                            dia 25
+                                          </Selo>
                                         )}
                                     </td>
                                     <td className="py-2 text-slate-500">

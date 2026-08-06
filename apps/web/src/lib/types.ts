@@ -105,11 +105,23 @@ export interface LancamentoCalculado {
   observacao: string;
 }
 
+/** Situação do adiantamento do dia 25 na competência da prévia. */
+export interface SituacaoAdiantamento {
+  valor: number;
+  /** Foi abatido do saldo salarial desta prévia? */
+  descontado: boolean;
+  situacao: 'PAGO' | 'PENDENTE' | 'NAO_GERADO';
+  status: StatusContaPagar | null;
+  pagoEm: string | null;
+}
+
 export interface PreviewFuncionario {
   funcionarioId: string;
   nome: string;
   carteiraAssinada: boolean;
   recebeAdiantamento: boolean;
+  /** null para quem não recebe adiantamento no dia 25 */
+  adiantamento: SituacaoAdiantamento | null;
   lancamentos: LancamentoCalculado[];
 }
 

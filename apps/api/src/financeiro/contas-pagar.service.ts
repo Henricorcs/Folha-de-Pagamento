@@ -20,6 +20,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ConfigFinanceiraService } from './config-financeira.service';
 import { FornecedorService } from './fornecedor.service';
 import {
+  calcularAdiantamento,
   competenciaAnterior,
   montarLancamentosFolha,
   renderObs,
@@ -29,11 +30,26 @@ import { CriarContasPagarDto, ItemContaPagarDto } from './dto/criar-contas.dto';
 import { PrepararFolhaDto } from './dto/preparar-folha.dto';
 import { QueryContasPagarDto } from './dto/query-contas.dto';
 
+/** Situação do adiantamento do dia 25 na competência da prévia. */
+export interface SituacaoAdiantamento {
+  /** Valor apurado para o dia 25 (cadastro, lançamento ou percentual). */
+  valor: number;
+  /** Foi abatido do saldo salarial desta prévia? */
+  descontado: boolean;
+  /** PAGO = retorno do banco; PENDENTE = gerado, ainda não pago. */
+  situacao: 'PAGO' | 'PENDENTE' | 'NAO_GERADO';
+  /** Status cru da conta a pagar do dia 25, quando existe. */
+  status: StatusContaPagar | null;
+  pagoEm: Date | null;
+}
+
 export interface PreviewFuncionario {
   funcionarioId: string;
   nome: string;
   carteiraAssinada: boolean;
   recebeAdiantamento: boolean;
+  /** null para quem não recebe adiantamento no dia 25. */
+  adiantamento: SituacaoAdiantamento | null;
   lancamentos: LancamentoCalculado[];
 }
 
@@ -85,29 +101,39 @@ export class ContasPagarService {
       percentualAdiantamento: cfg.percentualAdiantamento,
     };
 
+    // Situação do adiantamento do dia 25 desta competência, para mostrar na
+    // folha do quinto dia se o valor descontado do salário já foi mesmo pago.
+    const contasDia25 = await this.contasDoAdiantamento(
+      dto.competencia,
+      funcionarios.map((f) => f.id),
+    );
+
     return funcionarios.map((f) => {
       const somaTipo = (tipo: TipoLancamento) =>
         f.lancamentos
           .filter((l) => l.tipo === tipo)
           .reduce((s, l) => s + Number(l.valor), 0);
 
-      const lancamentos = montarLancamentosFolha(
-        {
-          salarioBase: Number(f.salarioBase),
-          carteiraAssinada: f.carteiraAssinada,
-          recebeAdiantamento: f.recebeAdiantamento,
-          valorAdiantamento:
-            f.valorAdiantamento === null ? null : Number(f.valorAdiantamento),
-          adiantamentoFixo: somaTipo(TipoLancamento.ADIANTAMENTO),
-          descontosFixos: somaTipo(TipoLancamento.DESCONTO),
-          bonusFixo: somaTipo(TipoLancamento.BONUS),
-        },
-        params,
-        {
-          incluirAdiantamento: dto.incluirAdiantamento ?? true,
-          incluirSalario: dto.incluirSalario ?? true,
-          incluirBonus: dto.incluirBonus ?? true,
-        },
+      const dados = {
+        salarioBase: Number(f.salarioBase),
+        carteiraAssinada: f.carteiraAssinada,
+        recebeAdiantamento: f.recebeAdiantamento,
+        valorAdiantamento:
+          f.valorAdiantamento === null ? null : Number(f.valorAdiantamento),
+        adiantamentoFixo: somaTipo(TipoLancamento.ADIANTAMENTO),
+        descontosFixos: somaTipo(TipoLancamento.DESCONTO),
+        bonusFixo: somaTipo(TipoLancamento.BONUS),
+      };
+
+      const lancamentos = montarLancamentosFolha(dados, params, {
+        incluirAdiantamento: dto.incluirAdiantamento ?? true,
+        incluirSalario: dto.incluirSalario ?? true,
+        incluirBonus: dto.incluirBonus ?? true,
+      });
+
+      const valorAdiantamento = calcularAdiantamento(
+        dados,
+        cfg.percentualAdiantamento,
       );
 
       return {
@@ -115,9 +141,50 @@ export class ContasPagarService {
         nome: f.nome,
         carteiraAssinada: f.carteiraAssinada,
         recebeAdiantamento: f.recebeAdiantamento,
+        adiantamento:
+          valorAdiantamento > 0
+            ? montarSituacaoAdiantamento(
+                valorAdiantamento,
+                // O desconto no saldo só acontece para quem não tem carteira.
+                !f.carteiraAssinada,
+                contasDia25.get(f.id) ?? null,
+              )
+            : null,
         lancamentos,
       };
     });
+  }
+
+  /** Conta a pagar de ADIANTAMENTO de cada funcionário na competência. */
+  private async contasDoAdiantamento(
+    competencia: string,
+    funcionarioIds: string[],
+  ): Promise<Map<string, ContaAdiantamento>> {
+    if (funcionarioIds.length === 0) return new Map();
+    const contas = await this.prisma.contaPagar.findMany({
+      where: {
+        competencia,
+        tipo: TipoLancamento.ADIANTAMENTO,
+        funcionarioId: { in: funcionarioIds },
+      },
+      select: { funcionarioId: true, status: true, pagoEm: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const mapa = new Map<string, ContaAdiantamento>();
+    for (const c of contas) {
+      if (!c.funcionarioId) continue;
+      // Se houver mais de uma, a paga vence; senão fica a mais recente.
+      const atual = mapa.get(c.funcionarioId);
+      if (!atual || (c.status === StatusContaPagar.PAGO && !atual.pago)) {
+        mapa.set(c.funcionarioId, {
+          status: c.status,
+          pago: c.status === StatusContaPagar.PAGO,
+          pagoEm: c.pagoEm,
+        });
+      }
+    }
+    return mapa;
   }
 
   // -------------------------------------------------------------------------
@@ -429,6 +496,39 @@ export class ContasPagarService {
     if (!b) throw new NotFoundException('Beneficiário não encontrado');
     return b.nome;
   }
+}
+
+/** Conta a pagar do dia 25 encontrada para um funcionário. */
+export interface ContaAdiantamento {
+  status: StatusContaPagar;
+  pago: boolean;
+  pagoEm: Date | null;
+}
+
+/**
+ * Traduz a conta do dia 25 em algo acionável na folha do quinto dia: se o
+ * adiantamento que está sendo abatido do salário já caiu na conta da pessoa.
+ * Conta cancelada conta como não gerada — não há o que descontar.
+ */
+export function montarSituacaoAdiantamento(
+  valor: number,
+  descontado: boolean,
+  conta: ContaAdiantamento | null,
+): SituacaoAdiantamento {
+  const cancelada = conta?.status === StatusContaPagar.CANCELADO;
+  const situacao = !conta || cancelada
+    ? 'NAO_GERADO'
+    : conta.pago
+      ? 'PAGO'
+      : 'PENDENTE';
+
+  return {
+    valor,
+    descontado,
+    situacao,
+    status: conta?.status ?? null,
+    pagoEm: conta?.pagoEm ?? null,
+  };
 }
 
 function hojeUtc(): Date {
