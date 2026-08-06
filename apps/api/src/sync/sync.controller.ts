@@ -25,6 +25,19 @@ export class SyncController {
     return { ok: true, resultado: await this.sync.syncAdiantamentos() };
   }
 
+  /** Importa funcionários do cadastro de fornecedor (ativo + ICMS isento). */
+  @Post('fornecedores')
+  @HttpCode(200)
+  async sincronizarFornecedores() {
+    return { ok: true, resultado: await this.sync.syncFuncionariosDoFornecedor() };
+  }
+
+  /** Roda o filtro sem gravar — use para conferir antes de importar. */
+  @Get('fornecedores/preview')
+  async previewFornecedores() {
+    return this.sync.previewFuncionariosDoFornecedor();
+  }
+
   @Get('historico')
   async historico(@Query('limite') limite?: string) {
     return this.sync.historico(limite ? Number(limite) : 20);

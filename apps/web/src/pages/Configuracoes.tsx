@@ -74,6 +74,36 @@ export function Configuracoes() {
           <CampoNum label="Bônus" valor={form.contaContabilBonus} onChange={(v) => num('contaContabilBonus', v)} />
         </Bloco>
 
+        <Bloco titulo="Filtro de funcionários (cadastro de fornecedor)">
+          <div className="sm:col-span-3 -mt-1 text-xs text-slate-500">
+            Fornecedor ativo com “Contribuinte ICMS” = Isento é tratado como
+            funcionário. Confira o resultado em Funcionários → “Filtro de
+            fornecedores” antes de importar.
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">
+              Campo do ICMS (vazio = detectar)
+            </label>
+            <input
+              value={form.fornecedorCampoIcms}
+              onChange={(e) => txt('fornecedorCampoIcms', e.target.value)}
+              className={inputCls}
+              placeholder="Ex.: contribuinte_icms"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="mb-1 block text-xs font-medium text-slate-500">
+              Valores que significam Isento (separados por vírgula)
+            </label>
+            <input
+              value={form.fornecedorIcmsIsento}
+              onChange={(e) => txt('fornecedorIcmsIsento', e.target.value)}
+              className={inputCls}
+              placeholder="Ex.: I,ISENTO"
+            />
+          </div>
+        </Bloco>
+
         <Bloco titulo="Templates de observação ({competencia} → MM/AAAA)">
           <CampoTxt label="Salário" valor={form.obsSalarioTemplate} onChange={(v) => txt('obsSalarioTemplate', v)} />
           <CampoTxt label="Adiantamento" valor={form.obsAdiantamentoTemplate} onChange={(v) => txt('obsAdiantamentoTemplate', v)} />

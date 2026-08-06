@@ -11,4 +11,7 @@ export class UpdateConfigFinanceiraDto {
   @IsOptional() @IsString() obsSalarioTemplate?: string;
   @IsOptional() @IsString() obsAdiantamentoTemplate?: string;
   @IsOptional() @IsString() obsBonusTemplate?: string;
+  // Filtro fornecedor → funcionário (vazio no campo = detecção automática)
+  @IsOptional() @IsString() fornecedorCampoIcms?: string;
+  @IsOptional() @IsString() fornecedorIcmsIsento?: string;
 }

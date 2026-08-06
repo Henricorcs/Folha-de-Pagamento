@@ -57,6 +57,28 @@ export interface IxcFuncionario {
   [key: string]: unknown;
 }
 
+/** Registro cru de `fornecedor` (campos relevantes; há muitos outros). */
+export interface IxcFornecedor {
+  id: string;
+  ativo?: string; // "S" | "N"
+  tipo_pessoa?: string; // "F" | "J"
+  razao?: string;
+  fantasia?: string;
+  /** O IXC varia entre `cnpj_cpf` e `cpf_cnpj` conforme a tabela/versão. */
+  cnpj_cpf?: string;
+  cpf_cnpj?: string;
+  email?: string;
+  celular?: string;
+  fone_celular?: string;
+  fone?: string;
+  cidade?: string;
+  banco?: string;
+  agencia?: string;
+  conta?: string;
+  chave_pix?: string;
+  [key: string]: unknown;
+}
+
 /** Registro cru de `fl_adto_salario` (adiantamentos). */
 export interface IxcAdiantamento {
   id: string;

@@ -120,6 +120,10 @@ export interface ConfigFinanceira {
   obsSalarioTemplate: string;
   obsAdiantamentoTemplate: string;
   obsBonusTemplate: string;
+  /** Campo do "Contribuinte ICMS" no fornecedor ("" = detectar automaticamente) */
+  fornecedorCampoIcms: string;
+  /** Valores desse campo que significam "Isento", separados por vírgula */
+  fornecedorIcmsIsento: string;
 }
 
 export interface BeneficiarioAvulso {
@@ -148,4 +152,33 @@ export interface SyncResult {
   totalLidos: number;
   totalNovos: number;
   totalAtualizados: number;
+}
+
+/** Funcionário identificado no cadastro de fornecedor do IXC. */
+export interface FuncionarioDoFornecedor {
+  idFornecedor: number;
+  nome: string;
+  cpfCnpj: string | null;
+  email: string | null;
+  telefone: string | null;
+  banco: string | null;
+  agencia: string | null;
+  conta: string | null;
+  chavePix: string | null;
+  icms: string;
+  jaCadastrado: boolean;
+}
+
+export interface OcorrenciaIcms {
+  valor: string;
+  quantidade: number;
+  exemplos: string[];
+}
+
+export interface PreviewFornecedores {
+  campoIcms: string | null;
+  valoresIsento: string[];
+  totalFornecedoresAtivos: number;
+  distribuicao: OcorrenciaIcms[];
+  funcionarios: FuncionarioDoFornecedor[];
 }

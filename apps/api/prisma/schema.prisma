@@ -173,6 +173,15 @@ model ConfiguracaoFinanceira {
   // Cidade padrão usada ao criar fornecedores
   cidadePadraoId Int @default(1) @map("cidade_padrao_id")
 
+  // --- Filtro que identifica funcionários no cadastro de `fornecedor` ---
+  // Regra: fornecedor ativo com "Contribuinte ICMS" = Isento é funcionário.
+  // Campo do ICMS no fornecedor; vazio = detecta automaticamente (qualquer
+  // coluna com "icms" no nome). Preencha se a base usar um nome inesperado.
+  fornecedorCampoIcms String @default("") @map("fornecedor_campo_icms")
+  // Valores que significam "Isento" nesse campo, separados por vírgula.
+  // Texto contendo "isent" sempre conta; códigos numéricos variam por base.
+  fornecedorIcmsIsento String @default("I,ISENTO") @map("fornecedor_icms_isento")
+
   // Tipo de pagamento enviado ao fn_apagar (rótulo exato usado pelo seu IXC,
   // ex.: "Dinheiro", "Pix"). A chave PIX do beneficiário vai junto no payload.
   tipoPagamentoPadrao String @default("Dinheiro") @map("tipo_pagamento_padrao")
