@@ -68,6 +68,10 @@ model Funcionario {
   agencia  String?
   conta    String?
   chavePix String? @map("chave_pix")
+  /// Tipo de PIX preferencial do cadastro do fornecedor ("Celular",
+  /// "CPF/CNPJ", "E-mail"…). É o que a conta a pagar do IXC marca junto da
+  /// chave; vazio = deduzir pelo formato.
+  tipoChavePix String? @map("tipo_chave_pix")
 
   // Campos internos da aplicação (não vêm do IXC)
   observacoes String? @map("observacoes")

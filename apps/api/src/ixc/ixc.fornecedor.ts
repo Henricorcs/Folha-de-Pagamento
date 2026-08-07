@@ -12,6 +12,7 @@
  * parametrizáveis. `distribuicaoIcms` existe para diagnosticar a base real.
  */
 import { Prisma } from '@prisma/client';
+import { normalizarTipoChavePix, type TipoChavePix } from './ixc.financeiro';
 import { extrairDadosBancarios } from './ixc.mappers';
 import { parseIxcId } from './ixc.parse';
 import type { IxcFornecedor } from './ixc.types';
@@ -31,6 +32,8 @@ export interface FuncionarioDoFornecedor {
   agencia: string | null;
   conta: string | null;
   chavePix: string | null;
+  /** Tipo da chave acima, para a conta a pagar marcar o mesmo do cadastro. */
+  tipoChavePix: TipoChavePix | null;
   /** Valor cru do campo de ICMS que fez o registro entrar no filtro. */
   icms: string;
 }
@@ -120,6 +123,9 @@ export function mapFornecedorParaFuncionario(
       textoOuNull(raw.fone),
     cidadeIxc: parseIxcId(raw.cidade) ?? parseIxcId(raw.id_cidade),
     ...bancarios,
+    // Chave e tipo saem juntos, da mesma coluna. O grid de dados bancários
+    // sobrescreve isso depois (é lá que a chave de verdade mora).
+    ...escolherPix(raw),
     icms,
   };
 }
@@ -220,16 +226,33 @@ const CAMPOS_CONTA = [
   'numero_conta',
   'conta_corrente',
 ];
-/** Ordem de preferência da chave PIX (o IXC separa em três colunas). */
-const CAMPOS_PIX = [
-  'chave_pix',
-  'pix_cpf_cnpj',
-  'pix_cnpj_cpf',
-  'pix_email',
-  'pix_e_mail',
-  'pix_celular',
-  'pix_telefone',
-  'pix',
+/**
+ * Colunas de chave PIX, na ordem de preferência de quando o cadastro não diz
+ * qual é a preferencial. O nome da coluna já entrega o tipo da chave — e é o
+ * tipo que a tela de contas a pagar do IXC precisa ter marcado. `null` = coluna
+ * genérica, aí o tipo sai do formato da chave.
+ */
+const COLUNAS_PIX: Array<{ campos: string[]; tipo: TipoChavePix | null }> = [
+  { campos: ['chave_pix'], tipo: null },
+  { campos: ['pix_cpf_cnpj', 'pix_cnpj_cpf', 'pix_cpf', 'pix_cnpj'], tipo: 'CPF/CNPJ' },
+  { campos: ['pix_email', 'pix_e_mail'], tipo: 'E-mail' },
+  { campos: ['pix_celular', 'pix_telefone', 'pix_fone'], tipo: 'Celular' },
+  { campos: ['pix_aleatoria', 'pix_chave_aleatoria'], tipo: 'Aleatória' },
+  { campos: ['pix'], tipo: null },
+];
+
+/**
+ * Colunas prováveis do "tipo de PIX preferencial" do fornecedor. Como o nome
+ * varia entre bases, o último recurso é qualquer coluna que fale de PIX e de
+ * tipo/preferência.
+ */
+const CAMPOS_TIPO_PIX = [
+  'tipo_pix_preferencial',
+  'pix_preferencial',
+  'tipo_chave_pix',
+  'tipo_pix',
+  'chave_pix_preferencial',
+  'preferencia_pix',
 ];
 
 /** Descobre o campo que liga a linha do grid ao fornecedor. */
@@ -253,8 +276,59 @@ export function mapLinhaDadosBancarios(
     banco: primeiroCampo(raw, CAMPOS_BANCO),
     agencia: primeiroCampo(raw, CAMPOS_AGENCIA),
     conta: primeiroCampo(raw, CAMPOS_CONTA),
-    chavePix: primeiroCampo(raw, CAMPOS_PIX) ?? pixPorNomeDeCampo(raw),
+    ...escolherPix(raw),
   };
+}
+
+/** Nome da coluna do "tipo de PIX preferencial" nesta linha, se houver. */
+export function detectarCampoTipoPix(
+  raw: Record<string, unknown>,
+): string | null {
+  const porNome = new Map(
+    Object.keys(raw).map((k) => [k.toLowerCase(), k] as const),
+  );
+  for (const nome of CAMPOS_TIPO_PIX) {
+    const original = porNome.get(nome);
+    if (original) return original;
+  }
+  return (
+    Object.keys(raw).find((k) => /pix/i.test(k) && /tipo|prefer/i.test(k)) ??
+    null
+  );
+}
+
+/** Tipo de PIX preferencial do cadastro (null = a base não informa). */
+export function lerTipoPixPreferencial(
+  raw: Record<string, unknown>,
+): TipoChavePix | null {
+  const campo = detectarCampoTipoPix(raw);
+  return campo ? normalizarTipoChavePix(raw[campo]) : null;
+}
+
+/**
+ * Chave PIX e o tipo que vai marcado com ela na conta a pagar.
+ *
+ * Manda o "tipo de PIX preferencial" do cadastro — é o que o fornecedor tem
+ * escolhido no IXC. Se a coluna daquele tipo estiver vazia, cai na primeira
+ * chave preenchida: chave e tipo saem **sempre da mesma coluna**, porque
+ * mandar um tipo que não é o da chave faz o banco recusar o pagamento.
+ */
+export function escolherPix(raw: Record<string, unknown>): {
+  chavePix: string | null;
+  tipoChavePix: TipoChavePix | null;
+} {
+  const preferido = lerTipoPixPreferencial(raw);
+  if (preferido) {
+    const grupo = COLUNAS_PIX.find((c) => c.tipo === preferido);
+    const chave = grupo ? primeiroCampo(raw, grupo.campos) : null;
+    if (chave) return { chavePix: chave, tipoChavePix: preferido };
+  }
+
+  for (const coluna of COLUNAS_PIX) {
+    const chave = primeiroCampo(raw, coluna.campos);
+    if (chave) return { chavePix: chave, tipoChavePix: coluna.tipo };
+  }
+  return pixPorNomeDeCampo(raw);
 }
 
 export interface DadosBancariosFornecedor {
@@ -262,11 +336,14 @@ export interface DadosBancariosFornecedor {
   agencia: string | null;
   conta: string | null;
   chavePix: string | null;
+  /** Tipo preferencial do cadastro; null = deduzir pelo formato da chave. */
+  tipoChavePix: TipoChavePix | null;
 }
 
 /**
  * Consolida as linhas do grid de um fornecedor: prioriza a que tem PIX e
- * completa os campos que faltarem com as demais.
+ * completa os campos que faltarem com as demais. Chave e tipo vêm sempre da
+ * mesma linha — misturar as duas coisas seria pagar com o tipo errado.
  */
 export function consolidarDadosBancarios(
   linhas: Array<Record<string, unknown>>,
@@ -280,12 +357,16 @@ export function consolidarDadosBancarios(
     agencia: null,
     conta: null,
     chavePix: null,
+    tipoChavePix: null,
   };
   for (const linha of ordenadas) {
     out.banco ??= linha.banco;
     out.agencia ??= linha.agencia;
     out.conta ??= linha.conta;
-    out.chavePix ??= linha.chavePix;
+    if (!out.chavePix && linha.chavePix) {
+      out.chavePix = linha.chavePix;
+      out.tipoChavePix = linha.tipoChavePix;
+    }
   }
   return out;
 }
@@ -304,14 +385,22 @@ function primeiroCampo(
   return null;
 }
 
-/** Último recurso: qualquer coluna com "pix" no nome e valor preenchido. */
-function pixPorNomeDeCampo(raw: Record<string, unknown>): string | null {
+/**
+ * Último recurso: qualquer coluna com "pix" no nome e valor preenchido, com o
+ * tipo tirado do próprio nome da coluna. A coluna do tipo preferencial fica de
+ * fora — o conteúdo dela é "Celular", não uma chave.
+ */
+function pixPorNomeDeCampo(raw: Record<string, unknown>): {
+  chavePix: string | null;
+  tipoChavePix: TipoChavePix | null;
+} {
+  const campoTipo = detectarCampoTipoPix(raw);
   for (const [chave, valor] of Object.entries(raw)) {
-    if (!/pix/i.test(chave)) continue;
+    if (!/pix/i.test(chave) || chave === campoTipo) continue;
     const s = textoOuNull(valor);
-    if (s) return s;
+    if (s) return { chavePix: s, tipoChavePix: normalizarTipoChavePix(chave) };
   }
-  return null;
+  return { chavePix: null, tipoChavePix: null };
 }
 
 /** Projeção local usada para decidir o que atualizar. */
@@ -348,7 +437,12 @@ export function montarUpdateDoFornecedor(
   if (dados.banco) data.banco = dados.banco;
   if (dados.agencia) data.agencia = dados.agencia;
   if (dados.conta) data.conta = dados.conta;
-  if (dados.chavePix) data.chavePix = dados.chavePix;
+  // O tipo viaja junto com a chave: guardar o tipo antigo com uma chave nova
+  // (o fornecedor trocou de celular para e-mail) faria o banco recusar.
+  if (dados.chavePix) {
+    data.chavePix = dados.chavePix;
+    data.tipoChavePix = dados.tipoChavePix;
+  }
 
   const doFornecedor = local.ixcId === null;
   if (dados.nome && (doFornecedor || vazio(local.nome))) data.nome = dados.nome;

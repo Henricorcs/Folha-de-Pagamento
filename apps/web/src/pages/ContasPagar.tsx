@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   Aviso,
   Bloco,
@@ -15,6 +15,7 @@ import { STATUS_LABEL, STATUS_TOM, TIPO_LABEL } from '../lib/status';
 import type {
   ContaPagar,
   Paginado,
+  ResultadoLote,
   ResultadoSincronizacao,
   ResumoSincronizacao,
   StatusContaPagar,
@@ -54,6 +55,15 @@ function podeReprovar(c: ContaPagar): boolean {
   return c.status !== 'REPROVADO';
 }
 
+/** Conta paga é histórico: some do IXC só estornando por lá. */
+function podeExcluir(c: ContaPagar): boolean {
+  return c.status !== 'PAGO';
+}
+
+function soma(contas: ContaPagar[]): number {
+  return contas.reduce((s, c) => s + Number(c.valor), 0);
+}
+
 /** O que dizer depois de conferir uma conta no IXC. */
 function resumoDaVerificacao(r: ResultadoSincronizacao): string {
   if (r.removida) {
@@ -65,10 +75,30 @@ function resumoDaVerificacao(r: ResultadoSincronizacao): string {
   return 'Nada mudou no IXC: a conta segue como está.';
 }
 
+/**
+ * O saldo de uma ação em massa. Quem ficou de fora aparece com nome e motivo:
+ * lote que "quase todo" deu certo sem dizer o que sobrou é o jeito mais rápido
+ * de alguém achar que pagou quem não pagou.
+ */
+function resumoDoLote(r: ResultadoLote, verbo: string): string {
+  const partes = [`${r.sucesso} de ${r.total} conta(s) ${verbo}.`];
+  if (r.falhas.length > 0) {
+    const mostradas = r.falhas
+      .slice(0, 3)
+      .map((f) => `${f.beneficiario} (${f.erro})`)
+      .join('; ');
+    const resto =
+      r.falhas.length > 3 ? ` e mais ${r.falhas.length - 3}` : '';
+    partes.push(`Ficaram de fora: ${mostradas}${resto}.`);
+  }
+  return partes.join(' ');
+}
+
 export function ContasPagar() {
   const qc = useQueryClient();
   const [status, setStatus] = useState<StatusContaPagar | 'todos'>('todos');
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [selecao, setSelecao] = useState<string[]>([]);
 
   const lista = useQuery({
     queryKey: ['contas-pagar', status],
@@ -79,6 +109,17 @@ export function ContasPagar() {
         .data;
     },
   });
+
+  const itens = lista.data?.itens ?? [];
+  // A seleção vive presa ao que está na tela: mudou o filtro ou a lista, o que
+  // não aparece mais sai da seleção — ninguém aprova em massa às cegas.
+  const selecionadas = itens.filter((c) => selecao.includes(c.id));
+
+  function alternar(id: string) {
+    setSelecao((s) =>
+      s.includes(id) ? s.filter((x) => x !== id) : [...s, id],
+    );
+  }
 
   function invalidar() {
     qc.invalidateQueries({ queryKey: ['contas-pagar'] });
@@ -112,6 +153,28 @@ export function ContasPagar() {
       (await api.delete(`/contas-pagar/${id}`)).data,
     onSuccess: () => {
       setFeedback('Conta apagada aqui e no IXC.');
+      invalidar();
+    },
+    onError: (err) => setFeedback(mensagemErro(err)),
+  });
+
+  const lote = useMutation({
+    mutationFn: async (args: {
+      op: 'aprovar-lote' | 'reprovar-lote' | 'excluir-lote';
+      ids: string[];
+      motivo?: string;
+      verbo: string;
+    }) =>
+      (
+        await api.post<ResultadoLote>(`/contas-pagar/${args.op}`, {
+          ids: args.ids,
+          ...(args.motivo ? { motivo: args.motivo } : {}),
+        })
+      ).data,
+    onSuccess: (r, args) => {
+      setFeedback(resumoDoLote(r, args.verbo));
+      // O que falhou continua marcado: é o que ainda pede decisão.
+      setSelecao(r.falhas.map((f) => f.id));
       invalidar();
     },
     onError: (err) => setFeedback(mensagemErro(err)),
@@ -170,10 +233,61 @@ export function ContasPagar() {
     if (ok) excluir.mutate(c.id);
   }
 
-  const total = (lista.data?.itens ?? []).reduce(
-    (s, c) => s + Number(c.valor),
-    0,
-  );
+  // --- Em massa: age só sobre as selecionadas que aceitam aquela ação ---
+  function aprovarSelecionadas() {
+    const alvos = selecionadas.filter(podeAprovar);
+    if (alvos.length === 0) return;
+    const motivo = prompt(
+      `Aprovar ${alvos.length} conta(s), ${formatBRL(soma(alvos))} no total. Motivo:`,
+      'Aprovado',
+    );
+    if (motivo === null) return;
+    lote.mutate({
+      op: 'aprovar-lote',
+      ids: alvos.map((c) => c.id),
+      motivo,
+      verbo: 'aprovadas',
+    });
+  }
+
+  function reprovarSelecionadas() {
+    const alvos = selecionadas.filter(podeReprovar);
+    if (alvos.length === 0) return;
+    const motivo = prompt(
+      `Reprovar ${alvos.length} conta(s), ${formatBRL(soma(alvos))} no total. Motivo:`,
+    );
+    if (!motivo) return;
+    lote.mutate({
+      op: 'reprovar-lote',
+      ids: alvos.map((c) => c.id),
+      motivo,
+      verbo: 'reprovadas',
+    });
+  }
+
+  function excluirSelecionadas() {
+    const alvos = selecionadas.filter(podeExcluir);
+    if (alvos.length === 0) return;
+    const noIxc = alvos.filter((c) => c.idFnApagarIxc !== null).length;
+    const ok = confirm(
+      `Apagar ${alvos.length} conta(s), ${formatBRL(soma(alvos))} no total?\n\n` +
+        `${noIxc} delas também serão apagadas no IXC. Não dá para desfazer.`,
+    );
+    if (!ok) return;
+    lote.mutate({
+      op: 'excluir-lote',
+      ids: alvos.map((c) => c.id),
+      verbo: 'apagadas',
+    });
+  }
+
+  const total = itens.reduce((s, c) => s + Number(c.valor), 0);
+  const todasMarcadas = itens.length > 0 && selecionadas.length === itens.length;
+  // Cada ação vale para um pedaço da seleção: dá para marcar tudo e ainda
+  // assim ver quantas realmente aceitam aprovar, reprovar ou sumir.
+  const podemAprovar = selecionadas.filter(podeAprovar).length;
+  const podemReprovar = selecionadas.filter(podeReprovar).length;
+  const podemExcluir = selecionadas.filter(podeExcluir).length;
 
   return (
     <Pagina>
@@ -218,7 +332,10 @@ export function ContasPagar() {
         {STATUS_FILTROS.map((s) => (
           <button
             key={s}
-            onClick={() => setStatus(s)}
+            onClick={() => {
+              setStatus(s);
+              setSelecao([]);
+            }}
             className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
               status === s
                 ? 'bg-tinta-900 text-white'
@@ -230,11 +347,71 @@ export function ContasPagar() {
         ))}
       </div>
 
+      {selecionadas.length > 0 && (
+        <div className="surgir sticky top-3 z-20 mb-4 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl bg-tinta-900 px-4 py-3 text-sm text-white shadow-lg">
+          <span className="font-semibold">
+            {selecionadas.length} selecionada(s)
+            <span className="valor ml-2 font-normal text-tinta-300">
+              {formatBRL(soma(selecionadas))}
+            </span>
+          </span>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <BotaoLote
+              onClick={aprovarSelecionadas}
+              quantidade={podemAprovar}
+              ocupado={lote.isPending}
+              className="bg-brand-500 text-tinta-900 hover:bg-brand-400"
+            >
+              Aprovar
+            </BotaoLote>
+            <BotaoLote
+              onClick={reprovarSelecionadas}
+              quantidade={podemReprovar}
+              ocupado={lote.isPending}
+              className="bg-white/10 text-rose-200 hover:bg-white/20"
+            >
+              Reprovar
+            </BotaoLote>
+            <BotaoLote
+              onClick={excluirSelecionadas}
+              quantidade={podemExcluir}
+              ocupado={lote.isPending}
+              className="bg-rose-600 text-white hover:bg-rose-500"
+            >
+              Excluir
+            </BotaoLote>
+            <button
+              onClick={() => setSelecao([])}
+              className="btn btn-p border border-white/15 text-tinta-300 hover:bg-white/10 hover:text-white"
+            >
+              Limpar
+            </button>
+          </div>
+        </div>
+      )}
+
       <Bloco className="surgir surgir-3" semPadding>
         <div className="overflow-x-auto rolagem-fina">
           <table className="w-full text-sm">
             <thead>
               <tr>
+                <th className="th w-9">
+                  <input
+                    type="checkbox"
+                    className="accent-brand-600"
+                    aria-label="Selecionar todas as contas da página"
+                    checked={todasMarcadas}
+                    ref={(el) => {
+                      if (el) {
+                        el.indeterminate =
+                          selecionadas.length > 0 && !todasMarcadas;
+                      }
+                    }}
+                    onChange={() =>
+                      setSelecao(todasMarcadas ? [] : itens.map((c) => c.id))
+                    }
+                  />
+                </th>
                 <th className="th">Beneficiário</th>
                 <th className="th">Tipo</th>
                 <th className="th">Comp.</th>
@@ -247,22 +424,36 @@ export function ContasPagar() {
             <tbody>
               {lista.isLoading && (
                 <tr>
-                  <td colSpan={7}>
+                  <td colSpan={8}>
                     <Carregando />
                   </td>
                 </tr>
               )}
-              {lista.data?.itens.length === 0 && (
+              {itens.length === 0 && (
                 <tr>
-                  <td colSpan={7}>
+                  <td colSpan={8}>
                     <Vazio titulo="Nenhuma conta nesta situação">
                       As contas aparecem aqui depois que você gera a folha.
                     </Vazio>
                   </td>
                 </tr>
               )}
-              {lista.data?.itens.map((c) => (
-                <tr key={c.id} className="linha">
+              {itens.map((c) => (
+                <tr
+                  key={c.id}
+                  className={`linha ${
+                    selecao.includes(c.id) ? 'bg-brand-50/60' : ''
+                  }`}
+                >
+                  <td className="td">
+                    <input
+                      type="checkbox"
+                      className="accent-brand-600"
+                      aria-label={`Selecionar a conta de ${c.beneficiarioNome}`}
+                      checked={selecao.includes(c.id)}
+                      onChange={() => alternar(c.id)}
+                    />
+                  </td>
                   <td className="td">
                     <div className="font-medium text-tinta-900">
                       {c.beneficiarioNome}
@@ -326,7 +517,7 @@ export function ContasPagar() {
                           Verificar
                         </button>
                       )}
-                      {c.status !== 'PAGO' && (
+                      {podeExcluir(c) && (
                         <button
                           onClick={() => apagar(c)}
                           disabled={excluir.isPending}
@@ -344,10 +535,10 @@ export function ContasPagar() {
           </table>
         </div>
 
-        {(lista.data?.itens.length ?? 0) > 0 && (
+        {itens.length > 0 && (
           <div className="flex items-center justify-between border-t border-tinta-100 px-5 py-3.5 text-sm">
             <span className="text-tinta-500 num">
-              {lista.data?.itens.length} de {lista.data?.total} conta(s)
+              {itens.length} de {lista.data?.total} conta(s)
             </span>
             <span className="text-tinta-500">
               Soma da página{' '}
@@ -359,5 +550,35 @@ export function ContasPagar() {
         )}
       </Bloco>
     </Pagina>
+  );
+}
+
+/**
+ * Botão da barra de seleção. Mostra quantas contas a ação realmente pega —
+ * marcar 10 e aprovar 7 é normal (o resto já está pago ou aprovado), mas
+ * precisa estar escrito antes do clique, não depois.
+ */
+function BotaoLote({
+  onClick,
+  quantidade,
+  ocupado,
+  className,
+  children,
+}: {
+  onClick: () => void;
+  quantidade: number;
+  ocupado: boolean;
+  className: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={quantidade === 0 || ocupado}
+      title={quantidade === 0 ? 'Nenhuma das selecionadas aceita esta ação' : undefined}
+      className={`btn btn-p disabled:cursor-not-allowed disabled:opacity-40 ${className}`}
+    >
+      {ocupado ? 'Aplicando…' : `${children} (${quantidade})`}
+    </button>
   );
 }

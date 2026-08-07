@@ -66,6 +66,10 @@ export class FuncionariosService {
       data: {
         observacoes: dto.observacoes,
         chavePix: dto.chavePix,
+        // Vazio limpa: volta a valer a dedução pelo formato da chave.
+        ...(dto.tipoChavePix !== undefined
+          ? { tipoChavePix: dto.tipoChavePix }
+          : {}),
         banco: dto.banco,
         agencia: dto.agencia,
         conta: dto.conta,

@@ -13,7 +13,11 @@ import type { Request } from 'express';
 import { ContasPagarService } from './contas-pagar.service';
 import { CriarContasPagarDto } from './dto/criar-contas.dto';
 import { PrepararFolhaDto } from './dto/preparar-folha.dto';
-import { AuditoriaDto, QueryContasPagarDto } from './dto/query-contas.dto';
+import {
+  AuditoriaDto,
+  LoteContasDto,
+  QueryContasPagarDto,
+} from './dto/query-contas.dto';
 
 function usuarioId(req: Request): string | undefined {
   return (req.user as { id?: string } | undefined)?.id;
@@ -52,6 +56,31 @@ export class ContasPagarController {
   @HttpCode(200)
   enviar(@Param('id') id: string) {
     return this.service.enviarIxc(id);
+  }
+
+  // Em massa. Declarados antes das rotas com :id só para ficarem juntos — não
+  // colidem, porque estas têm um segmento só.
+  @Post('aprovar-lote')
+  @HttpCode(200)
+  aprovarLote(@Body() dto: LoteContasDto, @Req() req: Request) {
+    return this.service.aprovarEmLote(dto.ids, dto.motivo ?? '', usuarioId(req));
+  }
+
+  @Post('reprovar-lote')
+  @HttpCode(200)
+  reprovarLote(@Body() dto: LoteContasDto, @Req() req: Request) {
+    return this.service.reprovarEmLote(
+      dto.ids,
+      dto.motivo ?? '',
+      usuarioId(req),
+    );
+  }
+
+  /** Apaga várias contas aqui e os fn_apagar correspondentes no IXC. */
+  @Post('excluir-lote')
+  @HttpCode(200)
+  excluirLote(@Body() dto: LoteContasDto) {
+    return this.service.removerEmLote(dto.ids);
   }
 
   @Post(':id/aprovar')

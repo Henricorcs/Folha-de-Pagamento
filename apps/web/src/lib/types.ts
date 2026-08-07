@@ -31,9 +31,20 @@ export interface Funcionario {
   agencia: string | null;
   conta: string | null;
   chavePix: string | null;
+  /** Tipo de PIX preferencial do fornecedor, repetido na conta a pagar */
+  tipoChavePix: string | null;
   observacoes: string | null;
   ultimoSyncAt: string | null;
 }
+
+/** Tipos de chave PIX, como aparecem na tela de contas a pagar do IXC. */
+export const TIPOS_CHAVE_PIX = [
+  'CPF/CNPJ',
+  'Celular',
+  'E-mail',
+  'Aleatória',
+  'Código copia e cola',
+] as const;
 
 export interface Adiantamento {
   id: string;
@@ -177,6 +188,20 @@ export interface ResumoSincronizacao {
   removidas: number;
   atualizadas: number;
   erros: number;
+}
+
+/** Conta que ficou de fora de uma ação em massa, e por quê. */
+export interface FalhaLote {
+  id: string;
+  beneficiario: string;
+  erro: string;
+}
+
+/** O que aconteceu numa ação feita em várias contas de uma vez. */
+export interface ResultadoLote {
+  total: number;
+  sucesso: number;
+  falhas: FalhaLote[];
 }
 
 export interface LancamentoCalculado {
@@ -351,6 +376,7 @@ export interface FuncionarioDoFornecedor {
   agencia: string | null;
   conta: string | null;
   chavePix: string | null;
+  tipoChavePix: string | null;
   icms: string;
   jaCadastrado: boolean;
 }

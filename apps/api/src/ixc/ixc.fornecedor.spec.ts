@@ -2,9 +2,12 @@ import {
   consolidarDadosBancarios,
   detectarCampoFornecedor,
   detectarCampoIcms,
+  detectarCampoTipoPix,
   distribuicaoIcms,
   ehIcmsIsento,
+  escolherPix,
   filtrarFuncionariosIsentos,
+  lerTipoPixPreferencial,
   mapFornecedorParaFuncionario,
   mapLinhaDadosBancarios,
   montarUpdateDoFornecedor,
@@ -242,12 +245,13 @@ describe('dados bancários (aba do fornecedor)', () => {
     pix_email: '',
   };
 
-  it('lê banco e a chave PIX da coluna preenchida', () => {
+  it('lê banco e a chave PIX da coluna preenchida, com o tipo dela', () => {
     expect(mapLinhaDadosBancarios(LINHA)).toEqual({
       banco: 'Banco Inter',
       agencia: null,
       conta: null,
       chavePix: '(99) 98107-4450',
+      tipoChavePix: 'Celular',
     });
   });
 
@@ -265,6 +269,7 @@ describe('dados bancários (aba do fornecedor)', () => {
       agencia: '1234',
       conta: '5678',
       chavePix: 'ana@pix',
+      tipoChavePix: 'E-mail',
     });
   });
 
@@ -273,6 +278,91 @@ describe('dados bancários (aba do fornecedor)', () => {
     expect(detectarCampoFornecedor({ id: '1', id_cadastro: '9' })).toBe(
       'id_cadastro',
     );
+  });
+});
+
+describe('tipo de PIX preferencial', () => {
+  /** Linha com as três chaves preenchidas: só o preferencial desempata. */
+  const COMPLETA = {
+    id: '7',
+    id_fornecedor: '2672',
+    pix_cpf_cnpj: '082.935.753-01',
+    pix_celular: '(99) 98107-4450',
+    pix_email: 'henrico@pix.com',
+  };
+
+  it('usa a chave do tipo preferencial do cadastro', () => {
+    expect(escolherPix({ ...COMPLETA, tipo_pix: 'E-mail' })).toEqual({
+      chavePix: 'henrico@pix.com',
+      tipoChavePix: 'E-mail',
+    });
+    expect(escolherPix({ ...COMPLETA, tipo_pix: 'Celular' })).toEqual({
+      chavePix: '(99) 98107-4450',
+      tipoChavePix: 'Celular',
+    });
+    expect(escolherPix({ ...COMPLETA, pix_preferencial: 'CPF/CNPJ' })).toEqual({
+      chavePix: '082.935.753-01',
+      tipoChavePix: 'CPF/CNPJ',
+    });
+  });
+
+  it('acha a coluna do tipo mesmo com outro nome', () => {
+    expect(detectarCampoTipoPix({ tipo_chave_pix_pref: 'Celular' })).toBe(
+      'tipo_chave_pix_pref',
+    );
+    expect(lerTipoPixPreferencial({ pix_tipo_preferencial: 'celular' })).toBe(
+      'Celular',
+    );
+    expect(lerTipoPixPreferencial({ banco: 'Inter' })).toBeNull();
+  });
+
+  it('ignora código de uma letra: "C" tanto é celular quanto CPF', () => {
+    expect(lerTipoPixPreferencial({ tipo_pix: 'C' })).toBeNull();
+    // Sem tipo legível, decide a coluna preenchida.
+    expect(escolherPix({ tipo_pix: 'C', pix_email: 'ana@pix' })).toEqual({
+      chavePix: 'ana@pix',
+      tipoChavePix: 'E-mail',
+    });
+  });
+
+  it('cai na chave preenchida quando o tipo preferencial está vazio no grid', () => {
+    // Preferencial diz "Celular", mas a coluna do celular está em branco:
+    // mandar tipo Celular com chave de e-mail o banco recusa.
+    expect(
+      escolherPix({
+        tipo_pix: 'Celular',
+        pix_celular: '',
+        pix_email: 'ana@pix',
+      }),
+    ).toEqual({ chavePix: 'ana@pix', tipoChavePix: 'E-mail' });
+  });
+
+  it('nunca confunde a coluna do tipo com uma chave', () => {
+    expect(escolherPix({ tipo_pix: 'Celular' })).toEqual({
+      chavePix: null,
+      tipoChavePix: null,
+    });
+  });
+
+  it('leva o tipo junto da chave para o cadastro local', () => {
+    const dados = mapFornecedorParaFuncionario(HENRICO, 'I')!;
+    dados.chavePix = '(99) 98107-4450';
+    dados.tipoChavePix = 'Celular';
+    const update = montarUpdateDoFornecedor(
+      {
+        id: 'local-1',
+        ixcId: 16,
+        nome: 'Henrico',
+        cpfCnpj: '082.935.753-01',
+        email: null,
+        telefone: null,
+        cidadeIxc: null,
+        idFornecedorIxc: 2672,
+      },
+      dados,
+    );
+    expect(update.chavePix).toBe('(99) 98107-4450');
+    expect(update.tipoChavePix).toBe('Celular');
   });
 });
 

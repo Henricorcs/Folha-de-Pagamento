@@ -33,6 +33,10 @@ Evolução planejada por fases. Cada fase entrega valor de forma incremental.
 - [x] Lançamentos **avulsos** por funcionário (competência específica), além dos fixos
 - [x] Polling automático do retorno do banco (SYNC_PAGAMENTOS_INTERVALO_MIN, padrão 10 min)
 - [x] PIX no fn_apagar (chave do beneficiário) + tipo de pagamento configurável
+- [x] **Tipo da chave PIX** vem do tipo preferencial do fornecedor (aba "Dados
+      bancários"): a conta a pagar marca o mesmo que está no cadastro
+- [x] **Ações em massa** em Contas a Pagar: aprovar, reprovar e excluir várias
+      de uma vez, com relatório de quem ficou de fora e por quê
 - [x] Reuso de fornecedor existente no IXC por CPF/CNPJ
 
 ### Pendências desta fase (dependem de você)

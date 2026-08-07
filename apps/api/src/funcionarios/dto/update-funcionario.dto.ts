@@ -1,11 +1,13 @@
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
   Min,
 } from 'class-validator';
+import { TIPOS_CHAVE_PIX } from '../../ixc/ixc.financeiro';
 
 /**
  * Campos editáveis localmente. Dados que vêm do IXC (nome, salário, etc.)
@@ -20,6 +22,15 @@ export class UpdateFuncionarioDto {
   @IsOptional()
   @IsString()
   chavePix?: string;
+
+  /**
+   * Tipo da chave marcado na conta a pagar do IXC. Normalmente vem do cadastro
+   * do fornecedor no sync; vazio volta a deduzir pelo formato da chave.
+   */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value == null ? null : value))
+  @IsIn([...TIPOS_CHAVE_PIX])
+  tipoChavePix?: string | null;
 
   @IsOptional()
   @IsString()

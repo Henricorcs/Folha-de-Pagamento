@@ -7,6 +7,7 @@ import {
   inferirTipoChavePix,
   lerSituacaoContaPagar,
   lerStatusAuditoria,
+  normalizarTipoChavePix,
 } from './ixc.financeiro';
 
 describe('formatDataIxc / formatValorIxc', () => {
@@ -90,6 +91,56 @@ describe('buildContaPagarPayload', () => {
       tipo_chave_pix: 'Celular',
       chave_pix: '+5599981074450',
     });
+  });
+});
+
+describe('tipo da chave PIX vindo do cadastro', () => {
+  const hoje = new Date(Date.UTC(2026, 6, 21));
+  const base = {
+    idFornecedor: 55,
+    valor: 500,
+    contaPagamentoId: 18,
+    contaContabilId: 2420,
+    filialId: 1,
+    dataEmissao: hoje,
+    dataVencimento: hoje,
+    observacao: 'saldo salarial',
+  };
+
+  it('marca o tipo preferencial do fornecedor em vez de deduzir', () => {
+    // Chave de 11 dígitos que o formato leria como CPF: o cadastro diz Celular.
+    const body = buildContaPagarPayload({
+      ...base,
+      chavePix: '75981074450',
+      tipoChavePix: 'Celular',
+    });
+    expect(body).toMatchObject({
+      tipo_chave_pix: 'Celular',
+      chave_pix: '+5575981074450',
+    });
+  });
+
+  it('sem tipo no cadastro, continua deduzindo pelo formato', () => {
+    const body = buildContaPagarPayload({ ...base, chavePix: 'ana@pix.com' });
+    expect(body).toMatchObject({ tipo_chave_pix: 'E-mail' });
+  });
+});
+
+describe('normalizarTipoChavePix', () => {
+  it('entende o rótulo e o nome da coluna', () => {
+    expect(normalizarTipoChavePix('Celular')).toBe('Celular');
+    expect(normalizarTipoChavePix('pix_celular')).toBe('Celular');
+    expect(normalizarTipoChavePix('E-mail')).toBe('E-mail');
+    expect(normalizarTipoChavePix('pix_email')).toBe('E-mail');
+    expect(normalizarTipoChavePix('CPF/CNPJ')).toBe('CPF/CNPJ');
+    expect(normalizarTipoChavePix('Chave aleatória')).toBe('Aleatória');
+  });
+
+  it('não chuta em código de uma letra nem em valor vazio', () => {
+    expect(normalizarTipoChavePix('C')).toBeNull();
+    expect(normalizarTipoChavePix('')).toBeNull();
+    expect(normalizarTipoChavePix(null)).toBeNull();
+    expect(normalizarTipoChavePix('outro')).toBeNull();
   });
 });
 

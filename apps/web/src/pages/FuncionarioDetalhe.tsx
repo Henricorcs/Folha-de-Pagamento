@@ -13,6 +13,7 @@ import { api, mensagemErro } from '../lib/api';
 import { baseDaFolha, rotuloParcelaAtual, usaValorAReceber } from '../lib/folha';
 import { formatBRL, formatData } from '../lib/format';
 import { SENTIDO_CURTO, SENTIDO_TOM, TIPO_LABEL } from '../lib/status';
+import { TIPOS_CHAVE_PIX } from '../lib/types';
 import type {
   FuncionarioDetalhe as TFunc,
   Lancamento,
@@ -26,6 +27,7 @@ export function FuncionarioDetalhe() {
   const qc = useQueryClient();
   const [observacoes, setObservacoes] = useState('');
   const [chavePix, setChavePix] = useState('');
+  const [tipoChavePix, setTipoChavePix] = useState('');
   const [salvo, setSalvo] = useState(false);
 
   const { data, isLoading, isError, error } = useQuery({
@@ -38,12 +40,19 @@ export function FuncionarioDetalhe() {
     if (data) {
       setObservacoes(data.observacoes ?? '');
       setChavePix(data.chavePix ?? '');
+      setTipoChavePix(data.tipoChavePix ?? '');
     }
   }, [data]);
 
   const salvar = useMutation({
     mutationFn: async () =>
-      (await api.patch(`/funcionarios/${id}`, { observacoes, chavePix })).data,
+      (
+        await api.patch(`/funcionarios/${id}`, {
+          observacoes,
+          chavePix,
+          tipoChavePix,
+        })
+      ).data,
     onSuccess: () => {
       setSalvo(true);
       qc.invalidateQueries({ queryKey: ['funcionario', id] });
@@ -115,6 +124,10 @@ export function FuncionarioDetalhe() {
               <Campo rotulo="Agência" valor={data.agencia} mono />
               <Campo rotulo="Conta" valor={data.conta} mono />
               <Campo rotulo="Chave PIX" valor={data.chavePix} mono />
+              <Campo
+                rotulo="Tipo da chave"
+                valor={data.tipoChavePix ?? 'pelo formato da chave'}
+              />
             </div>
           </Bloco>
 
@@ -174,6 +187,26 @@ export function FuncionarioDetalhe() {
               onChange={(e) => setChavePix(e.target.value)}
               className="campo mb-4"
             />
+            <label className="rotulo" htmlFor="tipo-pix">
+              Tipo da chave
+            </label>
+            <select
+              id="tipo-pix"
+              value={tipoChavePix}
+              onChange={(e) => setTipoChavePix(e.target.value)}
+              className="campo mb-1"
+            >
+              <option value="">Pelo formato da chave</option>
+              {TIPOS_CHAVE_PIX.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+            <p className="mb-4 text-xs leading-snug text-tinta-400">
+              É o que a conta a pagar marca no IXC. Vem do tipo preferencial do
+              fornecedor a cada sincronização — mexa aqui só para corrigir.
+            </p>
             <label className="rotulo" htmlFor="obs">
               Observações
             </label>

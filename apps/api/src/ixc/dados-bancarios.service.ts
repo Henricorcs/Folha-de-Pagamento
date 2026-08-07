@@ -51,6 +51,7 @@ export class DadosBancariosService {
       agencia: null,
       conta: null,
       chavePix: null,
+      tipoChavePix: null,
     };
 
     const tabela = await this.resolverTabela(tabelaConfigurada);

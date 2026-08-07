@@ -16,7 +16,9 @@ import {
   buildContaPagarPayload,
   lerSituacaoContaPagar,
   lerStatusAuditoria,
+  normalizarTipoChavePix,
   type StatusAuditoriaIxc,
+  type TipoChavePix,
 } from '../ixc/ixc.financeiro';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConfigFinanceiraService } from './config-financeira.service';
@@ -86,6 +88,20 @@ export interface ResumoSincronizacao {
   /** Mudaram de situação por causa do IXC (inclui as pagas). */
   atualizadas: number;
   erros: number;
+}
+
+/** Conta que ficou de fora de uma ação em massa, e por quê. */
+export interface FalhaLote {
+  id: string;
+  beneficiario: string;
+  erro: string;
+}
+
+/** O que aconteceu numa ação feita em várias contas de uma vez. */
+export interface ResultadoLote {
+  total: number;
+  sucesso: number;
+  falhas: FalhaLote[];
 }
 
 /** Por quantos dias uma conta paga continua sendo conferida no IXC. */
@@ -355,7 +371,7 @@ export class ContasPagarService {
         : await this.fornecedores.garantirParaAvulso(conta.beneficiarioAvulsoId!);
 
       const cfg = await this.config.obter();
-      const chavePix = await this.chavePixDoBeneficiario(conta);
+      const pix = await this.pixDoBeneficiario(conta);
 
       const payload = buildContaPagarPayload({
         idFornecedor,
@@ -367,7 +383,8 @@ export class ContasPagarService {
         dataVencimento: conta.dataVencimento,
         observacao: conta.observacao,
         tipoPagamento: cfg.tipoPagamentoPadrao,
-        chavePix,
+        chavePix: pix.chave,
+        tipoChavePix: pix.tipo,
       });
 
       const { id: idFnApagar } = await this.ixc.create('fn_apagar', payload);
@@ -477,6 +494,54 @@ export class ContasPagarService {
       conta.competencia,
       conta.funcionarioId,
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // 3b) Em massa: aprovar, reprovar e excluir vários de uma vez
+  // -------------------------------------------------------------------------
+  aprovarEmLote(ids: string[], motivo: string, usuarioId?: string) {
+    return this.emLote(ids, (id) => this.aprovar(id, motivo, usuarioId));
+  }
+
+  reprovarEmLote(ids: string[], motivo: string, usuarioId?: string) {
+    return this.emLote(ids, (id) => this.reprovar(id, motivo, usuarioId));
+  }
+
+  removerEmLote(ids: string[]) {
+    return this.emLote(ids, (id) => this.remover(id));
+  }
+
+  /**
+   * Roda a mesma ação em várias contas, uma a uma — cada uma é uma ida ao IXC.
+   * Falha em uma não derruba as outras: quem ficou de fora volta na lista de
+   * falhas, com nome e motivo, para a tela poder dizer o que não saiu. Sem
+   * isso, um lote de 20 pararia na primeira conta já paga.
+   */
+  private async emLote(
+    ids: string[],
+    acao: (id: string) => Promise<unknown>,
+  ): Promise<ResultadoLote> {
+    const unicos = [...new Set(ids)];
+    // Os nomes são lidos antes: depois de excluir, a conta não existe mais.
+    const contas = await this.prisma.contaPagar.findMany({
+      where: { id: { in: unicos } },
+      select: { id: true, beneficiarioNome: true },
+    });
+    const nomes = new Map(contas.map((c) => [c.id, c.beneficiarioNome]));
+
+    const falhas: FalhaLote[] = [];
+    let sucesso = 0;
+    for (const id of unicos) {
+      try {
+        await acao(id);
+        sucesso++;
+      } catch (err) {
+        const erro = err instanceof Error ? err.message : String(err);
+        falhas.push({ id, beneficiario: nomes.get(id) ?? 'Conta', erro });
+        this.logger.warn(`Conta ${id} ficou de fora do lote: ${erro}`);
+      }
+    }
+    return { total: unicos.length, sucesso, falhas };
   }
 
   // -------------------------------------------------------------------------
@@ -718,26 +783,33 @@ export class ContasPagarService {
     await this.prisma.contaPagar.delete({ where: { id } });
   }
 
-  /** Chave PIX do funcionário (sincronizada do IXC) ou do beneficiário avulso. */
-  private async chavePixDoBeneficiario(conta: {
+  /**
+   * Chave PIX do beneficiário e o tipo dela. O tipo vem do cadastro do
+   * fornecedor no IXC (aba "Dados bancários"), para a conta a pagar marcar o
+   * mesmo que está lá; sem tipo guardado, quem decide é o formato da chave.
+   */
+  private async pixDoBeneficiario(conta: {
     funcionarioId: string | null;
     beneficiarioAvulsoId: string | null;
-  }): Promise<string | null> {
+  }): Promise<{ chave: string | null; tipo: TipoChavePix | null }> {
     if (conta.funcionarioId) {
       const f = await this.prisma.funcionario.findUnique({
         where: { id: conta.funcionarioId },
-        select: { chavePix: true },
+        select: { chavePix: true, tipoChavePix: true },
       });
-      return f?.chavePix ?? null;
+      return {
+        chave: f?.chavePix ?? null,
+        tipo: normalizarTipoChavePix(f?.tipoChavePix),
+      };
     }
     if (conta.beneficiarioAvulsoId) {
       const b = await this.prisma.beneficiarioAvulso.findUnique({
         where: { id: conta.beneficiarioAvulsoId },
         select: { chavePix: true },
       });
-      return b?.chavePix ?? null;
+      return { chave: b?.chavePix ?? null, tipo: null };
     }
-    return null;
+    return { chave: null, tipo: null };
   }
 
   private async resolverNome(item: ItemContaPagarDto): Promise<string> {

@@ -271,6 +271,7 @@ export class SyncService {
             agencia: dados.agencia,
             conta: dados.conta,
             chavePix: dados.chavePix,
+            tipoChavePix: dados.tipoChavePix,
             cidadeIxc: dados.cidadeIxc,
             idFornecedorIxc: dados.idFornecedor,
             ativo: true,
@@ -407,7 +408,11 @@ export class SyncService {
       f.banco = grid.banco ?? f.banco;
       f.agencia = grid.agencia ?? f.agencia;
       f.conta = grid.conta ?? f.conta;
-      f.chavePix = grid.chavePix ?? f.chavePix;
+      // Chave e tipo preferencial andam juntos: são a mesma decisão.
+      if (grid.chavePix) {
+        f.chavePix = grid.chavePix;
+        f.tipoChavePix = grid.tipoChavePix;
+      }
       if (f.chavePix) comPix++;
     }
     if (funcionarios.length > 0) {

@@ -53,15 +53,43 @@ export interface ContaPagarInput {
   observacao: string;
   tipoPagamento?: string; // default "Dinheiro"
   chavePix?: string | null;
+  /**
+   * Tipo de PIX preferencial do cadastro (aba "Dados bancários" do
+   * fornecedor). Vazio = deduz pelo formato da chave.
+   */
+  tipoChavePix?: TipoChavePix | null;
 }
 
 /** Tipos da chave PIX, como aparecem na tela de contas a pagar do IXC. */
-export type TipoChavePix =
-  | 'CPF/CNPJ'
-  | 'Celular'
-  | 'E-mail'
-  | 'Aleatória'
-  | 'Código copia e cola';
+export const TIPOS_CHAVE_PIX = [
+  'CPF/CNPJ',
+  'Celular',
+  'E-mail',
+  'Aleatória',
+  'Código copia e cola',
+] as const;
+
+export type TipoChavePix = (typeof TIPOS_CHAVE_PIX)[number];
+
+/**
+ * Traduz o "tipo de PIX preferencial" do cadastro para o rótulo que a tela de
+ * contas a pagar do IXC usa. Entende o rótulo por extenso e o nome da coluna
+ * ("pix_celular"), que é como o IXC separa as chaves.
+ *
+ * Código de uma letra fica de fora de propósito: "C" tanto pode ser celular
+ * quanto CPF, e chutar aqui é mandar o pagamento com o tipo errado. Sem
+ * tradução, quem decide é a coluna que tem chave preenchida.
+ */
+export function normalizarTipoChavePix(valor: unknown): TipoChavePix | null {
+  const s = String(valor ?? '').trim().toLowerCase();
+  if (s.length < 2) return null;
+  if (/cel|fone|tel|whats/.test(s)) return 'Celular';
+  if (/mail/.test(s)) return 'E-mail';
+  if (/cpf|cnpj|documento/.test(s)) return 'CPF/CNPJ';
+  if (/aleat|random/.test(s)) return 'Aleatória';
+  if (/copia|cola|emv|brcode/.test(s)) return 'Código copia e cola';
+  return null;
+}
 
 /**
  * Deduz o tipo da chave PIX pelo formato, para marcar o rádio "Tipo da chave
@@ -104,7 +132,10 @@ export function buildContaPagarPayload(
   input: ContaPagarInput,
 ): Record<string, unknown> {
   const chave = (input.chavePix ?? '').trim();
-  const tipoChave = inferirTipoChavePix(chave);
+  // O tipo preferencial do cadastro manda: é o que o IXC mostra marcado na aba
+  // "Dados bancários" do fornecedor, e a conta a pagar tem que repetir. Só
+  // quando o cadastro não diz é que se deduz pelo formato da chave.
+  const tipoChave = input.tipoChavePix ?? inferirTipoChavePix(chave);
 
   return {
     id_fornecedor: String(input.idFornecedor),
