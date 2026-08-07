@@ -66,7 +66,10 @@ export class ContasPagarController {
     return this.service.reprovar(id, dto.motivo, usuarioId(req));
   }
 
-  /** Consulta o status no IXC e marca como pago quando o banco retornar. */
+  /**
+   * Consulta a conta no IXC: marca como paga quando o banco retorna, reflete a
+   * auditoria feita por lá e apaga daqui o que foi apagado no IXC.
+   */
   @Post(':id/sincronizar')
   @HttpCode(200)
   sincronizar(@Param('id') id: string) {
@@ -79,6 +82,7 @@ export class ContasPagarController {
     return this.service.sincronizarPendentes();
   }
 
+  /** Apaga a conta aqui e o fn_apagar no IXC. */
   @Delete(':id')
   @HttpCode(200)
   async remover(@Param('id') id: string) {

@@ -15,6 +15,8 @@ import {
   buildAuditoriaPayload,
   buildContaPagarPayload,
   lerSituacaoContaPagar,
+  lerStatusAuditoria,
+  type StatusAuditoriaIxc,
 } from '../ixc/ixc.financeiro';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConfigFinanceiraService } from './config-financeira.service';
@@ -66,9 +68,37 @@ export interface PreviewFuncionario {
   lancamentos: LancamentoCalculado[];
 }
 
+/** O que a conferência com o IXC descobriu sobre uma conta. */
+export interface ResultadoSincronizacao {
+  /** null = não existe mais no IXC e foi apagada daqui também. */
+  conta: ContaPagar | null;
+  removida: boolean;
+  /** O IXC mudou a situação da conta (pagou, aprovou, reprovou, cancelou). */
+  mudouStatus: boolean;
+  statusAnterior: StatusContaPagar;
+}
+
+export interface ResumoSincronizacao {
+  verificadas: number;
+  pagas: number;
+  /** Sumiram do IXC e foram apagadas daqui. */
+  removidas: number;
+  /** Mudaram de situação por causa do IXC (inclui as pagas). */
+  atualizadas: number;
+  erros: number;
+}
+
+/** Por quantos dias uma conta paga continua sendo conferida no IXC. */
+const DIAS_CONFERE_PAGA = 90;
+
+/** Quanto esperar antes de tentar de novo a tabela de auditoria do IXC. */
+const PAUSA_AUDITORIA_MS = 5 * 60_000;
+
 @Injectable()
 export class ContasPagarService {
   private readonly logger = new Logger(ContasPagarService.name);
+  /** Até quando parar de consultar a tabela de auditoria (ver `auditoriaNoIxc`). */
+  private auditoriaIndisponivelAte = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -373,6 +403,12 @@ export class ContasPagarService {
     return this.auditar(id, 'R', motivo, usuarioId);
   }
 
+  /**
+   * Aprova ou reprova no IXC e reflete aqui. Dá para mudar de ideia nos dois
+   * sentidos — reprovada volta a ser aprovada e vice-versa — porque a
+   * auditoria do IXC também aceita: só o pagamento confirmado pelo banco é
+   * ponto final.
+   */
   private async auditar(
     id: string,
     status: 'A' | 'R',
@@ -380,13 +416,15 @@ export class ContasPagarService {
     usuarioId?: string,
   ): Promise<ContaPagar> {
     const conta = await this.buscar(id);
-    if (conta.status !== StatusContaPagar.AGUARDANDO_APROVACAO) {
+    if (!conta.idFnApagarIxc) {
       throw new BadRequestException(
-        `Conta não está aguardando aprovação (status ${conta.status})`,
+        'Conta ainda não existe no IXC — reenvie antes de aprovar ou reprovar',
       );
     }
-    if (!conta.idFnApagarIxc) {
-      throw new BadRequestException('Conta sem vínculo no IXC (idFnApagar)');
+    if (conta.status === StatusContaPagar.PAGO) {
+      throw new BadRequestException(
+        'Conta já paga: o banco confirmou. Estorne o pagamento no IXC antes de auditar de novo.',
+      );
     }
 
     await this.ixc.action(
@@ -398,10 +436,7 @@ export class ContasPagarService {
       }),
     );
 
-    // Reprovada não vai ser paga: o vale volta a dever.
-    if (status === 'R') await this.vales.estornarBaixa(id);
-
-    return this.prisma.contaPagar.update({
+    const atualizada = await this.prisma.contaPagar.update({
       where: { id },
       data: {
         status:
@@ -413,57 +448,177 @@ export class ContasPagarService {
         motivoAuditoria: motivo,
       },
     });
+
+    // Reprovada não vira dinheiro: o vale volta a dever. Aprovada de novo:
+    // a parcela é abatida outra vez.
+    await this.acertarValesPorStatus(atualizada);
+    return atualizada;
+  }
+
+  /**
+   * Mantém as parcelas de vale coerentes com o destino da conta: o que não vai
+   * virar pagamento devolve a parcela para pendente; o que voltou a valer
+   * desconta de novo. Sem isso o vale ficaria quitado sem ninguém ter pago —
+   * ou seria descontado duas vezes.
+   */
+  private async acertarValesPorStatus(conta: ContaPagar): Promise<void> {
+    const naoVaiAcontecer =
+      conta.status === StatusContaPagar.REPROVADO ||
+      conta.status === StatusContaPagar.CANCELADO;
+
+    if (naoVaiAcontecer) {
+      await this.vales.estornarBaixa(conta.id);
+      return;
+    }
+    if (conta.tipo !== TipoLancamento.SALARIO) return;
+    if (!conta.competencia || !conta.funcionarioId) return;
+    await this.vales.baixarNaFolha(
+      conta.id,
+      conta.competencia,
+      conta.funcionarioId,
+    );
   }
 
   // -------------------------------------------------------------------------
-  // 4) Monitorar pagamento: lê o fn_apagar no IXC e detecta "pago"
+  // 4) Monitorar no IXC: pagamento, auditoria feita por lá e exclusão
   // -------------------------------------------------------------------------
-  async sincronizarStatus(id: string): Promise<ContaPagar> {
+  /**
+   * Traz do IXC o que aconteceu com a conta: se o banco pagou, se alguém
+   * aprovou/reprovou/cancelou por lá — e, quando o registro não existe mais,
+   * apaga aqui também. O IXC é a fonte da verdade; as duas telas precisam
+   * contar a mesma história.
+   */
+  async sincronizarStatus(id: string): Promise<ResultadoSincronizacao> {
     const conta = await this.buscar(id);
-    if (!conta.idFnApagarIxc) return conta;
+    const statusAnterior = conta.status;
+    if (!conta.idFnApagarIxc) {
+      return { conta, removida: false, mudouStatus: false, statusAnterior };
+    }
 
     const raw = await this.ixc.getById<Record<string, unknown>>(
       'fn_apagar',
       'fn_apagar.id',
       conta.idFnApagarIxc,
     );
-    if (!raw) return conta;
+
+    // Apagada no IXC: some daqui também.
+    if (!raw) {
+      await this.apagarLocal(conta.id);
+      this.logger.log(
+        `Conta ${id} removida daqui: o fn_apagar ${conta.idFnApagarIxc} não existe mais no IXC`,
+      );
+      return { conta: null, removida: true, mudouStatus: false, statusAnterior };
+    }
 
     const sit = lerSituacaoContaPagar(raw);
+    // A auditoria pode não vir no próprio fn_apagar; aí quem sabe é a tabela
+    // de auditoria — uma consulta a mais, que só vale a pena quando pagamento
+    // e cancelamento ainda não decidiram o assunto sozinhos.
+    const auditoria =
+      sit.pago || sit.cancelada
+        ? null
+        : (sit.statusAuditoria ??
+          (await this.auditoriaNoIxc(conta.idFnApagarIxc)));
+
+    const novo = statusPeloIxc(conta.status, {
+      pago: sit.pago,
+      cancelada: sit.cancelada,
+      auditoria,
+    });
+
     const data: Prisma.ContaPagarUpdateInput = {
       ixcStatusRaw: raw as Prisma.InputJsonValue,
     };
-    if (sit.pago && conta.status !== StatusContaPagar.PAGO) {
-      data.status = StatusContaPagar.PAGO;
-      data.pagoEm = sit.dataPagamento ?? new Date();
+    if (novo) {
+      data.status = novo;
+      if (novo === StatusContaPagar.PAGO) {
+        data.pagoEm = sit.dataPagamento ?? new Date();
+      }
     }
-    return this.prisma.contaPagar.update({ where: { id }, data });
+
+    const atualizada = await this.prisma.contaPagar.update({
+      where: { id },
+      data,
+    });
+    if (novo) await this.acertarValesPorStatus(atualizada);
+
+    return {
+      conta: atualizada,
+      removida: false,
+      mudouStatus: novo !== null,
+      statusAnterior,
+    };
   }
 
-  /** Verifica todas as contas aguardando pagamento (para um job/polling). */
-  async sincronizarPendentes(): Promise<{
-    verificadas: number;
-    pagas: number;
-    erros: number;
-  }> {
-    const pendentes = await this.prisma.contaPagar.findMany({
-      where: {
-        status: {
-          in: [
-            StatusContaPagar.AGUARDANDO_PAGAMENTO,
-            StatusContaPagar.AGUARDANDO_APROVACAO,
-          ],
+  /**
+   * Último registro de auditoria daquele fn_apagar. É o que permite enxergar
+   * aqui a aprovação/reprovação feita na tela do IXC. Se a consulta falhar
+   * (nome de campo diferente nesta base), devolve null em vez de derrubar a
+   * verificação inteira.
+   */
+  private async auditoriaNoIxc(
+    idFnApagar: number,
+  ): Promise<StatusAuditoriaIxc | null> {
+    // Depois de uma falha, dá um tempo: numa verificação em lote não adianta
+    // repetir a mesma consulta quebrada conta a conta.
+    if (Date.now() < this.auditoriaIndisponivelAte) return null;
+    try {
+      const res = await this.ixc.list<Record<string, unknown>>(
+        'fn_apagar_auditoria',
+        {
+          qtype: 'fn_apagar_auditoria.id_fn_apagar',
+          query: String(idFnApagar),
+          oper: '=',
+          sortname: 'fn_apagar_auditoria.id',
+          sortorder: 'desc',
+          rp: 1,
         },
+      );
+      const ultimo = res.registros[0];
+      return ultimo ? lerStatusAuditoria(ultimo) : null;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.auditoriaIndisponivelAte = Date.now() + PAUSA_AUDITORIA_MS;
+      this.logger.warn(
+        `Não foi possível ler a auditoria do fn_apagar ${idFnApagar}: ${message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Confere no IXC todas as contas que ainda podem mudar de lá para cá (para
+   * um job/polling). Entram as que não estão pagas — inclusive reprovadas, que
+   * podem ter sido liberadas ou apagadas por lá — e as pagas recentes, para
+   * pegar exclusão e estorno enquanto o mês ainda está fresco.
+   */
+  async sincronizarPendentes(): Promise<ResumoSincronizacao> {
+    const contas = await this.prisma.contaPagar.findMany({
+      where: {
         idFnApagarIxc: { not: null },
+        OR: [
+          { status: { not: StatusContaPagar.PAGO } },
+          {
+            status: StatusContaPagar.PAGO,
+            updatedAt: { gte: diasAtras(DIAS_CONFERE_PAGA) },
+          },
+        ],
       },
       select: { id: true },
     });
+
     let pagas = 0;
+    let removidas = 0;
+    let atualizadas = 0;
     let erros = 0;
-    for (const p of pendentes) {
+    for (const p of contas) {
       try {
-        const atual = await this.sincronizarStatus(p.id);
-        if (atual.status === StatusContaPagar.PAGO) pagas++;
+        const r = await this.sincronizarStatus(p.id);
+        if (r.removida) removidas++;
+        else if (r.mudouStatus) {
+          atualizadas++;
+          if (r.conta?.status === StatusContaPagar.PAGO) pagas++;
+        }
       } catch (err) {
         // Uma conta com falha não deve abortar a verificação das demais.
         erros++;
@@ -471,7 +626,7 @@ export class ContasPagarService {
         this.logger.warn(`Falha ao sincronizar conta ${p.id}: ${message}`);
       }
     }
-    return { verificadas: pendentes.length, pagas, erros };
+    return { verificadas: contas.length, pagas, removidas, atualizadas, erros };
   }
 
   // -------------------------------------------------------------------------
@@ -511,16 +666,53 @@ export class ContasPagarService {
     return conta;
   }
 
+  /**
+   * Apaga a conta dos dois lados: primeiro o fn_apagar no IXC, depois o
+   * registro daqui. Se o IXC recusar, nada é apagado — as duas telas não podem
+   * divergir. Conta já paga fica de fora: dinheiro que saiu é histórico, e o
+   * caminho é estornar no IXC (a verificação traz a mudança para cá).
+   */
   async remover(id: string): Promise<void> {
     const conta = await this.buscar(id);
-    if (
-      conta.status !== StatusContaPagar.RASCUNHO &&
-      conta.status !== StatusContaPagar.ERRO
-    ) {
+    if (conta.status === StatusContaPagar.PAGO) {
       throw new BadRequestException(
-        'Só é possível remover contas em rascunho ou com erro',
+        'Esta conta já foi paga — estorne ou apague no IXC e clique em ' +
+          '"Verificar" para ela sair daqui.',
       );
     }
+    if (conta.idFnApagarIxc) await this.apagarNoIxc(conta.idFnApagarIxc);
+    await this.apagarLocal(id);
+  }
+
+  /** Apaga o fn_apagar no IXC. Já não existir por lá não é erro. */
+  private async apagarNoIxc(idFnApagar: number): Promise<void> {
+    try {
+      await this.ixc.remove('fn_apagar', idFnApagar);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (await this.existeNoIxc(idFnApagar)) {
+        throw new BadRequestException(
+          `O IXC não apagou a conta (fn_apagar ${idFnApagar}): ${message}`,
+        );
+      }
+      this.logger.warn(
+        `fn_apagar ${idFnApagar} já não existia no IXC ao apagar: ${message}`,
+      );
+    }
+  }
+
+  /** Na dúvida (consulta falhou), assume que existe e não apaga nada aqui. */
+  private async existeNoIxc(idFnApagar: number): Promise<boolean> {
+    try {
+      const raw = await this.ixc.getById('fn_apagar', 'fn_apagar.id', idFnApagar);
+      return raw !== null;
+    } catch {
+      return true;
+    }
+  }
+
+  /** Apaga só o registro local, soltando o que dependia dele. */
+  private async apagarLocal(id: string): Promise<void> {
     // Antes de apagar: a FK vira null e a parcela ficaria baixada sem dono.
     await this.vales.estornarBaixa(id);
     await this.prisma.contaPagar.delete({ where: { id } });
@@ -627,9 +819,54 @@ export function montarSituacaoAdiantamento(
   };
 }
 
+/** Como o IXC vê a conta agora. */
+export interface SituacaoNoIxc {
+  pago: boolean;
+  cancelada: boolean;
+  auditoria: StatusAuditoriaIxc | null;
+}
+
+/**
+ * Para qual situação a conta daqui deve ir depois do que o IXC respondeu.
+ * null = nada muda.
+ *
+ * O pagamento confirmado vence tudo. Depois vale a auditoria feita lá: quem
+ * reprova, cancela ou libera na tela do IXC manda no que aparece aqui. Sem
+ * notícia nenhuma da auditoria, o status local é preservado — pode ser que a
+ * base nem exponha esse dado, e chute nenhum é melhor que chute errado.
+ */
+export function statusPeloIxc(
+  atual: StatusContaPagar,
+  ixc: SituacaoNoIxc,
+): StatusContaPagar | null {
+  const mudarPara = (destino: StatusContaPagar) =>
+    destino === atual ? null : destino;
+
+  if (ixc.pago) return mudarPara(StatusContaPagar.PAGO);
+  if (ixc.cancelada) return mudarPara(StatusContaPagar.CANCELADO);
+
+  switch (ixc.auditoria) {
+    case 'R':
+      return mudarPara(StatusContaPagar.REPROVADO);
+    case 'C':
+      return mudarPara(StatusContaPagar.CANCELADO);
+    case 'A':
+      // Liberada pela auditoria: falta o "pagar com ModoBank".
+      return atual === StatusContaPagar.PAGO
+        ? null
+        : mudarPara(StatusContaPagar.AGUARDANDO_PAGAMENTO);
+    default:
+      return null;
+  }
+}
+
 function hojeUtc(): Date {
   const now = new Date();
   return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+}
+
+function diasAtras(dias: number): Date {
+  return new Date(Date.now() - dias * 24 * 60 * 60 * 1000);
 }
 
 function contaContabilPorTipo(

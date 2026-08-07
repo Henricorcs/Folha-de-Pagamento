@@ -46,7 +46,8 @@ export interface DadosFolhaFuncionario {
   /**
    * Só para quem tem carteira assinada: o que a folha daqui paga, já que o
    * salário oficial sai pela contabilidade. Preenchido, substitui o salário
-   * base como base do cálculo.
+   * base no saldo salarial — mas não no adiantamento do dia 25, que segue os
+   * 40% do salário base.
    */
   valorAReceberFolha?: number | null;
   /** opção de receber o adiantamento do dia 25 */
@@ -103,9 +104,12 @@ export interface ParametrosLancamento {
 }
 
 /**
- * Base do cálculo da folha. Quem tem carteira assinada recebe o salário
+ * Base do **saldo salarial**. Quem tem carteira assinada recebe o salário
  * oficial pela contabilidade, então a folha daqui trabalha em cima do
  * combinado ("a receber na folha"); sem esse valor, cai no salário base.
+ *
+ * Não vale para o adiantamento do dia 25: o percentual dele sai sempre do
+ * salário base (ver `calcularAdiantamento`).
  */
 export function baseDaFolha(d: DadosFolhaFuncionario): number {
   return usaValorAReceber(d)
@@ -121,7 +125,11 @@ export function usaValorAReceber(d: DadosFolhaFuncionario): boolean {
 /**
  * Valor do adiantamento do dia 25. Quem não recebe adiantamento fica em zero.
  * Ordem: valor definido no cadastro → lançamento de ADIANTAMENTO → percentual
- * da base da folha (40% por padrão).
+ * do **salário base** (40% por padrão).
+ *
+ * O percentual sai sempre do salário base, inclusive para quem tem carteira
+ * assinada: o adiantamento é do salário da pessoa, não do combinado que a
+ * folha daqui paga ("a receber na folha"). Regra do usuário (2026-08-07).
  */
 export function calcularAdiantamento(
   d: DadosFolhaFuncionario,
@@ -132,7 +140,7 @@ export function calcularAdiantamento(
   if (doCadastro > 0) return doCadastro;
   const fixo = arredondar(d.adiantamentoFixo);
   if (fixo > 0) return fixo;
-  return arredondar((baseDaFolha(d) * percentual) / 100);
+  return arredondar((arredondar(d.salarioBase) * percentual) / 100);
 }
 
 export interface OpcoesGeracao {

@@ -9,8 +9,9 @@ import type { AppConfig } from '../config/configuration';
 import { ContasPagarService } from './contas-pagar.service';
 
 /**
- * "Esperar o retorno do banco": verifica periodicamente no IXC as contas
- * aguardando pagamento e marca como PAGO quando o banco confirma.
+ * "Esperar o retorno do banco": verifica periodicamente no IXC as contas que
+ * ainda podem mudar — marca como PAGO quando o banco confirma, reflete a
+ * auditoria feita na tela do IXC e apaga daqui o que foi apagado lá.
  * Intervalo em minutos via SYNC_PAGAMENTOS_INTERVALO_MIN (0 desliga).
  */
 @Injectable()
@@ -53,9 +54,10 @@ export class PagamentosPollerService implements OnModuleInit, OnModuleDestroy {
     this.executando = true;
     try {
       const r = await this.contasPagar.sincronizarPendentes();
-      if (r.pagas > 0 || r.erros > 0) {
+      if (r.atualizadas > 0 || r.removidas > 0 || r.erros > 0) {
         this.logger.log(
-          `Retorno do banco: ${r.verificadas} verificadas, ${r.pagas} pagas, ${r.erros} erros`,
+          `IXC: ${r.verificadas} verificadas, ${r.pagas} pagas, ` +
+            `${r.atualizadas} atualizadas, ${r.removidas} removidas, ${r.erros} erros`,
         );
       }
     } catch (err) {

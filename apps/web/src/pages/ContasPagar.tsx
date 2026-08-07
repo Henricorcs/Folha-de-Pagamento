@@ -12,7 +12,13 @@ import {
 import { api, mensagemErro } from '../lib/api';
 import { formatBRL, formatData } from '../lib/format';
 import { STATUS_LABEL, STATUS_TOM, TIPO_LABEL } from '../lib/status';
-import type { ContaPagar, Paginado, StatusContaPagar } from '../lib/types';
+import type {
+  ContaPagar,
+  Paginado,
+  ResultadoSincronizacao,
+  ResumoSincronizacao,
+  StatusContaPagar,
+} from '../lib/types';
 
 const STATUS_FILTROS: (StatusContaPagar | 'todos')[] = [
   'todos',
@@ -20,6 +26,7 @@ const STATUS_FILTROS: (StatusContaPagar | 'todos')[] = [
   'AGUARDANDO_PAGAMENTO',
   'PAGO',
   'REPROVADO',
+  'CANCELADO',
   'ERRO',
 ];
 
@@ -30,6 +37,33 @@ const ETAPAS = [
   ['Pagar', 'ModoBank, na tela do IXC'],
   ['Conferir', 'o banco confirma aqui'],
 ];
+
+/**
+ * Dá para mudar de ideia nos dois sentidos: reprovada volta a ser aprovada e
+ * vice-versa, do mesmo jeito que na auditoria do IXC. Só o pagamento
+ * confirmado pelo banco é ponto final — e conta que nunca chegou ao IXC não
+ * tem o que auditar.
+ */
+function podeAprovar(c: ContaPagar): boolean {
+  if (c.idFnApagarIxc === null || c.status === 'PAGO') return false;
+  return c.status !== 'AGUARDANDO_PAGAMENTO' && c.status !== 'APROVADO';
+}
+
+function podeReprovar(c: ContaPagar): boolean {
+  if (c.idFnApagarIxc === null || c.status === 'PAGO') return false;
+  return c.status !== 'REPROVADO';
+}
+
+/** O que dizer depois de conferir uma conta no IXC. */
+function resumoDaVerificacao(r: ResultadoSincronizacao): string {
+  if (r.removida) {
+    return 'Essa conta não existe mais no IXC — foi apagada daqui também.';
+  }
+  if (r.mudouStatus && r.conta) {
+    return `O IXC mudou a situação: agora está "${STATUS_LABEL[r.conta.status]}".`;
+  }
+  return 'Nada mudou no IXC: a conta segue como está.';
+}
 
 export function ContasPagar() {
   const qc = useQueryClient();
@@ -57,14 +91,27 @@ export function ContasPagar() {
       return (await api.post(url, args.motivo ? { motivo: args.motivo } : {}))
         .data;
     },
-    onSuccess: (_d, args) => {
+    onSuccess: (d, args) => {
       const nomes: Record<string, string> = {
-        aprovar: 'Conta aprovada.',
-        reprovar: 'Conta reprovada.',
-        sincronizar: 'Situação atualizada com o IXC.',
+        aprovar: 'Conta aprovada — no IXC também.',
+        reprovar: 'Conta reprovada — no IXC também.',
         enviar: 'Conta reenviada ao IXC.',
       };
-      setFeedback(nomes[args.op] ?? 'Pronto.');
+      setFeedback(
+        args.op === 'sincronizar'
+          ? resumoDaVerificacao(d as ResultadoSincronizacao)
+          : (nomes[args.op] ?? 'Pronto.'),
+      );
+      invalidar();
+    },
+    onError: (err) => setFeedback(mensagemErro(err)),
+  });
+
+  const excluir = useMutation({
+    mutationFn: async (id: string) =>
+      (await api.delete(`/contas-pagar/${id}`)).data,
+    onSuccess: () => {
+      setFeedback('Conta apagada aqui e no IXC.');
       invalidar();
     },
     onError: (err) => setFeedback(mensagemErro(err)),
@@ -73,26 +120,54 @@ export function ContasPagar() {
   const sincronizarTudo = useMutation({
     mutationFn: async () =>
       (
-        await api.post<{ verificadas: number; pagas: number }>(
+        await api.post<ResumoSincronizacao>(
           '/contas-pagar/sincronizar-pendentes',
         )
       ).data,
     onSuccess: (d) => {
-      setFeedback(
-        `${d.verificadas} conta(s) verificadas no IXC — ${d.pagas} já constam como pagas.`,
-      );
+      const partes = [`${d.verificadas} conta(s) verificadas no IXC`];
+      if (d.pagas > 0) partes.push(`${d.pagas} o banco acabou de confirmar`);
+      const outras = d.atualizadas - d.pagas;
+      if (outras > 0) partes.push(`${outras} mudaram de situação lá`);
+      if (d.removidas > 0) {
+        partes.push(`${d.removidas} não existem mais lá e saíram daqui`);
+      }
+      if (partes.length === 1) partes.push('nada mudou');
+      setFeedback(`${partes.join(' — ')}.`);
       invalidar();
     },
     onError: (err) => setFeedback(mensagemErro(err)),
   });
 
-  function aprovar(id: string) {
-    const motivo = prompt('Motivo da aprovação:', 'Aprovado');
-    if (motivo !== null) acao.mutate({ id, op: 'aprovar', motivo });
+  function aprovar(c: ContaPagar) {
+    const mudandoDeIdeia = c.status !== 'AGUARDANDO_APROVACAO';
+    const motivo = prompt(
+      mudandoDeIdeia
+        ? `Voltar atrás e aprovar a conta de ${c.beneficiarioNome}. Motivo:`
+        : 'Motivo da aprovação:',
+      'Aprovado',
+    );
+    if (motivo !== null) acao.mutate({ id: c.id, op: 'aprovar', motivo });
   }
-  function reprovar(id: string) {
-    const motivo = prompt('Motivo da reprovação:');
-    if (motivo) acao.mutate({ id, op: 'reprovar', motivo });
+
+  function reprovar(c: ContaPagar) {
+    const mudandoDeIdeia = c.status !== 'AGUARDANDO_APROVACAO';
+    const motivo = prompt(
+      mudandoDeIdeia
+        ? `Voltar atrás e reprovar a conta de ${c.beneficiarioNome}. Motivo:`
+        : 'Motivo da reprovação:',
+    );
+    if (motivo) acao.mutate({ id: c.id, op: 'reprovar', motivo });
+  }
+
+  function apagar(c: ContaPagar) {
+    const ok = confirm(
+      `Apagar a conta de ${c.beneficiarioNome} — ${formatBRL(c.valor)}?\n\n` +
+        (c.idFnApagarIxc
+          ? 'Ela sai daqui e o lançamento é apagado no IXC. Não dá para desfazer.'
+          : 'Ela nunca chegou ao IXC, então só sai daqui.'),
+    );
+    if (ok) excluir.mutate(c.id);
   }
 
   const total = (lista.data?.itens ?? []).reduce(
@@ -105,7 +180,7 @@ export function ContasPagar() {
       <CabecalhoPagina
         secao="Contas a pagar"
         titulo="Pagamentos no IXC"
-        descricao="Cada conta nasce aqui, passa pela auditoria e só vira dinheiro quando o banco confirma."
+        descricao="Cada conta nasce aqui, passa pela auditoria e só vira dinheiro quando o banco confirma. O que você faz nesta tela vale no IXC — e o que mudar lá volta no botão Verificar."
         acoes={
           <button
             onClick={() => sincronizarTudo.mutate()}
@@ -215,40 +290,50 @@ export function ContasPagar() {
                     </Selo>
                   </td>
                   <td className="td text-right">
-                    <div className="flex justify-end gap-1.5">
-                      {c.status === 'AGUARDANDO_APROVACAO' && (
-                        <>
-                          <button
-                            onClick={() => aprovar(c.id)}
-                            className="btn btn-p bg-brand-600 text-white hover:bg-brand-700"
-                          >
-                            Aprovar
-                          </button>
-                          <button
-                            onClick={() => reprovar(c.id)}
-                            className="btn btn-p border border-rose-200 text-rose-600 hover:bg-rose-50"
-                          >
-                            Reprovar
-                          </button>
-                        </>
-                      )}
-                      {(c.status === 'AGUARDANDO_PAGAMENTO' ||
-                        c.status === 'APROVADO') && (
+                    <div className="flex flex-wrap justify-end gap-1.5">
+                      {podeAprovar(c) && (
                         <button
-                          onClick={() =>
-                            acao.mutate({ id: c.id, op: 'sincronizar' })
-                          }
-                          className="btn btn-neutro btn-p"
+                          onClick={() => aprovar(c)}
+                          className="btn btn-p bg-brand-600 text-white hover:bg-brand-700"
                         >
-                          Verificar
+                          Aprovar
                         </button>
                       )}
-                      {c.status === 'ERRO' && (
+                      {podeReprovar(c) && (
+                        <button
+                          onClick={() => reprovar(c)}
+                          className="btn btn-p border border-rose-200 text-rose-600 hover:bg-rose-50"
+                        >
+                          Reprovar
+                        </button>
+                      )}
+                      {(c.status === 'ERRO' || c.status === 'RASCUNHO') && (
                         <button
                           onClick={() => acao.mutate({ id: c.id, op: 'enviar' })}
                           className="btn btn-p bg-amber-500 text-white hover:bg-amber-600"
                         >
                           Reenviar
+                        </button>
+                      )}
+                      {c.idFnApagarIxc !== null && (
+                        <button
+                          onClick={() =>
+                            acao.mutate({ id: c.id, op: 'sincronizar' })
+                          }
+                          title="Traz do IXC o que mudou por lá: pagamento, aprovação, reprovação ou exclusão"
+                          className="btn btn-neutro btn-p"
+                        >
+                          Verificar
+                        </button>
+                      )}
+                      {c.status !== 'PAGO' && (
+                        <button
+                          onClick={() => apagar(c)}
+                          disabled={excluir.isPending}
+                          title="Apaga aqui e no IXC"
+                          className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600"
+                        >
+                          Excluir
                         </button>
                       )}
                     </div>

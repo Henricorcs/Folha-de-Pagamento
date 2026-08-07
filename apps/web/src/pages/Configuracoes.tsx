@@ -83,7 +83,7 @@ export function Configuracoes() {
               onChange={(v) => num('cidadePadraoId', v)}
             />
             <CampoNum
-              label="Adiantamento do dia 25 (% do salário)"
+              label="Adiantamento do dia 25 (% do salário base)"
               valor={form.percentualAdiantamento}
               onChange={(v) => num('percentualAdiantamento', v)}
             />

@@ -111,6 +111,14 @@ export class IxcClient {
     return this.write('put', `/${resource}/${id}`, body);
   }
 
+  /** Apaga um registro (DELETE /resource/id). */
+  async remove(
+    resource: string,
+    id: number | string,
+  ): Promise<IxcActionResponse> {
+    return this.write('delete', `/${resource}/${id}`);
+  }
+
   /**
    * Chama um endpoint de ação/botão (ex.: fn_apagar_auditoria) via POST.
    * Esses endpoints não seguem o padrão CRUD e retornam formatos variados.
@@ -123,9 +131,9 @@ export class IxcClient {
   }
 
   private async write(
-    method: 'post' | 'put',
+    method: 'post' | 'put' | 'delete',
     url: string,
-    body: Record<string, unknown>,
+    body?: Record<string, unknown>,
   ): Promise<IxcActionResponse> {
     let res;
     try {

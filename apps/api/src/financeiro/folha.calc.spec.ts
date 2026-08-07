@@ -174,11 +174,12 @@ describe('a receber na folha (carteira assinada)', () => {
     expect(detalharSalario(d).usouValorAReceber).toBe(false);
   });
 
-  it('o adiantamento por percentual também sai da nova base', () => {
-    // 40% de 1200, e não de 2000
+  it('o adiantamento por percentual continua saindo do salário base', () => {
+    // 40% de 2000 (salário base), e não de 1200: o adiantamento é do salário
+    // da pessoa, não do combinado que esta folha paga.
     expect(
       calcularAdiantamento(comCarteira({ adiantamentoFixo: 0 })),
-    ).toBe(480);
+    ).toBe(800);
   });
 
   it('proventos e descontos do mês continuam entrando', () => {

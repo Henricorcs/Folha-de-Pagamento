@@ -8,7 +8,8 @@ type BaseFuncionario = Pick<
 /**
  * Quem tem carteira assinada recebe o salário oficial pela contabilidade; a
  * folha daqui paga o combinado em "a receber na folha". Sem esse valor, vale
- * o salário base. Mesma regra do `baseDaFolha` da API.
+ * o salário base. Mesma regra do `baseDaFolha` da API — e, como lá, isso vale
+ * para o saldo salarial, não para os 40% do dia 25 (esses saem do base).
  */
 export function usaValorAReceber(f: BaseFuncionario): boolean {
   return !!f.carteiraAssinada && Number(f.valorAReceberFolha ?? 0) > 0;

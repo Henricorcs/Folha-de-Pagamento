@@ -146,15 +146,50 @@ export function buildAuditoriaPayload(input: {
 /** Situação lida de um registro fn_apagar do IXC. */
 export interface SituacaoContaPagarIxc {
   pago: boolean;
-  statusAuditoria: 'A' | 'R' | 'C' | null;
+  /** `fn_apagar.status = C`: cancelada na tela do IXC. */
+  cancelada: boolean;
+  statusAuditoria: StatusAuditoriaIxc | null;
   valorPago: number;
   valorAberto: number;
   dataPagamento: Date | null;
 }
 
 /**
+ * Status da auditoria dentro de um registro cru. O nome da coluna varia entre
+ * versões do IXC, então procura os nomes conhecidos e, por fim, qualquer campo
+ * com "audit" no nome. Null = o registro não fala de auditoria (aí quem sabe é
+ * a tabela `fn_apagar_auditoria`).
+ */
+export function lerStatusAuditoria(
+  raw: Record<string, unknown>,
+): StatusAuditoriaIxc | null {
+  const candidatos = ['status_auditoria', 'auditoria', 'status_aud'];
+  for (const campo of candidatos) {
+    const v = normalizarStatusAuditoria(raw[campo]);
+    if (v) return v;
+  }
+  for (const [chave, valor] of Object.entries(raw)) {
+    if (!/audit/i.test(chave)) continue;
+    const v = normalizarStatusAuditoria(valor);
+    if (v) return v;
+  }
+  return null;
+}
+
+function normalizarStatusAuditoria(valor: unknown): StatusAuditoriaIxc | null {
+  const s = String(valor ?? '').trim().toUpperCase();
+  if (s === 'A' || s === 'R' || s === 'C') return s;
+  // Algumas telas devolvem o rótulo em vez do código.
+  if (s.startsWith('APROV')) return 'A';
+  if (s.startsWith('REPROV')) return 'R';
+  if (s.startsWith('CANCEL')) return 'C';
+  return null;
+}
+
+/**
  * Interpreta um registro cru de fn_apagar para descobrir se já foi pago
- * (retorno do banco) e o status da auditoria. Defensivo quanto a formatos.
+ * (retorno do banco), se foi cancelado e o status da auditoria. Defensivo
+ * quanto a formatos.
  */
 export function lerSituacaoContaPagar(
   raw: Record<string, unknown>,
@@ -162,18 +197,20 @@ export function lerSituacaoContaPagar(
   const valorPago = parseIxcDecimal(raw.valor_total_pago ?? raw.valor_pago);
   const valorAberto = parseIxcDecimal(raw.valor_aberto ?? raw.valor);
   const dataPagamento = parseIxcDate(raw.data_pagamento);
+  // fn_apagar.status: A = aberto, P = pago, C = cancelado.
   const status = String(raw.status ?? '').trim().toUpperCase();
-  const statusAud = String(raw.status_auditoria ?? '').trim().toUpperCase();
 
   const pago =
     status === 'P' ||
     dataPagamento !== null ||
     (valorPago > 0 && valorAberto <= 0.001);
 
-  const statusAuditoria =
-    statusAud === 'A' || statusAud === 'R' || statusAud === 'C'
-      ? (statusAud as 'A' | 'R' | 'C')
-      : null;
-
-  return { pago, statusAuditoria, valorPago, valorAberto, dataPagamento };
+  return {
+    pago,
+    cancelada: status === 'C',
+    statusAuditoria: lerStatusAuditoria(raw),
+    valorPago,
+    valorAberto,
+    dataPagamento,
+  };
 }

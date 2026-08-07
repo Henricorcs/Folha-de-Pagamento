@@ -6,6 +6,7 @@ import {
   formatValorIxc,
   inferirTipoChavePix,
   lerSituacaoContaPagar,
+  lerStatusAuditoria,
 } from './ixc.financeiro';
 
 describe('formatDataIxc / formatValorIxc', () => {
@@ -164,5 +165,51 @@ describe('lerSituacaoContaPagar', () => {
     });
     expect(s.pago).toBe(false);
     expect(s.statusAuditoria).toBeNull();
+  });
+
+  it('lê a reprovação feita na tela do IXC', () => {
+    const s = lerSituacaoContaPagar({
+      valor: '1000.00',
+      valor_aberto: '1000.00',
+      status: 'A', // aberto, não é "aprovado"
+      status_auditoria: 'R',
+    });
+    expect(s.pago).toBe(false);
+    expect(s.cancelada).toBe(false);
+    expect(s.statusAuditoria).toBe('R');
+  });
+
+  it('detecta conta cancelada no IXC', () => {
+    const s = lerSituacaoContaPagar({ valor: '1000.00', status: 'C' });
+    expect(s.cancelada).toBe(true);
+    expect(s.pago).toBe(false);
+  });
+});
+
+describe('lerStatusAuditoria', () => {
+  it('lê os nomes de campo conhecidos', () => {
+    expect(lerStatusAuditoria({ status_auditoria: 'r' })).toBe('R');
+    expect(lerStatusAuditoria({ auditoria: 'A' })).toBe('A');
+    expect(lerStatusAuditoria({ status_aud: 'C' })).toBe('C');
+  });
+
+  it('aceita o rótulo em vez do código', () => {
+    expect(lerStatusAuditoria({ status_auditoria: 'Reprovado' })).toBe('R');
+    expect(lerStatusAuditoria({ status_auditoria: 'Aprovada' })).toBe('A');
+  });
+
+  it('acha qualquer campo com "audit" no nome', () => {
+    expect(lerStatusAuditoria({ fn_auditoria_status: 'R' })).toBe('R');
+  });
+
+  it('ignora campos de auditoria que não são o status', () => {
+    expect(
+      lerStatusAuditoria({ data_auditoria: '2026-07-21', id_auditoria: '9' }),
+    ).toBeNull();
+  });
+
+  it('não confunde o status da conta com o da auditoria', () => {
+    // fn_apagar.status = A significa "aberto".
+    expect(lerStatusAuditoria({ status: 'A' })).toBeNull();
   });
 });

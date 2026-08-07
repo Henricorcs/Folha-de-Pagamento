@@ -302,8 +302,9 @@ function ConfigFolhaBloco({
           <p className="rounded-xl border border-tinta-200 bg-tinta-50 px-3.5 py-2.5 text-xs leading-relaxed text-tinta-600">
             O salário oficial sai pela contabilidade. Preencha{' '}
             <strong>A receber na folha</strong> com o que a empresa paga por
-            aqui — é esse valor que serve de base para o cálculo, no lugar do
-            salário base.
+            aqui — é esse valor que serve de base para o saldo salarial, no
+            lugar do salário base. O adiantamento do dia 25 continua saindo dos
+            40% do salário base.
           </p>
         )}
         <Marcador checked={recebeAdto} onChange={setRecebeAdto}>
@@ -343,7 +344,7 @@ function ConfigFolhaBloco({
               step="0.01"
               value={valorAdto}
               onChange={(e) => setValorAdto(e.target.value)}
-              placeholder="vazio = 40%"
+              placeholder="vazio = 40% do salário base"
               className="campo w-40"
             />
           </div>

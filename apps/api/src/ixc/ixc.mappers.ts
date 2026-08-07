@@ -19,13 +19,13 @@ export function mapFuncionario(raw: IxcFuncionario): {
   }
 
   const bancarios = extrairDadosBancarios(raw);
+  const salario = parseIxcDecimal(raw.salario);
 
   const common = {
     nome: (raw.funcionario ?? '').trim() || `Funcionário ${ixcId}`,
     cpfCnpj: emptyToNull(raw.cpf_cnpj),
     email: emptyToNull(raw.email),
     telefone: emptyToNull(raw.fone_celular) ?? emptyToNull(raw.fone),
-    salarioBase: new Prisma.Decimal(parseIxcDecimal(raw.salario)),
     filialId: parseIxcId(raw.filial_id),
     idFuncao: parseIxcId(raw.id_funcao),
     idDepartamento: parseIxcId(raw.id_departamento),
@@ -48,10 +48,22 @@ export function mapFuncionario(raw: IxcFuncionario): {
     ...(bancarios.chavePix ? { chavePix: bancarios.chavePix } : {}),
   };
 
+  // Mesma história do salário: muito funcionário está no IXC com o campo
+  // `salario` em branco (quem é CLT recebe pela contabilidade, quem entrou
+  // pelo fornecedor nunca teve esse campo). Zerar no update apagava o valor
+  // digitado aqui a cada sincronização — só sobrescreve quando o IXC informa.
+  const salarioUpdate =
+    salario > 0 ? { salarioBase: new Prisma.Decimal(salario) } : {};
+
   return {
     ixcId,
-    create: { ixcId, ...common, ...bancarios },
-    update: { ...common, ...bancariosUpdate },
+    create: {
+      ixcId,
+      ...common,
+      salarioBase: new Prisma.Decimal(salario),
+      ...bancarios,
+    },
+    update: { ...common, ...salarioUpdate, ...bancariosUpdate },
   };
 }
 

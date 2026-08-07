@@ -162,6 +162,23 @@ export interface ContaPagar {
   createdAt: string;
 }
 
+/** O que a conferência com o IXC descobriu sobre uma conta. */
+export interface ResultadoSincronizacao {
+  /** null = não existe mais no IXC e foi apagada daqui também. */
+  conta: ContaPagar | null;
+  removida: boolean;
+  mudouStatus: boolean;
+  statusAnterior: StatusContaPagar;
+}
+
+export interface ResumoSincronizacao {
+  verificadas: number;
+  pagas: number;
+  removidas: number;
+  atualizadas: number;
+  erros: number;
+}
+
 export interface LancamentoCalculado {
   tipo: TipoLancamento;
   valor: number;

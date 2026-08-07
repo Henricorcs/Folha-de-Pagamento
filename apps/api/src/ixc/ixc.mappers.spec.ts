@@ -70,6 +70,28 @@ describe('mapFuncionario', () => {
     // conta vazia: preserva o valor local (não entra no update).
     expect('conta' in update).toBe(false);
   });
+
+  it('no update, não zera o salário quando o IXC não informa', () => {
+    const semSalario = mapFuncionario({ id: '9', funcionario: 'LETÍCIA' });
+    expect(Number(semSalario.create.salarioBase)).toBe(0);
+    expect('salarioBase' in semSalario.update).toBe(false);
+
+    const zerado = mapFuncionario({
+      id: '9',
+      funcionario: 'LETÍCIA',
+      salario: '0.00',
+    });
+    expect('salarioBase' in zerado.update).toBe(false);
+  });
+
+  it('no update, sobrescreve o salário que o IXC informa', () => {
+    const { update } = mapFuncionario({
+      id: '9',
+      funcionario: 'LETÍCIA',
+      salario: '1.412,00',
+    });
+    expect(Number(update.salarioBase)).toBe(1412);
+  });
 });
 
 describe('extrairChavePix', () => {
