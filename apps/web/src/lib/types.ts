@@ -269,6 +269,8 @@ export interface PreviewFuncionario {
   vales: ParcelaValeFolha[];
   /** Conta de salário que já existe nesta competência */
   salarioJaGerado: ContaJaGerada | null;
+  /** Conta de bônus que já existe nesta competência */
+  bonusJaGerado: ContaJaGerada | null;
   lancamentos: LancamentoCalculado[];
 }
 

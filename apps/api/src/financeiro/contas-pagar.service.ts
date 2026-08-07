@@ -67,6 +67,8 @@ export interface PreviewFuncionario {
   vales: AcertoValeCompetencia['parcelas'];
   /** Conta de SALÁRIO que já existe nesta competência (null = ainda não). */
   salarioJaGerado: ContaJaGerada | null;
+  /** Conta de BÔNUS que já existe nesta competência (null = ainda não). */
+  bonusJaGerado: ContaJaGerada | null;
   lancamentos: LancamentoCalculado[];
 }
 
@@ -172,11 +174,17 @@ export class ContasPagarService {
       ids,
       TipoLancamento.ADIANTAMENTO,
     );
-    // Salário já gerado nesta competência: gerar de novo paga duas vezes.
+    // Salário e bônus já gerados nesta competência: gerar de novo paga duas
+    // vezes. Vale para os dois — o bônus é um pagamento como qualquer outro.
     const contasSalario = await this.contasPorTipo(
       dto.competencia,
       ids,
       TipoLancamento.SALARIO,
+    );
+    const contasBonus = await this.contasPorTipo(
+      dto.competencia,
+      ids,
+      TipoLancamento.BONUS,
     );
     // Vales e acertos só mexem no salário; no dia 25 não há o que abater.
     const acertosVale: Map<string, AcertoValeCompetencia> =
@@ -243,6 +251,7 @@ export class ContasPagarService {
         composicao: detalharSalario(dados, cfg.percentualAdiantamento),
         vales: vale?.parcelas ?? [],
         salarioJaGerado: montarContaJaGerada(contasSalario.get(f.id) ?? null),
+        bonusJaGerado: montarContaJaGerada(contasBonus.get(f.id) ?? null),
         lancamentos,
       };
     });

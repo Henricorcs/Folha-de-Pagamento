@@ -21,6 +21,7 @@ import type {
   ParcelaValeFolha,
   PreviewFuncionario,
   SituacaoAdiantamento,
+  TipoLancamento,
 } from '../lib/types';
 
 interface ItemGerar extends LancamentoCalculado {
@@ -35,8 +36,11 @@ interface ItemGerar extends LancamentoCalculado {
   composicao: ComposicaoSalario;
   /** Parcelas de vale/acerto desta competência. */
   vales: ParcelaValeFolha[];
-  /** Conta de salário que já existe nesta competência. */
-  salarioJaGerado: ContaJaGerada | null;
+  /**
+   * Conta a pagar **deste mesmo lançamento** que já existe na competência —
+   * salário, bônus ou dia 25. É o que faz a linha nascer desmarcada.
+   */
+  jaGerado: ContaJaGerada | null;
   /** Valor que a API calculou, antes de a tela mexer no dia 25. */
   valorOriginal: number;
   /**
@@ -364,21 +368,47 @@ function ValesJaBaixados({ vales }: { vales: ParcelaValeFolha[] }) {
 }
 
 /**
- * Avisa quando o salário daquela pessoa já saiu nesta competência. Gerar de
- * novo cria um segundo pagamento — e é justamente por isso que o vale já
- * abatido não é descontado outra vez.
+ * A conta a pagar daquele lançamento que já existe nesta competência. É o que
+ * decide quem nasce marcado na prévia: quem já recebeu (ou já tem o pagamento
+ * criado) fica de fora, cada tipo olhando o seu — o bônus tem o dele.
  */
-function SeloSalarioGerado({ conta }: { conta: ContaJaGerada | null }) {
+function jaGeradoDoLancamento(
+  tipo: TipoLancamento,
+  f: PreviewFuncionario,
+): ContaJaGerada | null {
+  if (tipo === 'SALARIO') return f.salarioJaGerado;
+  if (tipo === 'BONUS') return f.bonusJaGerado;
+  if (tipo === 'ADIANTAMENTO') {
+    const a = f.adiantamento;
+    if (!a || a.situacao === 'NAO_GERADO' || !a.status) return null;
+    return { situacao: a.situacao, status: a.status, pagoEm: a.pagoEm };
+  }
+  return null;
+}
+
+/**
+ * Avisa quando aquele pagamento já saiu nesta competência. Gerar de novo cria
+ * um segundo pagamento — e é justamente por isso que o vale já abatido não é
+ * descontado outra vez.
+ */
+function SeloJaGerado({
+  tipo,
+  conta,
+}: {
+  tipo: TipoLancamento;
+  conta: ContaJaGerada | null;
+}) {
   if (!conta) return null;
+  const nome = TIPO_LABEL[tipo].toLowerCase();
   return (
     <Selo
       tom={conta.situacao === 'PAGO' ? 'erro' : 'atencao'}
       pequeno
-      titulo="Já existe conta a pagar de salário nesta competência. Gerar de novo paga duas vezes — confira em Contas a Pagar antes."
+      titulo={`Já existe conta a pagar de ${nome} nesta competência. Gerar de novo paga duas vezes — confira em Contas a Pagar antes.`}
     >
       {conta.situacao === 'PAGO'
-        ? `salário já pago${conta.pagoEm ? ` em ${formatData(conta.pagoEm)}` : ''}`
-        : `salário já gerado · ${STATUS_LABEL[conta.status].toLowerCase()}`}
+        ? `${nome} já pago${conta.pagoEm ? ` em ${formatData(conta.pagoEm)}` : ''}`
+        : `${nome} já gerado · ${STATUS_LABEL[conta.status].toLowerCase()}`}
     </Selo>
   );
 }
@@ -508,22 +538,19 @@ export function Folha() {
 
         for (const l of f.lancamentos) {
           // Pagamento que já existe na competência vem desmarcado: o certo é
-          // conferir em Contas a Pagar antes de gerar outro.
-          const jaExiste =
-            (l.tipo === 'SALARIO' && !!f.salarioJaGerado) ||
-            (l.tipo === 'ADIANTAMENTO' &&
-              !!f.adiantamento &&
-              f.adiantamento.situacao !== 'NAO_GERADO');
+          // conferir em Contas a Pagar antes de gerar outro. Vale para os três
+          // — salário, bônus e dia 25 —, cada um olhando a sua própria conta.
+          const jaGerado = jaGeradoDoLancamento(l.tipo, f);
           const item: ItemGerar = {
             ...l,
             funcionarioId: f.funcionarioId,
             nome: f.nome,
-            selecionado: !jaExiste,
+            selecionado: !jaGerado,
             carteiraAssinada: f.carteiraAssinada,
             adiantamento: f.adiantamento,
             composicao: f.composicao,
             vales: f.vales,
-            salarioJaGerado: f.salarioJaGerado,
+            jaGerado,
             valorOriginal: l.valor,
             descontarAdiantamento,
           };
@@ -839,11 +866,21 @@ export function Folha() {
                             adiantamento={g.adiantamento}
                             abatido={abatidoDia25(g.reparto)}
                           />
-                          {temSalario && (
-                            <SeloSalarioGerado
-                              conta={itens[g.indices[0]].salarioJaGerado}
-                            />
-                          )}
+                          {/* O dia 25 já tem o selo acima; aqui ficam salário
+                              e bônus que já saíram nesta competência. */}
+                          {g.indices
+                            .filter(
+                              (i) =>
+                                itens[i].tipo !== 'ADIANTAMENTO' &&
+                                itens[i].jaGerado,
+                            )
+                            .map((i) => (
+                              <SeloJaGerado
+                                key={i}
+                                tipo={itens[i].tipo}
+                                conta={itens[i].jaGerado}
+                              />
+                            ))}
                         </div>
                       </td>
                       <td className="td text-right">
@@ -912,6 +949,12 @@ export function Folha() {
                                         <span className="font-medium text-tinta-800">
                                           {TIPO_LABEL[it.tipo]}
                                         </span>
+                                        {/* Junto da caixa de seleção, para a
+                                            linha desmarcada se explicar. */}
+                                        <SeloJaGerado
+                                          tipo={it.tipo}
+                                          conta={it.jaGerado}
+                                        />
                                         {it.tipo === 'SALARIO' &&
                                           g.carteiraAssinada &&
                                           g.temOpcaoDia25 && (
