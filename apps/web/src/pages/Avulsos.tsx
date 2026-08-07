@@ -1,7 +1,9 @@
 import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Aviso, Bloco, CabecalhoPagina, Pagina } from '../components/ui';
 import { api, mensagemErro } from '../lib/api';
+import { formatBRL } from '../lib/format';
 import type { ContaPagar } from '../lib/types';
 
 export function Avulsos() {
@@ -16,6 +18,7 @@ export function Avulsos() {
     observacao: '',
   });
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [erro, setErro] = useState(false);
 
   const criar = useMutation({
     mutationFn: async () => {
@@ -31,14 +34,19 @@ export function Avulsos() {
       return (await api.post<ContaPagar>('/avulsos', body)).data;
     },
     onSuccess: (conta) => {
+      setErro(conta.status === 'ERRO');
       setFeedback(
         conta.status === 'ERRO'
-          ? `Criado localmente, mas houve erro no IXC: ${conta.erro}`
-          : 'Pagamento avulso criado no IXC. Redirecionando…',
+          ? `Salvo aqui, mas o IXC recusou: ${conta.erro}`
+          : 'Pagamento criado no IXC. Abrindo Contas a Pagar…',
       );
-      if (conta.status !== 'ERRO') setTimeout(() => navigate('/contas-pagar'), 1200);
+      if (conta.status !== 'ERRO')
+        setTimeout(() => navigate('/contas-pagar'), 1200);
     },
-    onError: (err) => setFeedback(mensagemErro(err)),
+    onError: (err) => {
+      setErro(true);
+      setFeedback(mensagemErro(err));
+    },
   });
 
   function set<K extends keyof typeof form>(k: K, v: string) {
@@ -51,94 +59,101 @@ export function Avulsos() {
     form.observacao.trim().length >= 3;
 
   return (
-    <div className="p-8">
-      <h1 className="text-2xl font-semibold text-slate-800">Pagamentos Avulsos</h1>
-      <p className="mb-6 text-sm text-slate-500">
-        Pague alguém sem cadastro de funcionário (ex.: patrocínio). O beneficiário é
-        criado como fornecedor no IXC automaticamente.
-      </p>
+    <Pagina>
+      <CabecalhoPagina
+        secao="Pagamentos avulsos"
+        titulo="Pagar quem não é da folha"
+        descricao="Patrocínio, serviço pontual, ajuda de custo. O beneficiário vira fornecedor no IXC automaticamente."
+      />
 
-      {feedback && (
-        <div className="mb-5 max-w-2xl rounded-lg border border-brand-100 bg-brand-50 px-4 py-3 text-sm text-brand-800">
-          {feedback}
-        </div>
-      )}
+      {feedback && <Aviso tom={erro ? 'erro' : 'marca'}>{feedback}</Aviso>}
 
-      <div className="max-w-2xl rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Campo label="Nome / Razão social" span2>
-            <input
-              value={form.nome}
-              onChange={(e) => set('nome', e.target.value)}
-              className={inputCls}
-              placeholder="Ex.: João da Silva"
-            />
-          </Campo>
-          <Campo label="Tipo de pessoa">
-            <select
-              value={form.tipoPessoa}
-              onChange={(e) => set('tipoPessoa', e.target.value)}
-              className={inputCls}
+      <div className="max-w-3xl">
+        <Bloco className="surgir surgir-1">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Campo label="Nome ou razão social" span2>
+              <input
+                value={form.nome}
+                onChange={(e) => set('nome', e.target.value)}
+                className="campo"
+                placeholder="Ex.: João da Silva"
+              />
+            </Campo>
+            <Campo label="Tipo de pessoa">
+              <select
+                value={form.tipoPessoa}
+                onChange={(e) => set('tipoPessoa', e.target.value)}
+                className="campo"
+              >
+                <option value="F">Física</option>
+                <option value="J">Jurídica</option>
+              </select>
+            </Campo>
+            <Campo label="CPF ou CNPJ">
+              <input
+                value={form.cpfCnpj}
+                onChange={(e) => set('cpfCnpj', e.target.value)}
+                className="campo"
+              />
+            </Campo>
+            <Campo label="Chave PIX">
+              <input
+                value={form.chavePix}
+                onChange={(e) => set('chavePix', e.target.value)}
+                className="campo"
+                placeholder="Sem ela o banco não paga"
+              />
+            </Campo>
+            <Campo label="Conta contábil (id_conta)">
+              <input
+                type="number"
+                value={form.contaContabil}
+                onChange={(e) => set('contaContabil', e.target.value)}
+                className="campo"
+                placeholder="Ex.: 13916"
+              />
+            </Campo>
+            <Campo label="Valor (R$)" span2>
+              <input
+                type="number"
+                step="0.01"
+                value={form.valor}
+                onChange={(e) => set('valor', e.target.value)}
+                className="campo"
+              />
+            </Campo>
+            <Campo label="Observação — é o que aparece no IXC" span2>
+              <input
+                value={form.observacao}
+                onChange={(e) => set('observacao', e.target.value)}
+                className="campo"
+                placeholder="Ex.: patrocínio do campeonato de julho"
+              />
+            </Campo>
+          </div>
+
+          <div className="mt-6 flex flex-wrap items-center gap-4 border-t border-tinta-100 pt-5">
+            <button
+              onClick={() => criar.mutate()}
+              disabled={!valido || criar.isPending}
+              className="btn btn-primario"
             >
-              <option value="F">Física</option>
-              <option value="J">Jurídica</option>
-            </select>
-          </Campo>
-          <Campo label="CPF / CNPJ">
-            <input
-              value={form.cpfCnpj}
-              onChange={(e) => set('cpfCnpj', e.target.value)}
-              className={inputCls}
-            />
-          </Campo>
-          <Campo label="Chave PIX">
-            <input
-              value={form.chavePix}
-              onChange={(e) => set('chavePix', e.target.value)}
-              className={inputCls}
-            />
-          </Campo>
-          <Campo label="Conta contábil (id_conta)">
-            <input
-              type="number"
-              value={form.contaContabil}
-              onChange={(e) => set('contaContabil', e.target.value)}
-              className={inputCls}
-              placeholder="Ex.: 13916"
-            />
-          </Campo>
-          <Campo label="Valor (R$)">
-            <input
-              type="number"
-              step="0.01"
-              value={form.valor}
-              onChange={(e) => set('valor', e.target.value)}
-              className={inputCls}
-            />
-          </Campo>
-          <Campo label="Observação" span2>
-            <input
-              value={form.observacao}
-              onChange={(e) => set('observacao', e.target.value)}
-              className={inputCls}
-              placeholder="Ex.: Patrocínio evento X"
-            />
-          </Campo>
-        </div>
-        <button
-          onClick={() => criar.mutate()}
-          disabled={!valido || criar.isPending}
-          className="mt-5 rounded-lg bg-green-600 px-5 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-60"
-        >
-          {criar.isPending ? 'Criando…' : 'Criar pagamento no IXC'}
-        </button>
+              {criar.isPending ? 'Criando…' : 'Criar pagamento no IXC'}
+            </button>
+            {Number(form.valor) > 0 && (
+              <span className="text-sm text-tinta-500">
+                Vai sair{' '}
+                <strong className="valor text-[15px]">
+                  {formatBRL(Number(form.valor))}
+                </strong>
+              </span>
+            )}
+          </div>
+        </Bloco>
       </div>
-    </div>
+    </Pagina>
   );
 }
-
-const inputCls =
-  'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100';
 
 function Campo({
   label,
@@ -151,7 +166,7 @@ function Campo({
 }) {
   return (
     <div className={span2 ? 'sm:col-span-2' : ''}>
-      <label className="mb-1 block text-xs font-medium text-slate-500">{label}</label>
+      <label className="rotulo">{label}</label>
       {children}
     </div>
   );

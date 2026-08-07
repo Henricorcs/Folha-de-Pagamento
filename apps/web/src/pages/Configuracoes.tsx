@@ -1,5 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import {
+  Aviso,
+  Bloco,
+  CabecalhoPagina,
+  Carregando,
+  Pagina,
+} from '../components/ui';
 import { api, mensagemErro } from '../lib/api';
 import type { ConfigFinanceira } from '../lib/types';
 
@@ -7,6 +14,7 @@ export function Configuracoes() {
   const qc = useQueryClient();
   const [form, setForm] = useState<ConfigFinanceira | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [erro, setErro] = useState(false);
 
   const { data } = useQuery({
     queryKey: ['config-financeira'],
@@ -21,14 +29,23 @@ export function Configuracoes() {
   const salvar = useMutation({
     mutationFn: async () => (await api.put('/config-financeira', form)).data,
     onSuccess: () => {
+      setErro(false);
       setFeedback('Configurações salvas.');
       qc.invalidateQueries({ queryKey: ['config-financeira'] });
       setTimeout(() => setFeedback(null), 2500);
     },
-    onError: (err) => setFeedback(mensagemErro(err)),
+    onError: (err) => {
+      setErro(true);
+      setFeedback(mensagemErro(err));
+    },
   });
 
-  if (!form) return <div className="p-8 text-slate-400">Carregando…</div>;
+  if (!form)
+    return (
+      <Pagina>
+        <Carregando />
+      </Pagina>
+    );
 
   function num<K extends keyof ConfigFinanceira>(k: K, v: string) {
     setForm((f) => (f ? { ...f, [k]: Number(v) } : f));
@@ -38,130 +55,185 @@ export function Configuracoes() {
   }
 
   return (
-    <div className="p-8">
-      <h1 className="text-2xl font-semibold text-slate-800">Configurações financeiras</h1>
-      <p className="mb-6 text-sm text-slate-500">
-        Parâmetros usados ao gerar contas a pagar no IXC.
-      </p>
+    <Pagina>
+      <CabecalhoPagina
+        secao="Configurações"
+        titulo="Parâmetros da integração"
+        descricao="Tudo o que a folha usa para montar uma conta a pagar no IXC. Mexer aqui muda as próximas gerações, não o que já foi enviado."
+      />
 
-      {feedback && (
-        <div className="mb-5 max-w-2xl rounded-lg border border-brand-100 bg-brand-50 px-4 py-3 text-sm text-brand-800">
-          {feedback}
-        </div>
-      )}
+      {feedback && <Aviso tom={erro ? 'erro' : 'marca'}>{feedback}</Aviso>}
 
-      <div className="max-w-2xl space-y-6">
-        <Bloco titulo="IDs da integração">
-          <CampoNum label="Conta de pagamento (id_contas)" valor={form.contaPagamentoId} onChange={(v) => num('contaPagamentoId', v)} />
-          <CampoNum label="Filial (filial_id)" valor={form.filialId} onChange={(v) => num('filialId', v)} />
-          <CampoNum label="Cidade padrão (fornecedor)" valor={form.cidadePadraoId} onChange={(v) => num('cidadePadraoId', v)} />
-          <CampoNum label="Adiantamento dia 25 (% do salário)" valor={form.percentualAdiantamento} onChange={(v) => num('percentualAdiantamento', v)} />
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">
-              Tipo de pagamento (fn_apagar)
-            </label>
-            <input
-              value={form.tipoPagamentoPadrao}
-              onChange={(e) => txt('tipoPagamentoPadrao', e.target.value)}
-              className={inputCls}
-              placeholder='Ex.: "Dinheiro" ou "Pix"'
+      <div className="max-w-3xl space-y-6">
+        <Bloco titulo="IDs da integração" className="surgir surgir-1">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <CampoNum
+              label="Conta de pagamento (id_contas)"
+              valor={form.contaPagamentoId}
+              onChange={(v) => num('contaPagamentoId', v)}
+            />
+            <CampoNum
+              label="Filial (filial_id)"
+              valor={form.filialId}
+              onChange={(v) => num('filialId', v)}
+            />
+            <CampoNum
+              label="Cidade padrão do fornecedor"
+              valor={form.cidadePadraoId}
+              onChange={(v) => num('cidadePadraoId', v)}
+            />
+            <CampoNum
+              label="Adiantamento do dia 25 (% do salário)"
+              valor={form.percentualAdiantamento}
+              onChange={(v) => num('percentualAdiantamento', v)}
+            />
+            <div className="sm:col-span-2">
+              <label className="rotulo">Tipo de pagamento no fn_apagar</label>
+              <input
+                value={form.tipoPagamentoPadrao}
+                onChange={(e) => txt('tipoPagamentoPadrao', e.target.value)}
+                className="campo"
+                placeholder='O rótulo exato do seu IXC, ex.: "Pix"'
+              />
+            </div>
+          </div>
+        </Bloco>
+
+        <Bloco titulo="Contas contábeis" className="surgir surgir-2">
+          <p className="mb-4 text-xs text-tinta-500">
+            É o <span className="num">id_conta</span> do planejamento analítico
+            — o que separa salário de bônus no relatório do IXC.
+          </p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <CampoNum
+              label="Salário"
+              valor={form.contaContabilSalario}
+              onChange={(v) => num('contaContabilSalario', v)}
+            />
+            <CampoNum
+              label="Adiantamento"
+              valor={form.contaContabilAdiantamento}
+              onChange={(v) => num('contaContabilAdiantamento', v)}
+            />
+            <CampoNum
+              label="Bônus"
+              valor={form.contaContabilBonus}
+              onChange={(v) => num('contaContabilBonus', v)}
             />
           </div>
         </Bloco>
 
-        <Bloco titulo="Contas contábeis (id_conta / planejamento analítico)">
-          <CampoNum label="Salário" valor={form.contaContabilSalario} onChange={(v) => num('contaContabilSalario', v)} />
-          <CampoNum label="Adiantamento" valor={form.contaContabilAdiantamento} onChange={(v) => num('contaContabilAdiantamento', v)} />
-          <CampoNum label="Bônus" valor={form.contaContabilBonus} onChange={(v) => num('contaContabilBonus', v)} />
-        </Bloco>
-
-        <Bloco titulo="Filtro de funcionários (cadastro de fornecedor)">
-          <div className="sm:col-span-3 -mt-1 text-xs text-slate-500">
-            Fornecedor ativo com “Contribuinte ICMS” = Isento é tratado como
-            funcionário. Confira o resultado em Funcionários → “Filtro de
-            fornecedores” antes de importar.
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">
-              Campo do ICMS (vazio = detectar)
-            </label>
-            <input
-              value={form.fornecedorCampoIcms}
-              onChange={(e) => txt('fornecedorCampoIcms', e.target.value)}
-              className={inputCls}
-              placeholder="Ex.: contribuinte_icms"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">
-              Valores que significam Isento
-            </label>
-            <input
-              value={form.fornecedorIcmsIsento}
-              onChange={(e) => txt('fornecedorIcmsIsento', e.target.value)}
-              className={inputCls}
-              placeholder="Ex.: I,ISENTO"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">
-              Tabela dos dados bancários (vazio = descobrir)
-            </label>
-            <input
-              value={form.fornecedorTabelaBanco}
-              onChange={(e) => txt('fornecedorTabelaBanco', e.target.value)}
-              className={inputCls}
-              placeholder="Ex.: fornecedor_dados_bancarios"
-            />
+        <Bloco titulo="Quem conta como funcionário" className="surgir surgir-3">
+          <p className="mb-4 text-xs leading-relaxed text-tinta-500">
+            Fornecedor ativo com “Contribuinte ICMS” = Isento entra na folha.
+            Confira o resultado antes de importar.
+          </p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div>
+              <label className="rotulo">Campo do ICMS</label>
+              <input
+                value={form.fornecedorCampoIcms}
+                onChange={(e) => txt('fornecedorCampoIcms', e.target.value)}
+                className="campo"
+                placeholder="vazio = detectar"
+              />
+            </div>
+            <div>
+              <label className="rotulo">Valores que significam Isento</label>
+              <input
+                value={form.fornecedorIcmsIsento}
+                onChange={(e) => txt('fornecedorIcmsIsento', e.target.value)}
+                className="campo"
+                placeholder="Ex.: I,ISENTO"
+              />
+            </div>
+            <div>
+              <label className="rotulo">Tabela dos dados bancários</label>
+              <input
+                value={form.fornecedorTabelaBanco}
+                onChange={(e) => txt('fornecedorTabelaBanco', e.target.value)}
+                className="campo"
+                placeholder="vazio = descobrir"
+              />
+            </div>
           </div>
         </Bloco>
 
-        <Bloco titulo="Templates de observação ({competencia} → MM/AAAA)">
-          <CampoTxt label="Salário" valor={form.obsSalarioTemplate} onChange={(v) => txt('obsSalarioTemplate', v)} />
-          <CampoTxt label="Adiantamento" valor={form.obsAdiantamentoTemplate} onChange={(v) => txt('obsAdiantamentoTemplate', v)} />
-          <CampoTxt label="Bônus" valor={form.obsBonusTemplate} onChange={(v) => txt('obsBonusTemplate', v)} />
+        <Bloco titulo="Observação de cada pagamento" className="surgir surgir-4">
+          <p className="mb-4 text-xs text-tinta-500">
+            É o texto que a pessoa vê no IXC.{' '}
+            <span className="num">{'{competencia}'}</span> vira MM/AAAA.
+          </p>
+          <div className="space-y-4">
+            <CampoTxt
+              label="Salário"
+              valor={form.obsSalarioTemplate}
+              onChange={(v) => txt('obsSalarioTemplate', v)}
+            />
+            <CampoTxt
+              label="Adiantamento"
+              valor={form.obsAdiantamentoTemplate}
+              onChange={(v) => txt('obsAdiantamentoTemplate', v)}
+            />
+            <CampoTxt
+              label="Bônus"
+              valor={form.obsBonusTemplate}
+              onChange={(v) => txt('obsBonusTemplate', v)}
+            />
+          </div>
         </Bloco>
 
         <button
           onClick={() => salvar.mutate()}
           disabled={salvar.isPending}
-          className="rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+          className="btn btn-primario"
         >
           {salvar.isPending ? 'Salvando…' : 'Salvar configurações'}
         </button>
       </div>
-    </div>
+    </Pagina>
   );
 }
 
-function Bloco({ titulo, children }: { titulo: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
-        {titulo}
-      </h2>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">{children}</div>
-    </div>
-  );
-}
-
-const inputCls =
-  'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500';
-
-function CampoNum({ label, valor, onChange }: { label: string; valor: number; onChange: (v: string) => void }) {
+function CampoNum({
+  label,
+  valor,
+  onChange,
+}: {
+  label: string;
+  valor: number;
+  onChange: (v: string) => void;
+}) {
   return (
     <div>
-      <label className="mb-1 block text-xs font-medium text-slate-500">{label}</label>
-      <input type="number" value={valor} onChange={(e) => onChange(e.target.value)} className={inputCls} />
+      <label className="rotulo">{label}</label>
+      <input
+        type="number"
+        value={valor}
+        onChange={(e) => onChange(e.target.value)}
+        className="campo"
+      />
     </div>
   );
 }
 
-function CampoTxt({ label, valor, onChange }: { label: string; valor: string; onChange: (v: string) => void }) {
+function CampoTxt({
+  label,
+  valor,
+  onChange,
+}: {
+  label: string;
+  valor: string;
+  onChange: (v: string) => void;
+}) {
   return (
-    <div className="sm:col-span-3">
-      <label className="mb-1 block text-xs font-medium text-slate-500">{label}</label>
-      <input value={valor} onChange={(e) => onChange(e.target.value)} className={inputCls} />
+    <div>
+      <label className="rotulo">{label}</label>
+      <input
+        value={valor}
+        onChange={(e) => onChange(e.target.value)}
+        className="campo"
+      />
     </div>
   );
 }

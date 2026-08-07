@@ -1,6 +1,14 @@
 import { useMutation } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  Aviso,
+  CabecalhoPagina,
+  Pagina,
+  Selo,
+  Vazio,
+  type Tom,
+} from '../components/ui';
 import { api, mensagemErro } from '../lib/api';
 import { formatBRL, formatData } from '../lib/format';
 import { STATUS_LABEL, TIPO_LABEL } from '../lib/status';
@@ -47,22 +55,112 @@ function saldoComOpcao(it: ItemGerar): number {
     : arredondar(it.composicao.saldo + it.composicao.adiantamentoDescontado);
 }
 
-/**
- * Avisa quando o salário daquela pessoa já saiu nesta competência. Gerar de
- * novo cria um segundo pagamento — e é justamente por isso que o vale já
- * abatido não é descontado outra vez.
- */
-function SeloSalarioGerado({ conta }: { conta: ContaJaGerada | null }) {
-  if (!conta) return null;
+// ---------------------------------------------------------------------------
+// A régua: o saldo salarial aberto termo a termo, do jeito que se confere uma
+// conta no papel. É a peça central da tela — se um número surpreende, é aqui
+// que a pessoa descobre de onde ele veio.
+// ---------------------------------------------------------------------------
+interface Termo {
+  rotulo: string;
+  valor: number;
+  nota?: string;
+  sinal: '+' | '−';
+}
+
+function Regua({
+  c,
+  descontarAdiantamento,
+}: {
+  c: ComposicaoSalario;
+  descontarAdiantamento: boolean;
+}) {
+  const termos: Termo[] = [
+    {
+      rotulo: c.usouValorAReceber ? 'A receber na folha' : 'Salário base',
+      valor: c.salarioBase,
+      sinal: '+',
+    },
+  ];
+  if (c.comissao > 0) {
+    termos.push({
+      rotulo: 'Comissão',
+      valor: c.comissao,
+      nota: `${c.vendas} × ${formatBRL(c.valorPorVenda)}`,
+      sinal: '+',
+    });
+  }
+  if (c.horasExtras > 0) {
+    termos.push({ rotulo: 'Horas extras', valor: c.horasExtras, sinal: '+' });
+  }
+  if (c.valesCredito > 0) {
+    termos.push({
+      rotulo: 'Acerto a favor',
+      valor: c.valesCredito,
+      sinal: '+',
+    });
+  }
+  if (c.descontos > 0) {
+    termos.push({ rotulo: 'Descontos fixos', valor: c.descontos, sinal: '−' });
+  }
+  if (c.vales > 0) {
+    termos.push({ rotulo: 'Vale do mês', valor: c.vales, sinal: '−' });
+  }
+  if (c.adiantamentoDescontado > 0 && descontarAdiantamento) {
+    termos.push({
+      rotulo: 'Adiantamento dia 25',
+      valor: c.adiantamentoDescontado,
+      sinal: '−',
+    });
+  }
+
+  const saldo = descontarAdiantamento
+    ? c.saldo
+    : arredondar(c.saldo + c.adiantamentoDescontado);
+
+  // Um termo só: o salário fala por si.
+  if (termos.length === 1) return null;
+
   return (
-    <Selo
-      cor={conta.situacao === 'PAGO' ? 'vermelho' : 'ambar'}
-      titulo="Já existe conta a pagar de salário nesta competência. Gerar de novo paga duas vezes — confira em Contas a Pagar antes."
-    >
-      {conta.situacao === 'PAGO'
-        ? `salário já pago${conta.pagoEm ? ` em ${formatData(conta.pagoEm)}` : ''}`
-        : `salário já gerado · ${STATUS_LABEL[conta.status].toLowerCase()}`}
-    </Selo>
+    <div className="mb-4 overflow-x-auto rolagem-fina">
+      <div className="flex min-w-max items-stretch gap-1">
+        {termos.map((t, i) => (
+          <div key={t.rotulo} className="flex items-stretch gap-1">
+            {i > 0 && (
+              <span className="flex items-center px-1 font-display text-lg font-medium text-tinta-300">
+                {t.sinal}
+              </span>
+            )}
+            <div className="rounded-lg bg-white px-3 py-2 ring-1 ring-tinta-100">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-tinta-400">
+                {t.rotulo}
+              </div>
+              <div
+                className={`font-display text-[15px] font-semibold leading-tight num ${
+                  t.sinal === '−' ? 'text-rose-600' : 'text-tinta-900'
+                }`}
+              >
+                {t.sinal === '−' ? '−' : ''}
+                {formatBRL(t.valor)}
+              </div>
+              {t.nota && (
+                <div className="text-[10px] text-tinta-400 num">{t.nota}</div>
+              )}
+            </div>
+          </div>
+        ))}
+        <span className="flex items-center px-1.5 font-display text-lg font-medium text-tinta-300">
+          =
+        </span>
+        <div className="rounded-lg bg-tinta-900 px-4 py-2">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-brand-300">
+            A pagar
+          </div>
+          <div className="font-display text-[15px] font-semibold leading-tight text-white num">
+            {formatBRL(saldo)}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -82,23 +180,26 @@ function OpcaoDia25({
   if (!item || item.composicao.adiantamentoDescontado <= 0) return null;
   const naoGerado = item.adiantamento?.situacao === 'NAO_GERADO';
   return (
-    <label className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+    <label className="mb-4 flex flex-wrap items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs text-tinta-600 ring-1 ring-tinta-100">
       <input
         type="checkbox"
+        className="accent-brand-600"
         checked={item.descontarAdiantamento}
         onChange={(e) => onChange(e.target.checked)}
       />
       Descontar o adiantamento do dia 25 (
-      {formatBRL(item.composicao.adiantamentoDescontado)}) deste salário
+      <span className="num font-semibold">
+        {formatBRL(item.composicao.adiantamentoDescontado)}
+      </span>
+      ) deste salário
       {!item.descontarAdiantamento && (
-        <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700">
+        <Selo tom="atencao" pequeno>
           saindo cheio
-        </span>
+        </Selo>
       )}
       {naoGerado && item.descontarAdiantamento && (
         <span className="text-amber-700">
-          — o dia 25 não foi gerado nesta competência; confira se a pessoa
-          recebeu mesmo.
+          — o dia 25 não saiu nesta competência; confira se a pessoa recebeu.
         </span>
       )}
     </label>
@@ -110,8 +211,8 @@ function ValesJaBaixados({ vales }: { vales: ParcelaValeFolha[] }) {
   const baixadas = vales.filter((v) => v.descontada);
   if (baixadas.length === 0) return null;
   return (
-    <p className="mb-3 text-xs text-slate-500">
-      Já acertado nesta competência (fora deste saldo):{' '}
+    <p className="mb-4 text-xs text-tinta-500">
+      Já acertado nesta competência, fora deste saldo:{' '}
       {baixadas
         .map(
           (v) =>
@@ -125,76 +226,23 @@ function ValesJaBaixados({ vales }: { vales: ParcelaValeFolha[] }) {
   );
 }
 
-/** Abre o saldo salarial: o que somou e o que saiu. */
-function ComposicaoSaldo({
-  c,
-  descontarAdiantamento,
-}: {
-  c: ComposicaoSalario;
-  descontarAdiantamento: boolean;
-}) {
-  const partes: { rotulo: string; valor: number; sinal: '+' | '-' }[] = [
-    {
-      rotulo: c.usouValorAReceber ? 'A receber na folha' : 'Salário base',
-      valor: c.salarioBase,
-      sinal: '+',
-    },
-  ];
-  if (c.comissao > 0) {
-    partes.push({
-      rotulo: `Comissão (${c.vendas} × ${formatBRL(c.valorPorVenda)})`,
-      valor: c.comissao,
-      sinal: '+',
-    });
-  }
-  if (c.horasExtras > 0) {
-    partes.push({ rotulo: 'Horas extras', valor: c.horasExtras, sinal: '+' });
-  }
-  if (c.valesCredito > 0) {
-    partes.push({
-      rotulo: 'Acerto a favor da pessoa',
-      valor: c.valesCredito,
-      sinal: '+',
-    });
-  }
-  if (c.descontos > 0) {
-    partes.push({ rotulo: 'Descontos fixos', valor: c.descontos, sinal: '-' });
-  }
-  if (c.vales > 0) {
-    partes.push({ rotulo: 'Vale (parcela do mês)', valor: c.vales, sinal: '-' });
-  }
-  if (c.adiantamentoDescontado > 0 && descontarAdiantamento) {
-    partes.push({
-      rotulo: 'Adiantamento do dia 25',
-      valor: c.adiantamentoDescontado,
-      sinal: '-',
-    });
-  }
-  const saldo = descontarAdiantamento
-    ? c.saldo
-    : Math.round((c.saldo + c.adiantamentoDescontado) * 100) / 100;
-
-  // Só salário base: não há o que explicar.
-  if (partes.length === 1) return null;
-
+/**
+ * Avisa quando o salário daquela pessoa já saiu nesta competência. Gerar de
+ * novo cria um segundo pagamento — e é justamente por isso que o vale já
+ * abatido não é descontado outra vez.
+ */
+function SeloSalarioGerado({ conta }: { conta: ContaJaGerada | null }) {
+  if (!conta) return null;
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
-      {partes.map((p, i) => (
-        <span key={p.rotulo} className="whitespace-nowrap">
-          {i > 0 && <span className="mr-1 text-slate-400">{p.sinal}</span>}
-          {p.rotulo}{' '}
-          <strong
-            className={p.sinal === '-' ? 'text-red-600' : 'text-slate-800'}
-          >
-            {formatBRL(p.valor)}
-          </strong>
-        </span>
-      ))}
-      <span className="whitespace-nowrap">
-        <span className="mr-1 text-slate-400">=</span>
-        <strong className="text-slate-800">{formatBRL(saldo)}</strong>
-      </span>
-    </div>
+    <Selo
+      tom={conta.situacao === 'PAGO' ? 'erro' : 'atencao'}
+      pequeno
+      titulo="Já existe conta a pagar de salário nesta competência. Gerar de novo paga duas vezes — confira em Contas a Pagar antes."
+    >
+      {conta.situacao === 'PAGO'
+        ? `salário já pago${conta.pagoEm ? ` em ${formatData(conta.pagoEm)}` : ''}`
+        : `salário já gerado · ${STATUS_LABEL[conta.status].toLowerCase()}`}
+    </Selo>
   );
 }
 
@@ -220,7 +268,8 @@ function SeloAdiantamento({
     if (situacao === 'NAO_GERADO') return null;
     return (
       <Selo
-        cor={situacao === 'PAGO' ? 'verde' : 'ambar'}
+        pequeno
+        tom={situacao === 'PAGO' ? 'pago' : 'atencao'}
         titulo="Este adiantamento já foi gerado nesta competência — gerar de novo duplica o pagamento."
       >
         {situacao === 'PAGO'
@@ -232,7 +281,7 @@ function SeloAdiantamento({
 
   if (situacao === 'PAGO') {
     return (
-      <Selo cor="verde" titulo="Adiantamento do dia 25 confirmado pelo banco.">
+      <Selo pequeno tom="pago" titulo="Adiantamento do dia 25 confirmado pelo banco.">
         dia 25 pago{pagoEm ? ` em ${formatData(pagoEm)}` : ''}
       </Selo>
     );
@@ -240,16 +289,19 @@ function SeloAdiantamento({
   if (situacao === 'PENDENTE') {
     return (
       <Selo
-        cor="ambar"
+        pequeno
+        tom="atencao"
         titulo="A conta do dia 25 existe, mas o banco ainda não confirmou o pagamento."
       >
         dia 25 ainda não pago
       </Selo>
     );
   }
+  const tom: Tom = descontado ? 'erro' : 'neutro';
   return (
     <Selo
-      cor={descontado ? 'vermelho' : 'cinza'}
+      pequeno
+      tom={tom}
       titulo={
         descontado
           ? `Não há conta a pagar do dia 25 nesta competência, mas ${formatBRL(valor)} estão sendo descontados do salário. Confira antes de gerar.`
@@ -258,55 +310,6 @@ function SeloAdiantamento({
     >
       dia 25 não gerado{descontado ? ` · ${formatBRL(valor)} descontados` : ''}
     </Selo>
-  );
-}
-
-const CORES_SELO = {
-  verde: 'bg-green-100 text-green-700',
-  ambar: 'bg-amber-100 text-amber-700',
-  vermelho: 'bg-red-100 text-red-700',
-  cinza: 'bg-slate-100 text-slate-500',
-} as const;
-
-function Selo({
-  cor,
-  titulo,
-  children,
-}: {
-  cor: keyof typeof CORES_SELO;
-  titulo: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <span
-      title={titulo}
-      className={`ml-2 rounded px-1.5 py-0.5 text-[10px] font-medium ${CORES_SELO[cor]}`}
-    >
-      {children}
-    </span>
-  );
-}
-
-function BotaoModo({
-  ativo,
-  onClick,
-  children,
-}: {
-  ativo: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-        ativo
-          ? 'bg-brand-600 text-white'
-          : 'text-slate-600 hover:bg-slate-100'
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -406,11 +409,11 @@ export function Folha() {
       setFeedback(
         `${data.length} conta(s) criada(s) no IXC${
           comErro ? `, ${comErro} com erro` : ''
-        }. Redirecionando…`,
+        }. Abrindo Contas a Pagar…`,
       );
       setTimeout(() => navigate('/contas-pagar'), 1200);
     },
-    onError: (err) => setFeedback(`Erro ao gerar: ${mensagemErro(err)}`),
+    onError: (err) => setFeedback(`Não deu para gerar: ${mensagemErro(err)}`),
   });
 
   const totalSelecionado = itens
@@ -514,168 +517,181 @@ export function Folha() {
     );
   }
 
-  return (
-    <div className="p-8">
-      <h1 className="text-2xl font-semibold text-slate-800">Gerar Folha</h1>
-      <p className="mb-6 text-sm text-slate-500">
-        Calcule os lançamentos da competência e gere as contas a pagar no IXC.
-      </p>
+  const marcados = itens.filter((i) => i.selecionado).length;
 
-      <div className="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-end gap-4">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">
-              Pagamento
-            </label>
-            <div className="inline-flex rounded-lg border border-slate-300 p-0.5">
-              <BotaoModo
-                ativo={modo === 'DIA_25'}
-                onClick={() => trocarModo('DIA_25')}
-              >
-                Dia 25 · adiantamento
-              </BotaoModo>
-              <BotaoModo
-                ativo={modo === 'QUINTO_DIA'}
-                onClick={() => trocarModo('QUINTO_DIA')}
-              >
-                Quinto dia · salário
-              </BotaoModo>
-            </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">
-              Competência
-            </label>
-            <input
-              type="month"
-              value={competencia}
-              onChange={(e) => setCompetencia(e.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            />
-          </div>
-          <button
-            onClick={() => preview.mutate()}
-            disabled={preview.isPending}
-            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
-          >
-            {preview.isPending ? 'Calculando…' : 'Calcular prévia'}
-          </button>
-        </div>
-        <p className="mt-3 text-xs text-slate-500">
-          {modo === 'DIA_25'
+  return (
+    <Pagina>
+      <CabecalhoPagina
+        secao="Gerar folha"
+        titulo={
+          modo === 'DIA_25' ? 'Adiantamento do dia 25' : 'Salário do quinto dia'
+        }
+        descricao={
+          modo === 'DIA_25'
             ? 'Só o adiantamento de quem recebe no dia 25.'
-            : 'Salário e bônus. Quem recebeu no dia 25 vem com o adiantamento descontado; quem não recebe, com o salário cheio.'}
-        </p>
+            : 'Salário e bônus. Quem recebeu no dia 25 vem com o adiantamento descontado; quem não recebe, com o salário cheio.'
+        }
+      />
+
+      <div className="surgir surgir-1 card mb-6 flex flex-wrap items-end gap-5 p-5">
+        <div>
+          <span className="rotulo">Pagamento</span>
+          <div className="inline-flex rounded-xl bg-tinta-100 p-1">
+            <BotaoModo
+              ativo={modo === 'DIA_25'}
+              onClick={() => trocarModo('DIA_25')}
+            >
+              Dia 25
+            </BotaoModo>
+            <BotaoModo
+              ativo={modo === 'QUINTO_DIA'}
+              onClick={() => trocarModo('QUINTO_DIA')}
+            >
+              Quinto dia
+            </BotaoModo>
+          </div>
+        </div>
+        <div>
+          <label className="rotulo" htmlFor="comp-folha">
+            Competência
+          </label>
+          <input
+            id="comp-folha"
+            type="month"
+            value={competencia}
+            onChange={(e) => setCompetencia(e.target.value)}
+            className="campo"
+          />
+        </div>
+        <button
+          onClick={() => preview.mutate()}
+          disabled={preview.isPending}
+          className="btn btn-primario"
+        >
+          {preview.isPending ? 'Calculando…' : 'Calcular prévia'}
+        </button>
       </div>
 
-      {feedback && (
-        <div className="mb-5 rounded-lg border border-brand-100 bg-brand-50 px-4 py-3 text-sm text-brand-800">
-          {feedback}
-        </div>
-      )}
+      {feedback && <Aviso tom="marca">{feedback}</Aviso>}
 
       {comOpcaoDia25.length > 0 && (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+        <div className="surgir card mb-6 flex flex-wrap items-center gap-3 p-4 text-sm text-tinta-600">
           <span>
             Adiantamento do dia 25 em{' '}
-            <strong className="text-slate-800">{comOpcaoDia25.length}</strong>{' '}
+            <strong className="num text-tinta-900">
+              {comOpcaoDia25.length}
+            </strong>{' '}
             salário(s) de quem não tem carteira assinada:
           </span>
           <button
             onClick={() => descontarDia25(comOpcaoDia25, true)}
-            className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium hover:bg-slate-50"
+            className="btn btn-neutro btn-p"
           >
             Descontar de todos
           </button>
           <button
             onClick={() => descontarDia25(comOpcaoDia25, false)}
-            className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium hover:bg-slate-50"
+            className="btn btn-neutro btn-p"
           >
             Não descontar de ninguém
           </button>
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-tinta-400">
             Use quando o pagamento do dia 25 não chegou a sair.
           </span>
         </div>
       )}
 
+      {itens.length === 0 && !preview.isPending && (
+        <div className="card">
+          <Vazio titulo="Nada calculado ainda">
+            Escolha o pagamento e a competência e clique em “Calcular prévia”.
+            Nada é enviado ao IXC até você conferir.
+          </Vazio>
+        </div>
+      )}
+
       {itens.length > 0 && (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="overflow-x-auto">
+        <div className="surgir surgir-2 card overflow-hidden">
+          <div className="overflow-x-auto rolagem-fina">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+              <thead>
                 <tr>
-                  <th className="w-10 px-4 py-3">✓</th>
-                  <th className="px-4 py-3">Funcionário</th>
-                  <th className="px-4 py-3 text-right">Total a pagar</th>
+                  <th className="th w-10"></th>
+                  <th className="th">Pessoa</th>
+                  <th className="th text-right">Total a pagar</th>
                 </tr>
               </thead>
               {grupos.map((g) => {
-                const marcados = g.indices.filter((i) => itens[i].selecionado);
-                const todos = marcados.length === g.indices.length;
+                const marcadosGrupo = g.indices.filter(
+                  (i) => itens[i].selecionado,
+                );
+                const todos = marcadosGrupo.length === g.indices.length;
                 const aberto = !!abertos[g.funcionarioId];
+                const temSalario = g.salarioIdx !== null;
                 return (
-                  <tbody
-                    key={g.funcionarioId}
-                    className="border-t border-slate-100"
-                  >
+                  <tbody key={g.funcionarioId}>
                     <tr
                       onClick={() => alternarDetalhe(g.funcionarioId)}
-                      className={`cursor-pointer hover:bg-slate-50 ${
-                        marcados.length === 0 ? 'opacity-40' : ''
+                      className={`linha cursor-pointer ${
+                        marcadosGrupo.length === 0 ? 'opacity-45' : ''
                       }`}
                     >
-                      <td
-                        className="px-4 py-3"
-                        onClick={(e) => e.stopPropagation()}
-                      >
+                      <td className="td" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
+                          className="accent-brand-600"
                           checked={todos}
                           ref={(el) => {
                             if (el) {
-                              el.indeterminate = marcados.length > 0 && !todos;
+                              el.indeterminate =
+                                marcadosGrupo.length > 0 && !todos;
                             }
                           }}
                           onChange={() => selecionarGrupo(g.indices, !todos)}
                         />
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="mr-2 inline-block w-3 text-slate-400">
-                          {aberto ? '▾' : '▸'}
-                        </span>
-                        <span className="font-medium text-slate-700">
-                          {g.nome}
-                        </span>
-                        <span className="ml-2 text-xs text-slate-400">
-                          {g.indices
-                            .map((i) => TIPO_LABEL[itens[i].tipo])
-                            .join(' · ')}
-                        </span>
-                        <SeloAdiantamento
-                          modo={modo}
-                          adiantamento={g.adiantamento}
-                          descontado={descontaDia25(g.salarioIdx)}
-                        />
-                        {g.indices.some((i) => itens[i].tipo === 'SALARIO') && (
-                          <SeloSalarioGerado
-                            conta={itens[g.indices[0]].salarioJaGerado}
+                      <td className="td">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={`text-tinta-300 transition-transform ${
+                              aberto ? 'rotate-90' : ''
+                            }`}
+                          >
+                            ▸
+                          </span>
+                          <span className="font-medium text-tinta-900">
+                            {g.nome}
+                          </span>
+                          <span className="text-[11px] uppercase tracking-wider text-tinta-400">
+                            {g.indices
+                              .map((i) => TIPO_LABEL[itens[i].tipo])
+                              .join(' · ')}
+                          </span>
+                          <SeloAdiantamento
+                            modo={modo}
+                            adiantamento={g.adiantamento}
+                            descontado={descontaDia25(g.salarioIdx)}
                           />
-                        )}
+                          {temSalario && (
+                            <SeloSalarioGerado
+                              conta={itens[g.indices[0]].salarioJaGerado}
+                            />
+                          )}
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-right font-semibold text-slate-800">
-                        {formatBRL(totalDoGrupo(g.indices))}
+                      <td className="td text-right">
+                        <span className="valor text-[15px]">
+                          {formatBRL(totalDoGrupo(g.indices))}
+                        </span>
                       </td>
                     </tr>
 
                     {aberto && (
                       <tr>
-                        <td colSpan={3} className="bg-slate-50 px-4 pb-4 pt-2">
-                          {g.indices.some(
-                            (i) => itens[i].tipo === 'SALARIO',
-                          ) && (
+                        <td colSpan={3} className="bg-tinta-50/80 px-5 pb-5 pt-4">
+                          {temSalario && (
                             <>
-                              <ComposicaoSaldo
+                              <Regua
                                 c={itens[g.indices[0]].composicao}
                                 descontarAdiantamento={descontaDia25(
                                   g.salarioIdx,
@@ -697,14 +713,17 @@ export function Folha() {
                               />
                             </>
                           )}
+
                           <table className="w-full text-sm">
-                            <thead className="text-left text-[11px] uppercase text-slate-400">
+                            <thead>
                               <tr>
-                                <th className="w-10 py-1"></th>
-                                <th className="py-1">Tipo</th>
-                                <th className="py-1">Conta contábil</th>
-                                <th className="py-1">Observação</th>
-                                <th className="py-1 text-right">Valor</th>
+                                <th className="th w-10 !py-2"></th>
+                                <th className="th !py-2">Lançamento</th>
+                                <th className="th !py-2">Conta contábil</th>
+                                <th className="th !py-2">
+                                  Observação enviada ao IXC
+                                </th>
+                                <th className="th !py-2 text-right">Valor</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -713,52 +732,58 @@ export function Folha() {
                                 return (
                                   <tr
                                     key={idx}
-                                    className={`border-t border-slate-200 ${
-                                      it.selecionado ? '' : 'opacity-40'
+                                    className={`border-t border-tinta-200/70 ${
+                                      it.selecionado ? '' : 'opacity-45'
                                     }`}
                                   >
-                                    <td className="py-2">
+                                    <td className="td !py-2.5">
                                       <input
                                         type="checkbox"
+                                        className="accent-brand-600"
                                         checked={it.selecionado}
                                         onChange={() => toggle(idx)}
                                       />
                                     </td>
-                                    <td className="py-2">
-                                      {TIPO_LABEL[it.tipo]}
-                                      {it.tipo === 'SALARIO' &&
-                                        it.cltComAdiantamento && (
-                                          <Selo
-                                            cor="ambar"
-                                            titulo="Carteira assinada: a contabilidade já desconta o adiantamento, então o saldo salarial não é reduzido aqui."
-                                          >
-                                            carteira assinada · sem desconto do dia 25
-                                          </Selo>
-                                        )}
-                                      {it.tipo === 'SALARIO' &&
-                                        it.composicao.adiantamentoDescontado >
-                                          0 &&
-                                        it.descontarAdiantamento && (
-                                          <Selo
-                                            cor="cinza"
-                                            titulo="Valor do dia 25 já abatido deste saldo salarial."
-                                          >
-                                            −{' '}
-                                            {formatBRL(
-                                              it.composicao
-                                                .adiantamentoDescontado,
-                                            )}{' '}
-                                            do dia 25
-                                          </Selo>
-                                        )}
+                                    <td className="td !py-2.5">
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <span className="font-medium text-tinta-800">
+                                          {TIPO_LABEL[it.tipo]}
+                                        </span>
+                                        {it.tipo === 'SALARIO' &&
+                                          it.cltComAdiantamento && (
+                                            <Selo
+                                              pequeno
+                                              tom="atencao"
+                                              titulo="Carteira assinada: a contabilidade já desconta o adiantamento, então o saldo salarial não é reduzido aqui."
+                                            >
+                                              carteira assinada
+                                            </Selo>
+                                          )}
+                                        {it.tipo === 'SALARIO' &&
+                                          it.composicao.adiantamentoDescontado >
+                                            0 &&
+                                          it.descontarAdiantamento && (
+                                            <Selo
+                                              pequeno
+                                              titulo="Valor do dia 25 já abatido deste saldo salarial."
+                                            >
+                                              −{' '}
+                                              {formatBRL(
+                                                it.composicao
+                                                  .adiantamentoDescontado,
+                                              )}{' '}
+                                              do dia 25
+                                            </Selo>
+                                          )}
+                                      </div>
                                     </td>
-                                    <td className="py-2 text-slate-500">
+                                    <td className="td !py-2.5 num text-tinta-400">
                                       {it.contaContabil}
                                     </td>
-                                    <td className="py-2 text-slate-500">
+                                    <td className="td !py-2.5 max-w-md text-xs text-tinta-500">
                                       {it.observacao}
                                     </td>
-                                    <td className="py-2 text-right">
+                                    <td className="td !py-2.5 text-right">
                                       <input
                                         type="number"
                                         step="0.01"
@@ -766,7 +791,7 @@ export function Folha() {
                                         onChange={(e) =>
                                           editarValor(idx, Number(e.target.value))
                                         }
-                                        className="w-28 rounded border border-slate-300 px-2 py-1 text-right"
+                                        className="campo w-32 py-1.5 text-right"
                                       />
                                     </td>
                                   </tr>
@@ -782,21 +807,50 @@ export function Folha() {
               })}
             </table>
           </div>
-          <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3">
-            <span className="text-sm text-slate-600">
-              Total selecionado:{' '}
-              <strong className="text-slate-800">{formatBRL(totalSelecionado)}</strong>
-            </span>
+
+          <div className="flex flex-wrap items-center justify-between gap-4 border-t border-tinta-100 bg-white px-5 py-4">
+            <div>
+              <p className="eyebrow">Total selecionado</p>
+              <p className="valor mt-1 font-display text-2xl">
+                {formatBRL(totalSelecionado)}
+              </p>
+              <p className="mt-0.5 text-xs text-tinta-400">
+                {marcados} lançamento(s) em {grupos.length} pessoa(s)
+              </p>
+            </div>
             <button
               onClick={() => gerar.mutate()}
               disabled={gerar.isPending || totalSelecionado <= 0}
-              className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-60"
+              className="btn btn-primario"
             >
-              {gerar.isPending ? 'Gerando…' : 'Salvar contas a pagar no IXC'}
+              {gerar.isPending ? 'Gerando…' : 'Gerar contas a pagar no IXC'}
             </button>
           </div>
         </div>
       )}
-    </div>
+    </Pagina>
+  );
+}
+
+function BotaoModo({
+  ativo,
+  onClick,
+  children,
+}: {
+  ativo: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+        ativo
+          ? 'bg-white text-tinta-900 shadow-sm'
+          : 'text-tinta-500 hover:text-tinta-800'
+      }`}
+    >
+      {children}
+    </button>
   );
 }

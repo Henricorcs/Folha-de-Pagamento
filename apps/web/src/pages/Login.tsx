@@ -17,7 +17,7 @@ export function Login() {
     setCarregando(true);
     try {
       await login(email, senha);
-      navigate('/funcionarios');
+      navigate('/dashboard');
     } catch (err) {
       setErro(mensagemErro(err));
     } finally {
@@ -26,56 +26,112 @@ export function Login() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100 px-4">
-      <form
-        onSubmit={onSubmit}
-        className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-lg"
-      >
-        <h1 className="text-center text-xl font-semibold text-slate-800">
-          <span className="text-brand-600">Folha</span> de Pagamento
-        </h1>
-        <p className="mb-6 mt-1 text-center text-sm text-slate-500">
-          Acesse com suas credenciais
-        </p>
+    <div className="flex min-h-screen">
+      {/* Painel da marca: fibra óptica é luz dentro de vidro escuro. */}
+      <div className="relative hidden overflow-hidden bg-tinta-900 lg:flex lg:w-[46%] lg:flex-col lg:justify-between">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -left-32 top-1/4 h-[520px] w-[520px] rounded-full opacity-40 blur-3xl"
+          style={{
+            background:
+              'radial-gradient(circle, rgba(51,188,173,0.55) 0%, rgba(10,16,32,0) 70%)',
+          }}
+        />
+        <div className="relative flex items-center gap-2.5 px-12 pt-12">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500 font-display text-sm font-bold text-tinta-900">
+            F
+          </span>
+          <span className="font-display text-[15px] font-semibold tracking-tight text-white">
+            Folha de Pagamento
+          </span>
+        </div>
 
-        {erro && (
-          <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-            {erro}
+        <div className="relative px-12 pb-16">
+          <p className="eyebrow mb-4 text-brand-300">Painel interno</p>
+          <h2 className="max-w-md font-display text-[38px] font-semibold leading-[1.1] tracking-[-0.03em] text-white">
+            Todo pagamento conferido antes de sair.
+          </h2>
+          <p className="mt-5 max-w-sm text-sm leading-relaxed text-tinta-300">
+            Salário, adiantamento, comissão, horas extras e vales calculados por
+            competência e enviados ao IXC como contas a pagar.
+          </p>
+        </div>
+
+        <div className="relative flex gap-8 border-t border-white/10 px-12 py-6">
+          {[
+            ['Dia 25', 'adiantamento'],
+            ['Quinto dia', 'salário'],
+          ].map(([q, o]) => (
+            <div key={q}>
+              <div className="font-display text-sm font-semibold text-white">
+                {q}
+              </div>
+              <div className="text-[11px] uppercase tracking-[0.14em] text-tinta-400">
+                {o}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Formulário */}
+      <div className="flex flex-1 items-center justify-center bg-tinta-50 px-6 py-12">
+        <form onSubmit={onSubmit} className="surgir w-full max-w-[380px]">
+          <div className="mb-8 flex items-center gap-2.5 lg:hidden">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 font-display text-sm font-bold text-white">
+              F
+            </span>
+            <span className="font-display text-[15px] font-semibold tracking-tight text-tinta-900">
+              Folha de Pagamento
+            </span>
           </div>
-        )}
 
-        <label className="mb-1 block text-sm font-medium text-slate-700">
-          E-mail
-        </label>
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-          className="mb-4 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-          placeholder="voce@empresa.com"
-        />
+          <p className="eyebrow mb-2">Acesso</p>
+          <h1 className="titulo-pagina mb-8">Entrar</h1>
 
-        <label className="mb-1 block text-sm font-medium text-slate-700">
-          Senha
-        </label>
-        <input
-          type="password"
-          value={senha}
-          onChange={(e) => setSenha(e.target.value)}
-          required
-          className="mb-6 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-          placeholder="••••••••"
-        />
+          {erro && (
+            <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+              {erro}
+            </div>
+          )}
 
-        <button
-          type="submit"
-          disabled={carregando}
-          className="w-full rounded-lg bg-brand-600 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:opacity-60"
-        >
-          {carregando ? 'Entrando…' : 'Entrar'}
-        </button>
-      </form>
+          <label className="rotulo" htmlFor="email">
+            E-mail
+          </label>
+          <input
+            id="email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            autoComplete="username"
+            className="campo mb-5"
+            placeholder="voce@empresa.com"
+          />
+
+          <label className="rotulo" htmlFor="senha">
+            Senha
+          </label>
+          <input
+            id="senha"
+            type="password"
+            value={senha}
+            onChange={(e) => setSenha(e.target.value)}
+            required
+            autoComplete="current-password"
+            className="campo mb-7"
+            placeholder="••••••••"
+          />
+
+          <button
+            type="submit"
+            disabled={carregando}
+            className="btn btn-primario w-full py-3"
+          >
+            {carregando ? 'Entrando…' : 'Entrar'}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

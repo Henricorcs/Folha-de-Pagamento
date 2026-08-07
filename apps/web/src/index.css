@@ -6,8 +6,140 @@
   color-scheme: light;
 }
 
-body {
-  @apply bg-slate-50 text-slate-800 antialiased;
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
-    Helvetica, Arial, sans-serif;
+@layer base {
+  body {
+    @apply bg-tinta-50 font-sans text-tinta-800 antialiased;
+  }
+
+  /* Dinheiro em coluna só é conferível se os dígitos alinharem. */
+  table,
+  input[type='number'],
+  input[type='month'] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    @apply bg-brand-200 text-brand-900;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand-500 ring-offset-2 ring-offset-white;
+  }
+}
+
+@layer components {
+  /* --- Superfícies --- */
+  .card {
+    @apply rounded-2xl border border-tinta-100 bg-white shadow-card;
+  }
+  .card-hover {
+    @apply transition duration-200 hover:-translate-y-0.5 hover:shadow-card-hover;
+  }
+
+  /* --- Texto estrutural --- */
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.16em] text-tinta-400;
+  }
+  .titulo-pagina {
+    @apply font-display text-[28px] font-semibold leading-tight tracking-[-0.02em] text-tinta-900;
+  }
+  .titulo-bloco {
+    @apply font-display text-sm font-semibold uppercase tracking-[0.12em] text-tinta-400;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+  .valor {
+    @apply font-display font-semibold text-tinta-900;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* --- Botões --- */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition duration-150 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primario {
+    @apply bg-brand-600 text-white shadow-sm hover:bg-brand-700 active:bg-brand-800;
+  }
+  .btn-acao {
+    @apply bg-tinta-900 text-white shadow-sm hover:bg-tinta-800 active:bg-tinta-900;
+  }
+  .btn-neutro {
+    @apply border border-tinta-200 bg-white text-tinta-700 hover:border-tinta-300 hover:bg-tinta-50;
+  }
+  .btn-sutil {
+    @apply text-tinta-500 hover:bg-tinta-100 hover:text-tinta-800;
+  }
+  .btn-p {
+    @apply rounded-lg px-3 py-1.5 text-xs;
+  }
+
+  /* --- Formulário --- */
+  .campo {
+    @apply w-full rounded-xl border border-tinta-200 bg-white px-3.5 py-2.5 text-sm text-tinta-900 transition placeholder:text-tinta-300 hover:border-tinta-300 focus:border-brand-400 focus:outline-none focus:ring-4 focus:ring-brand-100;
+  }
+  .rotulo {
+    @apply mb-1.5 block text-xs font-semibold text-tinta-500;
+  }
+  .ajuda {
+    @apply mt-1.5 text-xs text-tinta-400;
+  }
+
+  /* --- Tabela --- */
+  .th {
+    @apply whitespace-nowrap px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.1em] text-tinta-400;
+  }
+  .td {
+    @apply px-4 py-3.5 align-middle text-tinta-700;
+  }
+  .linha {
+    @apply border-t border-tinta-100 transition-colors hover:bg-tinta-50/70;
+  }
+
+  /* --- Selos --- */
+  .selo {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold;
+  }
+  .selo-p {
+    @apply inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold;
+  }
+
+  /* --- Entrada em cena --- */
+  .surgir {
+    @apply animate-surgir;
+  }
+  .surgir-1 {
+    animation-delay: 60ms;
+  }
+  .surgir-2 {
+    animation-delay: 120ms;
+  }
+  .surgir-3 {
+    animation-delay: 180ms;
+  }
+  .surgir-4 {
+    animation-delay: 240ms;
+  }
+}
+
+/* Barra de rolagem discreta nas áreas densas */
+.rolagem-fina::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.rolagem-fina::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-tinta-200;
+}
+.rolagem-fina::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

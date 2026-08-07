@@ -1,8 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import {
+  Aviso,
+  Bloco,
+  CabecalhoPagina,
+  Carregando,
+  Pagina,
+  Selo,
+  Vazio,
+} from '../components/ui';
 import { api, mensagemErro } from '../lib/api';
 import { formatBRL, formatData } from '../lib/format';
-import { STATUS_CLASSE, STATUS_LABEL, TIPO_LABEL } from '../lib/status';
+import { STATUS_LABEL, STATUS_TOM, TIPO_LABEL } from '../lib/status';
 import type { ContaPagar, Paginado, StatusContaPagar } from '../lib/types';
 
 const STATUS_FILTROS: (StatusContaPagar | 'todos')[] = [
@@ -12,6 +21,14 @@ const STATUS_FILTROS: (StatusContaPagar | 'todos')[] = [
   'PAGO',
   'REPROVADO',
   'ERRO',
+];
+
+/** As quatro paradas de uma conta, do jeito que acontecem. */
+const ETAPAS = [
+  ['Salvar', 'a conta nasce no IXC'],
+  ['Aprovar', 'auditoria libera'],
+  ['Pagar', 'ModoBank, na tela do IXC'],
+  ['Conferir', 'o banco confirma aqui'],
 ];
 
 export function ContasPagar() {
@@ -24,21 +41,30 @@ export function ContasPagar() {
     queryFn: async () => {
       const params: Record<string, string> = {};
       if (status !== 'todos') params.status = status;
-      return (await api.get<Paginado<ContaPagar>>('/contas-pagar', { params })).data;
+      return (await api.get<Paginado<ContaPagar>>('/contas-pagar', { params }))
+        .data;
     },
   });
 
   function invalidar() {
     qc.invalidateQueries({ queryKey: ['contas-pagar'] });
+    qc.invalidateQueries({ queryKey: ['dashboard'] });
   }
 
   const acao = useMutation({
     mutationFn: async (args: { id: string; op: string; motivo?: string }) => {
       const url = `/contas-pagar/${args.id}/${args.op}`;
-      return (await api.post(url, args.motivo ? { motivo: args.motivo } : {})).data;
+      return (await api.post(url, args.motivo ? { motivo: args.motivo } : {}))
+        .data;
     },
     onSuccess: (_d, args) => {
-      setFeedback(`Ação "${args.op}" concluída.`);
+      const nomes: Record<string, string> = {
+        aprovar: 'Conta aprovada.',
+        reprovar: 'Conta reprovada.',
+        sincronizar: 'Situação atualizada com o IXC.',
+        enviar: 'Conta reenviada ao IXC.',
+      };
+      setFeedback(nomes[args.op] ?? 'Pronto.');
       invalidar();
     },
     onError: (err) => setFeedback(mensagemErro(err)),
@@ -46,11 +72,15 @@ export function ContasPagar() {
 
   const sincronizarTudo = useMutation({
     mutationFn: async () =>
-      (await api.post<{ verificadas: number; pagas: number }>(
-        '/contas-pagar/sincronizar-pendentes',
-      )).data,
+      (
+        await api.post<{ verificadas: number; pagas: number }>(
+          '/contas-pagar/sincronizar-pendentes',
+        )
+      ).data,
     onSuccess: (d) => {
-      setFeedback(`Sincronização: ${d.verificadas} verificadas, ${d.pagas} pagas.`);
+      setFeedback(
+        `${d.verificadas} conta(s) verificadas no IXC — ${d.pagas} já constam como pagas.`,
+      );
       invalidar();
     },
     onError: (err) => setFeedback(mensagemErro(err)),
@@ -65,106 +95,138 @@ export function ContasPagar() {
     if (motivo) acao.mutate({ id, op: 'reprovar', motivo });
   }
 
+  const total = (lista.data?.itens ?? []).reduce(
+    (s, c) => s + Number(c.valor),
+    0,
+  );
+
   return (
-    <div className="p-8">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-800">Contas a Pagar</h1>
-          <p className="text-sm text-slate-500">
-            Fluxo: salvar → aprovar (auditoria) → pagar (ModoBank no IXC) → pago.
-          </p>
-        </div>
-        <button
-          onClick={() => sincronizarTudo.mutate()}
-          disabled={sincronizarTudo.isPending}
-          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
-        >
-          {sincronizarTudo.isPending ? 'Sincronizando…' : '↻ Sincronizar pagamentos'}
-        </button>
-      </div>
+    <Pagina>
+      <CabecalhoPagina
+        secao="Contas a pagar"
+        titulo="Pagamentos no IXC"
+        descricao="Cada conta nasce aqui, passa pela auditoria e só vira dinheiro quando o banco confirma."
+        acoes={
+          <button
+            onClick={() => sincronizarTudo.mutate()}
+            disabled={sincronizarTudo.isPending}
+            className="btn btn-acao"
+          >
+            {sincronizarTudo.isPending
+              ? 'Verificando…'
+              : 'Verificar pagamentos no IXC'}
+          </button>
+        }
+      />
 
-      {feedback && (
-        <div className="mb-4 rounded-lg border border-brand-100 bg-brand-50 px-4 py-3 text-sm text-brand-800">
-          {feedback}
-        </div>
-      )}
+      {feedback && <Aviso tom="marca">{feedback}</Aviso>}
 
-      <div className="mb-4 flex flex-wrap gap-2">
+      <Bloco className="surgir surgir-1 mb-6">
+        <ol className="flex flex-wrap gap-x-8 gap-y-4">
+          {ETAPAS.map(([nome, oque], i) => (
+            <li key={nome} className="flex items-start gap-2.5">
+              <span className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-tinta-900 font-display text-[10px] font-bold text-white">
+                {i + 1}
+              </span>
+              <div className="leading-tight">
+                <div className="text-sm font-semibold text-tinta-800">
+                  {nome}
+                </div>
+                <div className="text-xs text-tinta-400">{oque}</div>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </Bloco>
+
+      <div className="surgir surgir-2 mb-4 flex flex-wrap gap-2">
         {STATUS_FILTROS.map((s) => (
           <button
             key={s}
             onClick={() => setStatus(s)}
-            className={`rounded-full px-3 py-1 text-xs font-medium ${
+            className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
               status === s
-                ? 'bg-brand-600 text-white'
-                : 'bg-white text-slate-600 border border-slate-200'
+                ? 'bg-tinta-900 text-white'
+                : 'border border-tinta-200 bg-white text-tinta-600 hover:border-tinta-300'
             }`}
           >
-            {s === 'todos' ? 'Todos' : STATUS_LABEL[s]}
+            {s === 'todos' ? 'Todas' : STATUS_LABEL[s]}
           </button>
         ))}
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="overflow-x-auto">
+      <Bloco className="surgir surgir-3" semPadding>
+        <div className="overflow-x-auto rolagem-fina">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+            <thead>
               <tr>
-                <th className="px-4 py-3">Beneficiário</th>
-                <th className="px-4 py-3">Tipo</th>
-                <th className="px-4 py-3">Comp.</th>
-                <th className="px-4 py-3">Emissão</th>
-                <th className="px-4 py-3 text-right">Valor</th>
-                <th className="px-4 py-3 text-center">Status</th>
-                <th className="px-4 py-3 text-right">Ações</th>
+                <th className="th">Beneficiário</th>
+                <th className="th">Tipo</th>
+                <th className="th">Comp.</th>
+                <th className="th">Emissão</th>
+                <th className="th text-right">Valor</th>
+                <th className="th text-center">Situação</th>
+                <th className="th text-right">Ação</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {lista.isLoading && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
-                    Carregando…
+                  <td colSpan={7}>
+                    <Carregando />
                   </td>
                 </tr>
               )}
               {lista.data?.itens.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-slate-400">
-                    Nenhuma conta a pagar. Gere pela tela “Gerar Folha”.
+                  <td colSpan={7}>
+                    <Vazio titulo="Nenhuma conta nesta situação">
+                      As contas aparecem aqui depois que você gera a folha.
+                    </Vazio>
                   </td>
                 </tr>
               )}
               {lista.data?.itens.map((c) => (
-                <tr key={c.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-slate-700">{c.beneficiarioNome}</div>
-                    <div className="text-xs text-slate-400">{c.observacao}</div>
+                <tr key={c.id} className="linha">
+                  <td className="td">
+                    <div className="font-medium text-tinta-900">
+                      {c.beneficiarioNome}
+                    </div>
+                    <div className="mt-0.5 max-w-md text-xs text-tinta-400">
+                      {c.observacao}
+                    </div>
+                    {c.erro && (
+                      <div className="mt-1 text-xs text-rose-600">{c.erro}</div>
+                    )}
                   </td>
-                  <td className="px-4 py-3">{TIPO_LABEL[c.tipo]}</td>
-                  <td className="px-4 py-3 text-slate-500">{c.competencia ?? '—'}</td>
-                  <td className="px-4 py-3 text-slate-500">{formatData(c.dataEmissao)}</td>
-                  <td className="px-4 py-3 text-right font-medium">{formatBRL(c.valor)}</td>
-                  <td className="px-4 py-3 text-center">
-                    <span
-                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_CLASSE[c.status]}`}
-                      title={c.erro ?? undefined}
-                    >
+                  <td className="td text-tinta-500">{TIPO_LABEL[c.tipo]}</td>
+                  <td className="td num text-tinta-500">
+                    {c.competencia ?? '—'}
+                  </td>
+                  <td className="td num text-tinta-500">
+                    {formatData(c.dataEmissao)}
+                  </td>
+                  <td className="td text-right">
+                    <span className="valor">{formatBRL(c.valor)}</span>
+                  </td>
+                  <td className="td text-center">
+                    <Selo tom={STATUS_TOM[c.status]} ponto>
                       {STATUS_LABEL[c.status]}
-                    </span>
+                    </Selo>
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="td text-right">
                     <div className="flex justify-end gap-1.5">
                       {c.status === 'AGUARDANDO_APROVACAO' && (
                         <>
                           <button
                             onClick={() => aprovar(c.id)}
-                            className="rounded-md bg-green-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700"
+                            className="btn btn-p bg-brand-600 text-white hover:bg-brand-700"
                           >
                             Aprovar
                           </button>
                           <button
                             onClick={() => reprovar(c.id)}
-                            className="rounded-md bg-red-500 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-600"
+                            className="btn btn-p border border-rose-200 text-rose-600 hover:bg-rose-50"
                           >
                             Reprovar
                           </button>
@@ -173,16 +235,18 @@ export function ContasPagar() {
                       {(c.status === 'AGUARDANDO_PAGAMENTO' ||
                         c.status === 'APROVADO') && (
                         <button
-                          onClick={() => acao.mutate({ id: c.id, op: 'sincronizar' })}
-                          className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                          onClick={() =>
+                            acao.mutate({ id: c.id, op: 'sincronizar' })
+                          }
+                          className="btn btn-neutro btn-p"
                         >
-                          Verificar pgto.
+                          Verificar
                         </button>
                       )}
                       {c.status === 'ERRO' && (
                         <button
                           onClick={() => acao.mutate({ id: c.id, op: 'enviar' })}
-                          className="rounded-md bg-amber-500 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-600"
+                          className="btn btn-p bg-amber-500 text-white hover:bg-amber-600"
                         >
                           Reenviar
                         </button>
@@ -194,7 +258,21 @@ export function ContasPagar() {
             </tbody>
           </table>
         </div>
-      </div>
-    </div>
+
+        {(lista.data?.itens.length ?? 0) > 0 && (
+          <div className="flex items-center justify-between border-t border-tinta-100 px-5 py-3.5 text-sm">
+            <span className="text-tinta-500 num">
+              {lista.data?.itens.length} de {lista.data?.total} conta(s)
+            </span>
+            <span className="text-tinta-500">
+              Soma da página{' '}
+              <strong className="valor ml-1 text-[15px]">
+                {formatBRL(total)}
+              </strong>
+            </span>
+          </div>
+        )}
+      </Bloco>
+    </Pagina>
   );
 }

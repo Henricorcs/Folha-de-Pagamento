@@ -1,10 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import {
+  Bloco,
+  Carregando,
+  Pagina,
+  Selo,
+  Vazio,
+} from '../components/ui';
 import { api, mensagemErro } from '../lib/api';
-import { rotuloParcelaAtual } from '../lib/folha';
+import { baseDaFolha, rotuloParcelaAtual, usaValorAReceber } from '../lib/folha';
 import { formatBRL, formatData } from '../lib/format';
-import { SENTIDO_CLASSE, SENTIDO_CURTO, TIPO_LABEL } from '../lib/status';
+import { SENTIDO_CURTO, SENTIDO_TOM, TIPO_LABEL } from '../lib/status';
 import type {
   FuncionarioDetalhe as TFunc,
   Lancamento,
@@ -43,54 +50,71 @@ export function FuncionarioDetalhe() {
     },
   });
 
-  if (isLoading) return <div className="p-8 text-slate-400">Carregando…</div>;
+  if (isLoading)
+    return (
+      <Pagina>
+        <Carregando />
+      </Pagina>
+    );
   if (isError)
-    return <div className="p-8 text-red-500">{mensagemErro(error)}</div>;
+    return (
+      <Pagina>
+        <div className="card p-6 text-sm text-rose-600">
+          {mensagemErro(error)}
+        </div>
+      </Pagina>
+    );
   if (!data) return null;
 
   return (
-    <div className="p-8">
-      <Link
-        to="/funcionarios"
-        className="text-sm text-brand-700 hover:underline"
-      >
-        ← Voltar
-      </Link>
-
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        <h1 className="text-2xl font-semibold text-slate-800">{data.nome}</h1>
-        <span
-          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
-            data.ativo ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'
-          }`}
+    <Pagina>
+      <header className="surgir mb-8">
+        <Link
+          to="/funcionarios"
+          className="eyebrow inline-flex items-center gap-1.5 transition hover:text-tinta-700"
         >
-          {data.ativo ? 'Ativo' : 'Inativo'}
-        </span>
-        {data.ixcId && (
-          <span className="text-xs text-slate-400">IXC #{data.ixcId}</span>
-        )}
-      </div>
+          ← Funcionários
+        </Link>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <h1 className="titulo-pagina">{data.nome}</h1>
+          <Selo tom={data.ativo ? 'pago' : 'neutro'} ponto>
+            {data.ativo ? 'Ativo' : 'Inativo'}
+          </Selo>
+          {data.ixcId && (
+            <span className="num text-xs text-tinta-300">IXC {data.ixcId}</span>
+          )}
+        </div>
+        <p className="mt-2 text-sm text-tinta-500">
+          Base da folha{' '}
+          <strong className="valor text-[15px]">
+            {formatBRL(baseDaFolha(data))}
+          </strong>
+          {usaValorAReceber(data) && (
+            <span className="text-tinta-400">
+              {' '}
+              · salário base {formatBRL(data.salarioBase)}
+            </span>
+          )}
+        </p>
+      </header>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <section className="lg:col-span-2 space-y-6">
-          <Bloco titulo="Dados cadastrais" grade>
-            <Campo rotulo="CPF/CNPJ" valor={data.cpfCnpj} />
-            <Campo rotulo="E-mail" valor={data.email} />
-            <Campo rotulo="Telefone" valor={data.telefone} />
-            <Campo rotulo="Função" valor={data.funcao} />
-            <Campo rotulo="Departamento" valor={data.departamento} />
-            <Campo rotulo="Admissão" valor={formatData(data.dataAdmissao)} />
-            <Campo
-              rotulo="Salário base"
-              valor={formatBRL(data.salarioBase)}
-            />
-          </Bloco>
-
-          <Bloco titulo="Dados bancários" grade>
-            <Campo rotulo="Banco" valor={data.banco} />
-            <Campo rotulo="Agência" valor={data.agencia} />
-            <Campo rotulo="Conta" valor={data.conta} />
-            <Campo rotulo="Chave PIX" valor={data.chavePix} />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <section className="space-y-6 lg:col-span-2">
+          <Bloco titulo="Cadastro no IXC" className="surgir surgir-1">
+            <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+              <Campo rotulo="CPF/CNPJ" valor={data.cpfCnpj} mono />
+              <Campo rotulo="E-mail" valor={data.email} />
+              <Campo rotulo="Telefone" valor={data.telefone} mono />
+              <Campo rotulo="Função" valor={data.funcao} />
+              <Campo rotulo="Departamento" valor={data.departamento} />
+              <Campo rotulo="Admissão" valor={formatData(data.dataAdmissao)} />
+            </div>
+            <div className="mt-5 grid grid-cols-1 gap-x-8 gap-y-4 border-t border-tinta-100 pt-5 sm:grid-cols-2">
+              <Campo rotulo="Banco" valor={data.banco} />
+              <Campo rotulo="Agência" valor={data.agencia} mono />
+              <Campo rotulo="Conta" valor={data.conta} mono />
+              <Campo rotulo="Chave PIX" valor={data.chavePix} mono />
+            </div>
           </Bloco>
 
           <ConfigFolhaBloco data={data} funcionarioId={id!} />
@@ -106,109 +130,96 @@ export function FuncionarioDetalhe() {
 
           <LancamentosBloco funcionarioId={id!} lancamentos={data.lancamentos} />
 
-          <Bloco titulo="Adiantamentos recentes">
+          <Bloco titulo="Adiantamentos vindos do IXC" semPadding>
             {data.adiantamentos.length === 0 ? (
-              <p className="text-sm text-slate-400">Nenhum adiantamento.</p>
+              <Vazio titulo="Nenhum adiantamento sincronizado" />
             ) : (
-              <table className="w-full text-sm">
-                <thead className="text-left text-xs uppercase text-slate-400">
-                  <tr>
-                    <th className="py-1">Data</th>
-                    <th className="py-1">Descrição</th>
-                    <th className="py-1 text-right">Valor</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.adiantamentos.map((a) => (
-                    <tr key={a.id} className="border-t border-slate-100">
-                      <td className="py-1.5">{formatData(a.data)}</td>
-                      <td className="py-1.5">{a.descricao}</td>
-                      <td className="py-1.5 text-right font-medium">
-                        {formatBRL(a.valor)}
-                      </td>
+              <div className="overflow-x-auto rolagem-fina">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-t border-tinta-100">
+                      <th className="th">Data</th>
+                      <th className="th">Descrição</th>
+                      <th className="th text-right">Valor</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {data.adiantamentos.map((a) => (
+                      <tr key={a.id} className="linha">
+                        <td className="td num text-tinta-500">
+                          {formatData(a.data)}
+                        </td>
+                        <td className="td">{a.descricao}</td>
+                        <td className="td text-right">
+                          <span className="valor">{formatBRL(a.valor)}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </Bloco>
         </section>
 
-        <section className="space-y-4">
-          <Bloco titulo="Notas internas">
-            <label className="mb-1 block text-xs font-medium text-slate-500">
+        <section className="space-y-6">
+          <Bloco titulo="Notas internas" className="surgir surgir-2">
+            <label className="rotulo" htmlFor="pix">
               Chave PIX (complementar)
             </label>
             <input
+              id="pix"
               value={chavePix}
               onChange={(e) => setChavePix(e.target.value)}
-              className="mb-4 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
+              className="campo mb-4"
             />
-            <label className="mb-1 block text-xs font-medium text-slate-500">
+            <label className="rotulo" htmlFor="obs">
               Observações
             </label>
             <textarea
+              id="obs"
               value={observacoes}
               onChange={(e) => setObservacoes(e.target.value)}
               rows={5}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
+              className="campo resize-y"
+              placeholder="Contexto que não cabe no IXC."
             />
             <button
               onClick={() => salvar.mutate()}
               disabled={salvar.isPending}
-              className="mt-3 w-full rounded-lg bg-brand-600 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+              className="btn btn-primario mt-4 w-full"
             >
               {salvar.isPending ? 'Salvando…' : 'Salvar'}
             </button>
             {salvo && (
-              <p className="mt-2 text-center text-xs text-green-600">
-                Salvo com sucesso.
+              <p className="mt-2 text-center text-xs font-semibold text-emerald-600">
+                Salvo.
               </p>
             )}
           </Bloco>
         </section>
       </div>
-    </div>
-  );
-}
-
-function Bloco({
-  titulo,
-  children,
-  grade = false,
-}: {
-  titulo: string;
-  children: React.ReactNode;
-  /** Quando true, distribui os filhos em grade de 2 colunas (listas de campos). */
-  grade?: boolean;
-}) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
-        {titulo}
-      </h2>
-      {grade ? (
-        <div className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
-          {children}
-        </div>
-      ) : (
-        children
-      )}
-    </div>
+    </Pagina>
   );
 }
 
 function Campo({
   rotulo,
   valor,
+  mono = false,
 }: {
   rotulo: string;
   valor: React.ReactNode;
+  mono?: boolean;
 }) {
   return (
     <div>
-      <div className="text-xs text-slate-400">{rotulo}</div>
-      <div className="text-sm text-slate-700">{valor || '—'}</div>
+      <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-tinta-400">
+        {rotulo}
+      </div>
+      <div className={`mt-0.5 text-sm text-tinta-800 ${mono ? 'num' : ''}`}>
+        {valor || <span className="text-tinta-300">—</span>}
+      </div>
     </div>
   );
 }
@@ -262,136 +273,147 @@ function ConfigFolhaBloco({
   });
 
   return (
-    <Bloco titulo="Configuração da folha">
+    <Bloco titulo="Configuração da folha" className="surgir surgir-2">
       <div className="space-y-3">
-        <label className="flex items-center gap-2 text-sm text-slate-700">
-          <input
-            type="checkbox"
-            checked={clt}
-            onChange={(e) => {
-              setClt(e.target.checked);
-              if (!e.target.checked) setCarteira(false);
-            }}
-          />
+        <Marcador
+          checked={clt}
+          onChange={(v) => {
+            setClt(v);
+            if (!v) setCarteira(false);
+          }}
+        >
           Contratado como CLT
-        </label>
-        <label className="flex items-center gap-2 text-sm text-slate-700">
-          <input
-            type="checkbox"
-            checked={carteira}
-            disabled={!clt}
-            onChange={(e) => setCarteira(e.target.checked)}
-          />
-          <span className={clt ? '' : 'text-slate-400'}>
-            Carteira assinada — a contabilidade já desconta o adiantamento
-          </span>
-        </label>
+        </Marcador>
+        <Marcador
+          checked={carteira}
+          disabled={!clt}
+          onChange={setCarteira}
+        >
+          Carteira assinada — a contabilidade já desconta o adiantamento
+        </Marcador>
         {clt && !carteira && (
-          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <p className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs leading-relaxed text-amber-900">
             CLT com carteira ainda não assinada: o adiantamento do dia 25
             continua sendo descontado do saldo salarial. Marque “Carteira
             assinada” quando o registro sair.
           </p>
         )}
         {carteira && (
-          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          <p className="rounded-xl border border-tinta-200 bg-tinta-50 px-3.5 py-2.5 text-xs leading-relaxed text-tinta-600">
             O salário oficial sai pela contabilidade. Preencha{' '}
             <strong>A receber na folha</strong> com o que a empresa paga por
             aqui — é esse valor que serve de base para o cálculo, no lugar do
             salário base.
           </p>
         )}
-        <label className="flex items-center gap-2 text-sm text-slate-700">
+        <Marcador checked={recebeAdto} onChange={setRecebeAdto}>
+          Recebe adiantamento no dia 25
+        </Marcador>
+      </div>
+
+      <div className="mt-5 flex flex-wrap items-end gap-4 border-t border-tinta-100 pt-5">
+        <div>
+          <label className="rotulo">Salário base (R$)</label>
           <input
-            type="checkbox"
-            checked={recebeAdto}
-            onChange={(e) => setRecebeAdto(e.target.checked)}
+            type="number"
+            step="0.01"
+            value={salario}
+            onChange={(e) => setSalario(e.target.value)}
+            className="campo w-40"
           />
-          Recebe adiantamento (dia 25)
-        </label>
-        <div className="flex flex-wrap items-end gap-3">
+        </div>
+        {carteira && (
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">
-              Salário base (R$)
-            </label>
+            <label className="rotulo">A receber na folha (R$)</label>
             <input
               type="number"
               step="0.01"
-              value={salario}
-              onChange={(e) => setSalario(e.target.value)}
-              className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              value={aReceber}
+              onChange={(e) => setAReceber(e.target.value)}
+              placeholder="vazio = salário base"
+              className="campo w-44"
             />
           </div>
-          {carteira && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-500">
-                A receber na folha (R$)
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                value={aReceber}
-                onChange={(e) => setAReceber(e.target.value)}
-                placeholder="vazio = salário base"
-                className="w-44 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-            </div>
-          )}
-          {recebeAdto && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-500">
-                Valor do dia 25 (R$)
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                value={valorAdto}
-                onChange={(e) => setValorAdto(e.target.value)}
-                placeholder="vazio = 40%"
-                className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-            </div>
-          )}
+        )}
+        {recebeAdto && (
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">
-              Comissão por venda
-            </label>
-            <select
-              value={comissao}
-              onChange={(e) => setComissao(e.target.value)}
-              className="w-44 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            >
-              <option value="">Não comissiona</option>
-              <option value="5">R$ 5,00 por venda</option>
-              <option value="50">R$ 50,00 por venda</option>
-              <option value="outro">Outro valor…</option>
-            </select>
+            <label className="rotulo">Valor do dia 25 (R$)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={valorAdto}
+              onChange={(e) => setValorAdto(e.target.value)}
+              placeholder="vazio = 40%"
+              className="campo w-40"
+            />
           </div>
-          {comissao === 'outro' && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-500">
-                Valor por venda (R$)
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                value={comissaoOutro}
-                onChange={(e) => setComissaoOutro(e.target.value)}
-                className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-            </div>
-          )}
-          <button
-            onClick={() => salvar.mutate()}
-            disabled={salvar.isPending}
-            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+        )}
+        <div>
+          <label className="rotulo">Comissão por venda</label>
+          <select
+            value={comissao}
+            onChange={(e) => setComissao(e.target.value)}
+            className="campo w-48"
           >
-            {salvar.isPending ? 'Salvando…' : 'Salvar'}
-          </button>
-          {ok && <span className="text-xs text-green-600">Salvo.</span>}
+            <option value="">Não comissiona</option>
+            <option value="5">R$ 5,00 por venda</option>
+            <option value="50">R$ 50,00 por venda</option>
+            <option value="outro">Outro valor…</option>
+          </select>
         </div>
+        {comissao === 'outro' && (
+          <div>
+            <label className="rotulo">Valor por venda (R$)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={comissaoOutro}
+              onChange={(e) => setComissaoOutro(e.target.value)}
+              className="campo w-40"
+            />
+          </div>
+        )}
+        <button
+          onClick={() => salvar.mutate()}
+          disabled={salvar.isPending}
+          className="btn btn-primario"
+        >
+          {salvar.isPending ? 'Salvando…' : 'Salvar'}
+        </button>
+        {ok && (
+          <span className="text-xs font-semibold text-emerald-600">Salvo.</span>
+        )}
       </div>
     </Bloco>
+  );
+}
+
+function Marcador({
+  checked,
+  onChange,
+  disabled,
+  children,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <label
+      className={`flex items-start gap-2.5 text-sm ${
+        disabled ? 'text-tinta-300' : 'cursor-pointer text-tinta-700'
+      }`}
+    >
+      <input
+        type="checkbox"
+        className="mt-0.5 accent-brand-600"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      {children}
+    </label>
   );
 }
 
@@ -476,42 +498,37 @@ function VariaveisMesBloco({
   const comissaoPrevista = (Number(vendas) || 0) * unitario;
 
   return (
-    <Bloco titulo="Vendas e horas extras do mês">
-      <p className="mb-3 text-xs text-slate-500">
+    <Bloco titulo="Vendas e horas extras do mês" className="surgir surgir-3">
+      <p className="mb-4 text-xs leading-relaxed text-tinta-500">
         Lançamento por <strong>mês trabalhado</strong>: o que você registrar em{' '}
-        {formatComp(competencia)} entra no saldo salarial da folha do mês
-        seguinte, detalhado na observação da conta a pagar.
+        <span className="num">{formatComp(competencia)}</span> entra no saldo
+        salarial da folha do mês seguinte, detalhado na observação da conta a
+        pagar.
       </p>
 
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="flex flex-wrap items-end gap-4">
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">
-            Mês trabalhado
-          </label>
+          <label className="rotulo">Mês trabalhado</label>
           <input
             type="month"
             value={competencia}
             onChange={(e) => setCompetencia(e.target.value)}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="campo"
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">
-            Vendas no mês
-          </label>
+          <label className="rotulo">Vendas no mês</label>
           <input
             type="number"
             min={0}
             value={vendas}
             onChange={(e) => setVendas(e.target.value)}
             placeholder="0"
-            className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="campo w-28"
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">
-            Valor por venda (R$)
-          </label>
+          <label className="rotulo">Valor por venda (R$)</label>
           <input
             type="number"
             step="0.01"
@@ -522,97 +539,103 @@ function VariaveisMesBloco({
                 ? `padrão ${formatBRL(valorPorVendaPadrao)}`
                 : 'sem padrão'
             }
-            className="w-36 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="campo w-40"
           />
         </div>
         {!carteiraAssinada && (
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">
-              Horas extras (R$)
-            </label>
+            <label className="rotulo">Horas extras (R$)</label>
             <input
               type="number"
               step="0.01"
               value={horasExtras}
               onChange={(e) => setHorasExtras(e.target.value)}
               placeholder="0,00"
-              className="w-36 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              className="campo w-36"
             />
           </div>
         )}
         <div className="min-w-[160px] flex-1">
-          <label className="mb-1 block text-xs font-medium text-slate-500">
-            Observação
-          </label>
+          <label className="rotulo">Observação</label>
           <input
             value={observacao}
             onChange={(e) => setObservacao(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="campo"
           />
         </div>
         <button
           onClick={() => salvar.mutate()}
           disabled={salvar.isPending}
-          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+          className="btn btn-primario"
         >
           {salvar.isPending ? 'Salvando…' : 'Salvar mês'}
         </button>
-        {ok && <span className="text-xs text-green-600">Salvo.</span>}
+        {ok && (
+          <span className="text-xs font-semibold text-emerald-600">Salvo.</span>
+        )}
       </div>
 
       {carteiraAssinada && (
-        <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+        <p className="mt-4 rounded-xl border border-tinta-200 bg-tinta-50 px-3.5 py-2.5 text-xs text-tinta-600">
           Carteira assinada: as horas extras saem pela contabilidade, então não
           entram no cálculo daqui.
         </p>
       )}
       {comissaoPrevista > 0 && (
-        <p className="mt-3 text-sm text-slate-600">
+        <p className="mt-4 text-sm text-tinta-600">
           Comissão de {formatComp(competencia)}:{' '}
-          <strong className="text-slate-800">
+          <strong className="valor text-[15px]">
             {formatBRL(comissaoPrevista)}
           </strong>{' '}
-          ({vendas} × {formatBRL(unitario)})
+          <span className="num text-tinta-400">
+            ({vendas} × {formatBRL(unitario)})
+          </span>
         </p>
       )}
 
       {variaveis.length > 0 && (
-        <table className="mt-4 w-full text-sm">
-          <thead className="text-left text-xs uppercase text-slate-400">
-            <tr>
-              <th className="py-1">Mês</th>
-              <th className="py-1 text-right">Vendas</th>
-              <th className="py-1 text-right">Comissão</th>
-              <th className="py-1 text-right">Horas extras</th>
-              <th className="py-1"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {variaveis.map((v) => {
-              const unit = Number(v.valorPorVenda ?? valorPorVendaPadrao ?? 0);
-              return (
-                <tr key={v.id} className="border-t border-slate-100">
-                  <td className="py-1.5">{formatComp(v.competencia)}</td>
-                  <td className="py-1.5 text-right">{v.vendas}</td>
-                  <td className="py-1.5 text-right">
-                    {formatBRL(v.vendas * unit)}
-                  </td>
-                  <td className="py-1.5 text-right">
-                    {formatBRL(v.horasExtras)}
-                  </td>
-                  <td className="py-1.5 text-right">
-                    <button
-                      onClick={() => remover.mutate(v.competencia)}
-                      className="text-xs text-red-500 hover:underline"
-                    >
-                      remover
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="mt-5 overflow-hidden rounded-xl ring-1 ring-tinta-100">
+          <table className="w-full text-sm">
+            <thead>
+              <tr>
+                <th className="th !py-2">Mês</th>
+                <th className="th !py-2 text-right">Vendas</th>
+                <th className="th !py-2 text-right">Comissão</th>
+                <th className="th !py-2 text-right">Horas extras</th>
+                <th className="th !py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {variaveis.map((v) => {
+                const unit = Number(v.valorPorVenda ?? valorPorVendaPadrao ?? 0);
+                return (
+                  <tr key={v.id} className="border-t border-tinta-100">
+                    <td className="td num !py-2">{formatComp(v.competencia)}</td>
+                    <td className="td num !py-2 text-right">{v.vendas}</td>
+                    <td className="td !py-2 text-right">
+                      <span className="valor text-[13px]">
+                        {formatBRL(v.vendas * unit)}
+                      </span>
+                    </td>
+                    <td className="td !py-2 text-right">
+                      <span className="valor text-[13px]">
+                        {formatBRL(v.horasExtras)}
+                      </span>
+                    </td>
+                    <td className="td !py-2 text-right">
+                      <button
+                        onClick={() => remover.mutate(v.competencia)}
+                        className="text-xs font-semibold text-rose-500 hover:underline"
+                      >
+                        remover
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </Bloco>
   );
@@ -630,71 +653,75 @@ function ValesBloco({ funcionarioId }: { funcionarioId: string }) {
       ).data,
   });
 
-  const abertos = (data ?? []).filter(
-    (v) => !v.vale.cancelado && !v.quitado,
-  );
+  const abertos = (data ?? []).filter((v) => !v.vale.cancelado && !v.quitado);
 
   return (
-    <Bloco titulo="Vales e acertos">
-      {isLoading && <p className="text-sm text-slate-400">Carregando…</p>}
+    <Bloco
+      titulo="Vales e acertos"
+      className="surgir surgir-4"
+      acao={
+        <Link
+          to="/vales"
+          className="text-xs font-semibold text-brand-700 hover:underline"
+        >
+          Registrar
+        </Link>
+      }
+    >
+      {isLoading && <p className="text-sm text-tinta-400">Carregando…</p>}
       {data && data.length === 0 && (
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-tinta-400">
           Nenhum vale ou acerto registrado.
         </p>
       )}
       {data && data.length > 0 && (
-        <table className="w-full text-sm">
-          <thead className="text-left text-xs uppercase text-slate-400">
-            <tr>
-              <th className="py-1">Descrição</th>
-              <th className="py-1 text-center">Parcela</th>
-              <th className="py-1 text-right">Saldo</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((v) => (
-              <tr
-                key={v.vale.id}
-                className={`border-t border-slate-100 ${
-                  v.vale.cancelado ? 'opacity-50' : ''
-                }`}
-              >
-                <td className="py-1.5">
-                  {v.vale.descricao}
-                  <span
-                    className={`ml-2 rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                      SENTIDO_CLASSE[v.vale.sentido]
-                    }`}
-                  >
-                    {SENTIDO_CURTO[v.vale.sentido]}
-                  </span>
-                  {!v.vale.descontarDaFolha && (
-                    <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
-                      fora da folha
-                    </span>
-                  )}
-                </td>
-                <td className="py-1.5 text-center text-slate-600">
-                  {rotuloParcelaAtual(v)}
-                </td>
-                <td className="py-1.5 text-right font-medium">
-                  {formatBRL(v.saldo)}
-                </td>
+        <div className="overflow-hidden rounded-xl ring-1 ring-tinta-100">
+          <table className="w-full text-sm">
+            <thead>
+              <tr>
+                <th className="th !py-2">Descrição</th>
+                <th className="th !py-2 text-center">Parcela</th>
+                <th className="th !py-2 text-right">Saldo</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.map((v) => (
+                <tr
+                  key={v.vale.id}
+                  className={`border-t border-tinta-100 ${
+                    v.vale.cancelado ? 'opacity-45' : ''
+                  }`}
+                >
+                  <td className="td !py-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {v.vale.descricao}
+                      <Selo tom={SENTIDO_TOM[v.vale.sentido]} pequeno>
+                        {SENTIDO_CURTO[v.vale.sentido]}
+                      </Selo>
+                      {!v.vale.descontarDaFolha && (
+                        <Selo pequeno>fora da folha</Selo>
+                      )}
+                    </div>
+                  </td>
+                  <td className="td num !py-2 text-center text-tinta-600">
+                    {rotuloParcelaAtual(v)}
+                  </td>
+                  <td className="td !py-2 text-right">
+                    <span className="valor text-[13px]">
+                      {formatBRL(v.saldo)}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
-      <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-        <Link to="/vales" className="text-brand-700 hover:underline">
-          Registrar vale ou acerto →
-        </Link>
-        {abertos.length > 0 && (
-          <span className="text-xs text-slate-500">
-            {abertos.length} em aberto
-          </span>
-        )}
-      </div>
+      {abertos.length > 0 && (
+        <p className="mt-3 text-xs text-tinta-400">
+          {abertos.length} em aberto
+        </p>
+      )}
     </Bloco>
   );
 }
@@ -742,79 +769,90 @@ function LancamentosBloco({
   });
 
   return (
-    <Bloco titulo="Lançamentos (fixos e avulsos)">
+    <Bloco titulo="Lançamentos fixos e avulsos" className="surgir surgir-4">
       {lancamentos.length === 0 ? (
-        <p className="mb-3 text-sm text-slate-400">Nenhum lançamento.</p>
+        <p className="mb-4 text-sm text-tinta-400">
+          Nenhum lançamento. Bônus fixo entra todo mês; avulso, só na
+          competência escolhida.
+        </p>
       ) : (
-        <table className="mb-4 w-full text-sm">
-          <tbody>
-            {lancamentos.map((l) => (
-              <tr key={l.id} className="border-t border-slate-100">
-                <td className="py-1.5">
-                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
-                    {TIPO_LABEL[l.tipo]}
-                  </span>
-                </td>
-                <td className="py-1.5">
-                  {l.descricao}{' '}
-                  <span
-                    className={`ml-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                      l.competencia
-                        ? 'bg-amber-100 text-amber-700'
-                        : 'bg-sky-100 text-sky-700'
-                    }`}
-                  >
-                    {l.competencia ? `Avulso ${formatComp(l.competencia)}` : 'Fixo'}
-                  </span>
-                </td>
-                <td className="py-1.5 text-right font-medium">{formatBRL(l.valor)}</td>
-                <td className="py-1.5 pl-2 text-right">
-                  <button
-                    onClick={() => remover.mutate(l.id)}
-                    className="text-xs text-red-500 hover:underline"
-                  >
-                    remover
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="mb-5 overflow-hidden rounded-xl ring-1 ring-tinta-100">
+          <table className="w-full text-sm">
+            <tbody>
+              {lancamentos.map((l) => (
+                <tr key={l.id} className="border-t border-tinta-100 first:border-0">
+                  <td className="td !py-2.5">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-tinta-400">
+                      {TIPO_LABEL[l.tipo]}
+                    </span>
+                  </td>
+                  <td className="td !py-2.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {l.descricao}
+                      <Selo tom={l.competencia ? 'atencao' : 'info'} pequeno>
+                        {l.competencia
+                          ? `avulso ${formatComp(l.competencia)}`
+                          : 'fixo'}
+                      </Selo>
+                    </div>
+                  </td>
+                  <td className="td !py-2.5 text-right">
+                    <span className="valor">{formatBRL(l.valor)}</span>
+                  </td>
+                  <td className="td !py-2.5 text-right">
+                    <button
+                      onClick={() => remover.mutate(l.id)}
+                      className="text-xs font-semibold text-rose-500 hover:underline"
+                    >
+                      remover
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
-      <div className="flex flex-wrap items-end gap-2">
-        <select
-          value={tipo}
-          onChange={(e) => setTipo(e.target.value as TipoLancamento)}
-          className="rounded-lg border border-slate-300 px-2 py-2 text-sm"
-        >
-          <option value="DESCONTO">Desconto</option>
-          <option value="ADIANTAMENTO">Adiantamento</option>
-          <option value="BONUS">Bônus</option>
-        </select>
-        <input
-          value={descricao}
-          onChange={(e) => setDescricao(e.target.value)}
-          placeholder="Descrição"
-          className="min-w-[140px] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-        />
-        <input
-          type="number"
-          step="0.01"
-          value={valor}
-          onChange={(e) => setValor(e.target.value)}
-          placeholder="Valor"
-          className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-        />
+      <div className="flex flex-wrap items-end gap-3">
         <div>
-          <label className="mb-0.5 block text-[10px] text-slate-400">
-            Mês (vazio = fixo)
-          </label>
+          <label className="rotulo">Tipo</label>
+          <select
+            value={tipo}
+            onChange={(e) => setTipo(e.target.value as TipoLancamento)}
+            className="campo w-auto"
+          >
+            <option value="DESCONTO">Desconto</option>
+            <option value="ADIANTAMENTO">Adiantamento</option>
+            <option value="BONUS">Bônus</option>
+          </select>
+        </div>
+        <div className="min-w-[160px] flex-1">
+          <label className="rotulo">Descrição</label>
+          <input
+            value={descricao}
+            onChange={(e) => setDescricao(e.target.value)}
+            placeholder="Ex.: bônus técnico"
+            className="campo"
+          />
+        </div>
+        <div>
+          <label className="rotulo">Valor (R$)</label>
+          <input
+            type="number"
+            step="0.01"
+            value={valor}
+            onChange={(e) => setValor(e.target.value)}
+            className="campo w-32"
+          />
+        </div>
+        <div>
+          <label className="rotulo">Mês (vazio = fixo)</label>
           <input
             type="month"
             value={competencia}
             onChange={(e) => setCompetencia(e.target.value)}
-            className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+            className="campo"
           />
         </div>
         <button
@@ -822,7 +860,7 @@ function LancamentosBloco({
           disabled={
             adicionar.isPending || descricao.trim().length < 2 || Number(valor) <= 0
           }
-          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+          className="btn btn-neutro"
         >
           Adicionar
         </button>

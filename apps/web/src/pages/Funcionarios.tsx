@@ -1,6 +1,16 @@
-﻿import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  Aviso,
+  Bloco,
+  CabecalhoPagina,
+  Carregando,
+  Indicador,
+  Pagina,
+  Selo,
+  Vazio,
+} from '../components/ui';
 import { api, mensagemErro } from '../lib/api';
 import { baseDaFolha, usaValorAReceber } from '../lib/folha';
 import { formatBRL } from '../lib/format';
@@ -37,22 +47,15 @@ export function Funcionarios() {
       const f = data.resultados.find((r) => r.recurso === 'funcionarios');
       const forn = data.resultados.find((r) => r.recurso === 'fornecedores');
       setFeedback(
-        `Sincronização concluída — ${f?.totalLidos ?? 0} funcionários (${
-          f?.totalNovos ?? 0
-        } novos, ${f?.totalAtualizados ?? 0} atualizados). ` +
-          `Fornecedores isentos de ICMS: ${forn?.totalLidos ?? 0} (${
-            forn?.totalNovos ?? 0
-          } novos).`,
+        `${f?.totalLidos ?? 0} funcionário(s) lidos — ${f?.totalNovos ?? 0} novos, ${
+          f?.totalAtualizados ?? 0
+        } atualizados. Fornecedores isentos de ICMS: ${forn?.totalLidos ?? 0}.`,
       );
-      invalidarListas();
+      qc.invalidateQueries({ queryKey: ['funcionarios'] });
+      qc.invalidateQueries({ queryKey: ['resumo'] });
     },
-    onError: (err) => setFeedback(`Erro ao sincronizar: ${mensagemErro(err)}`),
+    onError: (err) => setFeedback(`Não deu para sincronizar: ${mensagemErro(err)}`),
   });
-
-  function invalidarListas() {
-    qc.invalidateQueries({ queryKey: ['funcionarios'] });
-    qc.invalidateQueries({ queryKey: ['resumo'] });
-  }
 
   function submitBusca(e: React.FormEvent) {
     e.preventDefault();
@@ -60,135 +63,149 @@ export function Funcionarios() {
     setBuscaAtiva(busca.trim());
   }
 
+  const temBonus = Number(resumo.data?.bonusFixoMensal ?? 0) > 0;
+
   return (
-    <div className="p-8">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-800">Funcionários</h1>
-          <p className="text-sm text-slate-500">
-            Fornecedores ativos isentos de ICMS, sincronizados do IXC
-          </p>
-        </div>
-        <button
-          onClick={() => sync.mutate()}
-          disabled={sync.isPending}
-          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:opacity-60"
-        >
-          {sync.isPending ? 'Sincronizando…' : '↻ Sincronizar com IXC'}
-        </button>
-      </div>
+    <Pagina>
+      <CabecalhoPagina
+        secao="Funcionários"
+        titulo="Quem entra na folha"
+        descricao="Fornecedores ativos e isentos de ICMS no IXC. É essa lista que a folha calcula."
+        acoes={
+          <button
+            onClick={() => sync.mutate()}
+            disabled={sync.isPending}
+            className="btn btn-acao"
+          >
+            {sync.isPending ? 'Sincronizando…' : 'Sincronizar com o IXC'}
+          </button>
+        }
+      />
 
-      {feedback && (
-        <div className="mb-5 rounded-lg border border-brand-100 bg-brand-50 px-4 py-3 text-sm text-brand-800">
-          {feedback}
-        </div>
-      )}
+      {feedback && <Aviso tom="marca">{feedback}</Aviso>}
 
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Card titulo="Funcionários ativos" valor={resumo.data?.ativos ?? '—'} />
-        <Card titulo="Inativos" valor={resumo.data?.inativos ?? '—'} />
-        <Card
-          titulo="Folha base mensal"
+      <div className="surgir surgir-1 mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <Indicador
+          acento
+          rotulo="Folha base mensal"
           valor={formatBRL(resumo.data?.folhaBaseMensal)}
           detalhe={
-            Number(resumo.data?.bonusFixoMensal ?? 0) > 0
-              ? `salários ${formatBRL(resumo.data?.salarioBaseMensal)} + bônus fixos ${formatBRL(resumo.data?.bonusFixoMensal)}`
-              : 'soma dos salários base dos ativos'
+            temBonus
+              ? `${formatBRL(resumo.data?.salarioBaseMensal)} de base + ${formatBRL(
+                  resumo.data?.bonusFixoMensal,
+                )} de bônus fixos`
+              : 'soma da base de quem está ativo'
           }
+        />
+        <Indicador
+          rotulo="Ativos"
+          valor={resumo.data?.ativos ?? '—'}
+          detalhe="entram na próxima folha"
+        />
+        <Indicador
+          rotulo="Inativos"
+          valor={resumo.data?.inativos ?? '—'}
+          detalhe="ficam no histórico, fora do cálculo"
         />
       </div>
 
-      <form onSubmit={submitBusca} className="mb-4 flex flex-wrap gap-2">
-        <input
-          value={busca}
-          onChange={(e) => setBusca(e.target.value)}
-          placeholder="Buscar por nome, CPF ou e-mail…"
-          className="min-w-[240px] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-        />
-        <select
-          value={ativo}
-          onChange={(e) => {
-            setPage(1);
-            setAtivo(e.target.value as typeof ativo);
-          }}
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
+      <Bloco className="surgir surgir-2" semPadding>
+        <form
+          onSubmit={submitBusca}
+          className="flex flex-wrap gap-2 border-b border-tinta-100 p-4 sm:p-5"
         >
-          <option value="todos">Todos</option>
-          <option value="true">Ativos</option>
-          <option value="false">Inativos</option>
-        </select>
-        <button className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-          Buscar
-        </button>
-      </form>
+          <input
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            placeholder="Buscar por nome, CPF ou e-mail…"
+            className="campo min-w-[240px] flex-1"
+          />
+          <select
+            value={ativo}
+            onChange={(e) => {
+              setPage(1);
+              setAtivo(e.target.value as typeof ativo);
+            }}
+            className="campo w-auto"
+          >
+            <option value="todos">Todos</option>
+            <option value="true">Ativos</option>
+            <option value="false">Inativos</option>
+          </select>
+          <button className="btn btn-neutro">Buscar</button>
+        </form>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rolagem-fina">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+            <thead>
               <tr>
-                <th className="px-4 py-3 font-semibold">Nome</th>
-                <th className="px-4 py-3 font-semibold">CPF/CNPJ</th>
-                <th className="px-4 py-3 font-semibold">Chave PIX</th>
-                <th className="px-4 py-3 text-right font-semibold">
-                  Base da folha
-                </th>
-                <th className="px-4 py-3 text-center font-semibold">Status</th>
+                <th className="th">Nome</th>
+                <th className="th">CPF/CNPJ</th>
+                <th className="th">Chave PIX</th>
+                <th className="th text-right">Base da folha</th>
+                <th className="th text-center">Situação</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {lista.isLoading && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
-                    Carregando…
+                  <td colSpan={5}>
+                    <Carregando />
                   </td>
                 </tr>
               )}
               {lista.isError && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-red-500">
+                  <td colSpan={5} className="px-4 py-10 text-center text-sm text-rose-600">
                     {mensagemErro(lista.error)}
                   </td>
                 </tr>
               )}
               {lista.data?.itens.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-slate-400">
-                    Nenhum funcionário. Clique em “Sincronizar com IXC”.
+                  <td colSpan={5}>
+                    <Vazio titulo="Nenhum funcionário por aqui">
+                      Sincronize com o IXC para trazer os fornecedores ativos
+                      isentos de ICMS.
+                    </Vazio>
                   </td>
                 </tr>
               )}
               {lista.data?.itens.map((f) => (
-                <tr key={f.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3">
+                <tr key={f.id} className="linha group">
+                  <td className="td">
                     <Link
                       to={`/funcionarios/${f.id}`}
-                      className="font-medium text-brand-700 hover:underline"
+                      className="font-medium text-tinta-900 decoration-brand-300 underline-offset-4 group-hover:underline"
                     >
                       {f.nome}
                     </Link>
                     {f.ixcId && (
-                      <span className="ml-2 text-xs text-slate-400">
-                        IXC #{f.ixcId}
+                      <span className="ml-2 text-[11px] text-tinta-300 num">
+                        IXC {f.ixcId}
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{f.cpfCnpj ?? '—'}</td>
-                  <td className="px-4 py-3 text-slate-600">
+                  <td className="td num text-tinta-500">{f.cpfCnpj ?? '—'}</td>
+                  <td className="td text-tinta-500">
                     {f.chavePix || (
-                      <span className="text-amber-600">sem PIX</span>
+                      <Selo tom="atencao" pequeno>
+                        sem PIX
+                      </Selo>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right font-medium text-slate-700">
-                    {formatBRL(baseDaFolha(f))}
+                  <td className="td text-right">
+                    <span className="valor">{formatBRL(baseDaFolha(f))}</span>
                     {usaValorAReceber(f) && (
-                      <div className="text-[10px] font-normal text-slate-400">
+                      <div className="text-[10px] text-tinta-300">
                         salário base {formatBRL(f.salarioBase)}
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-center">
-                    <StatusBadge ativo={f.ativo} />
+                  <td className="td text-center">
+                    <Selo tom={f.ativo ? 'pago' : 'neutro'} ponto>
+                      {f.ativo ? 'Ativo' : 'Inativo'}
+                    </Selo>
                   </td>
                 </tr>
               ))}
@@ -197,8 +214,8 @@ export function Funcionarios() {
         </div>
 
         {lista.data && lista.data.totalPages > 1 && (
-          <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-sm text-slate-600">
-            <span>
+          <div className="flex items-center justify-between border-t border-tinta-100 px-5 py-3 text-sm text-tinta-500">
+            <span className="num">
               Página {lista.data.page} de {lista.data.totalPages} ·{' '}
               {lista.data.total} registros
             </span>
@@ -206,53 +223,21 @@ export function Funcionarios() {
               <button
                 disabled={page <= 1}
                 onClick={() => setPage((p) => p - 1)}
-                className="rounded-md border border-slate-300 px-3 py-1 disabled:opacity-40"
+                className="btn btn-neutro btn-p"
               >
                 Anterior
               </button>
               <button
                 disabled={page >= lista.data.totalPages}
                 onClick={() => setPage((p) => p + 1)}
-                className="rounded-md border border-slate-300 px-3 py-1 disabled:opacity-40"
+                className="btn btn-neutro btn-p"
               >
                 Próxima
               </button>
             </div>
           </div>
         )}
-      </div>
-    </div>
-  );
-}
-
-function Card({
-  titulo,
-  valor,
-  detalhe,
-}: {
-  titulo: string;
-  valor: React.ReactNode;
-  detalhe?: string;
-}) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-        {titulo}
-      </div>
-      <div className="mt-1 text-2xl font-semibold text-slate-800">{valor}</div>
-      {detalhe && <div className="mt-0.5 text-xs text-slate-400">{detalhe}</div>}
-    </div>
-  );
-}
-
-function StatusBadge({ ativo }: { ativo: boolean }) {
-  return (
-    <span
-      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
-        ativo ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'
-      }`}
-    >
-      {ativo ? 'Ativo' : 'Inativo'}
-    </span>
+      </Bloco>
+    </Pagina>
   );
 }

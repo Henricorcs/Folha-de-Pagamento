@@ -1,9 +1,18 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  Bloco,
+  CabecalhoPagina,
+  Carregando,
+  Indicador,
+  Pagina,
+  Selo,
+  Vazio,
+} from '../components/ui';
 import { api, mensagemErro } from '../lib/api';
 import { formatBRL, formatData } from '../lib/format';
-import { STATUS_CLASSE, STATUS_LABEL, TIPO_LABEL } from '../lib/status';
+import { STATUS_LABEL, STATUS_TOM, TIPO_LABEL } from '../lib/status';
 import type { Dashboard as TDashboard } from '../lib/types';
 
 function competenciaAtual(): string {
@@ -36,236 +45,210 @@ export function Dashboard() {
         .data,
   });
 
-  if (isError)
-    return <div className="p-8 text-red-500">{mensagemErro(error)}</div>;
-
   const f = data?.funcionarios;
   const folha = data?.folha;
   const vales = data?.vales;
-  const maiorDaSerie = Math.max(1, ...(data?.serie.map((s) => s.total) ?? [1]));
 
   return (
-    <div className="p-8">
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-800">Dashboard</h1>
-          <p className="text-sm text-slate-500">
-            Como está a folha de {formatComp(competencia)} e o que ela deixa
-            pendente.
-          </p>
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">
-            Competência
-          </label>
-          <input
-            type="month"
-            value={competencia}
-            onChange={(e) => setCompetencia(e.target.value)}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
-          />
-        </div>
-      </div>
+    <Pagina>
+      <CabecalhoPagina
+        secao="Dashboard"
+        titulo={`Folha de ${formatComp(competencia)}`}
+        descricao="O que já saiu, o que está parado esperando alguém e o que a competência ainda deve."
+        acoes={
+          <div>
+            <label className="rotulo" htmlFor="competencia">
+              Competência
+            </label>
+            <input
+              id="competencia"
+              type="month"
+              value={competencia}
+              onChange={(e) => setCompetencia(e.target.value)}
+              className="campo"
+            />
+          </div>
+        }
+      />
 
-      {isLoading && <p className="text-slate-400">Carregando…</p>}
+      {isError && (
+        <div className="card p-6 text-sm text-rose-600">
+          {mensagemErro(error)}
+        </div>
+      )}
+      {isLoading && (
+        <div className="card">
+          <Carregando />
+        </div>
+      )}
 
       {data && (
-        <>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <Card
-              titulo="Folha base mensal"
+        <div className="space-y-6">
+          <div className="surgir surgir-1 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <Indicador
+              acento
+              rotulo="Folha base mensal"
               valor={formatBRL(f?.folhaBaseMensal)}
               detalhe={
                 f && f.bonusFixoMensal > 0
-                  ? `salários ${formatBRL(f.salarioBaseMensal)} + bônus fixos ${formatBRL(f.bonusFixoMensal)}`
-                  : 'soma dos salários base dos ativos'
+                  ? `${formatBRL(f.salarioBaseMensal)} de base + ${formatBRL(f.bonusFixoMensal)} de bônus fixos`
+                  : 'soma da base de quem está ativo'
               }
             />
-            <Card
-              titulo="Funcionários ativos"
-              valor={f?.ativos ?? '—'}
-              detalhe={`${f?.inativos ?? 0} inativos`}
-              link="/funcionarios"
-            />
-            <Card
-              titulo={`Gerado em ${formatComp(competencia)}`}
+            <Indicador
+              rotulo="Gerado na competência"
               valor={formatBRL(folha?.total)}
               detalhe={`${folha?.quantidade ?? 0} conta(s) a pagar`}
-              link="/contas-pagar"
             />
-            <Card
-              titulo="Pago x em aberto"
+            <Indicador
+              rotulo="Confirmado pelo banco"
               valor={formatBRL(folha?.pago)}
               detalhe={`${formatBRL(folha?.emAberto)} ainda em aberto`}
-              destaque={
+              alerta={
                 (folha?.comErro ?? 0) > 0
                   ? `${formatBRL(folha?.comErro)} com erro no IXC`
                   : undefined
               }
             />
+            <Indicador
+              rotulo="Pessoas ativas"
+              valor={f?.ativos ?? '—'}
+              detalhe={`${f?.inativos ?? 0} inativas`}
+              alerta={
+                (f?.semPix ?? 0) > 0 ? `${f?.semPix} sem chave PIX` : undefined
+              }
+            />
           </div>
 
-          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div className="surgir surgir-2 grid grid-cols-1 gap-6 lg:grid-cols-3">
             <Bloco titulo="Últimos 6 meses" className="lg:col-span-2">
-              <div className="flex h-52 items-end gap-3">
-                {data.serie.map((s) => {
-                  const altura = (s.total / maiorDaSerie) * 100;
-                  const pago = s.total > 0 ? (s.pago / s.total) * 100 : 0;
-                  return (
-                    <div
-                      key={s.competencia}
-                      className="flex flex-1 flex-col items-center gap-1"
-                    >
-                      <span className="text-[10px] text-slate-500">
-                        {s.total > 0 ? formatBRL(s.total) : ''}
-                      </span>
-                      <div
-                        className="flex w-full items-end justify-center rounded-t bg-slate-100"
-                        style={{ height: `${Math.max(altura, 2)}%` }}
-                        title={`${formatComp(s.competencia)} — total ${formatBRL(
-                          s.total,
-                        )}, pago ${formatBRL(s.pago)}`}
-                      >
-                        <div
-                          className="w-full rounded-t bg-brand-500"
-                          style={{ height: `${pago}%` }}
-                        />
-                      </div>
-                      <span
-                        className={`text-xs ${
-                          s.competencia === competencia
-                            ? 'font-semibold text-slate-700'
-                            : 'text-slate-400'
-                        }`}
-                      >
-                        {rotuloMes(s.competencia)}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-              <p className="mt-3 text-xs text-slate-400">
-                Barra cheia = total gerado na competência; a parte colorida é o
-                que o banco já confirmou como pago.
-              </p>
+              <Serie serie={data.serie} atual={competencia} />
             </Bloco>
 
-            <Bloco titulo="Vales e acertos">
-              <Linha
-                rotulo="Funcionários devem"
-                valor={formatBRL(vales?.saldoDevedor)}
-              />
-              <Linha
-                rotulo="Empresa deve"
-                valor={formatBRL(vales?.saldoAPagar)}
-              />
-              <Linha
-                rotulo={`Desconto em ${formatComp(competencia)}`}
-                valor={formatBRL(vales?.descontoNaCompetencia)}
-              />
-              <Linha
-                rotulo={`A pagar a mais em ${formatComp(competencia)}`}
-                valor={formatBRL(vales?.creditoNaCompetencia)}
-              />
-              <Linha
-                rotulo="Vales em aberto"
-                valor={String(vales?.valesEmAberto ?? 0)}
-              />
-              <Link
-                to="/vales"
-                className="mt-3 inline-block text-sm text-brand-700 hover:underline"
-              >
-                Ver vales e acertos →
-              </Link>
+            <Bloco
+              titulo="Vales e acertos"
+              acao={
+                <Link
+                  to="/vales"
+                  className="text-xs font-semibold text-brand-700 hover:underline"
+                >
+                  Ver todos
+                </Link>
+              }
+            >
+              <div className="space-y-3">
+                <SaldoVale
+                  rotulo="Funcionários devem"
+                  valor={formatBRL(vales?.saldoDevedor)}
+                  tom="text-amber-700"
+                />
+                <SaldoVale
+                  rotulo="Empresa deve"
+                  valor={formatBRL(vales?.saldoAPagar)}
+                  tom="text-emerald-700"
+                />
+                <div className="border-t border-tinta-100 pt-3">
+                  <Linha
+                    rotulo={`Desconta em ${formatComp(competencia)}`}
+                    valor={formatBRL(vales?.descontoNaCompetencia)}
+                  />
+                  <Linha
+                    rotulo={`Paga a mais em ${formatComp(competencia)}`}
+                    valor={formatBRL(vales?.creditoNaCompetencia)}
+                  />
+                  <Linha
+                    rotulo="Vales em aberto"
+                    valor={String(vales?.valesEmAberto ?? 0)}
+                  />
+                </div>
+              </div>
             </Bloco>
           </div>
 
-          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <Bloco titulo={`Situação das contas de ${formatComp(competencia)}`}>
+          <div className="surgir surgir-3 grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <Bloco titulo={`Situação em ${formatComp(competencia)}`}>
               {folha && folha.porStatus.length > 0 ? (
-                <table className="w-full text-sm">
-                  <tbody>
+                <>
+                  <div className="space-y-2.5">
                     {folha.porStatus.map((s) => (
-                      <tr key={s.status} className="border-t border-slate-100">
-                        <td className="py-2">
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                              STATUS_CLASSE[s.status]
-                            }`}
-                          >
-                            {STATUS_LABEL[s.status]}
+                      <div
+                        key={s.status}
+                        className="flex items-center justify-between gap-3"
+                      >
+                        <Selo tom={STATUS_TOM[s.status]} ponto>
+                          {STATUS_LABEL[s.status]}
+                        </Selo>
+                        <div className="flex items-baseline gap-3">
+                          <span className="text-xs text-tinta-400">
+                            {s.quantidade}
                           </span>
-                        </td>
-                        <td className="py-2 text-right text-slate-500">
-                          {s.quantidade}
-                        </td>
-                        <td className="py-2 text-right font-medium text-slate-700">
-                          {formatBRL(s.valor)}
-                        </td>
-                      </tr>
+                          <span className="valor text-sm">
+                            {formatBRL(s.valor)}
+                          </span>
+                        </div>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
+                  </div>
+                  {folha.porTipo.length > 0 && (
+                    <div className="mt-5 flex flex-wrap gap-2 border-t border-tinta-100 pt-4">
+                      {folha.porTipo.map((t) => (
+                        <span
+                          key={t.tipo}
+                          className="rounded-lg bg-tinta-50 px-3 py-1.5 text-xs text-tinta-500"
+                        >
+                          {TIPO_LABEL[t.tipo]}{' '}
+                          <strong className="valor text-[13px]">
+                            {formatBRL(t.valor)}
+                          </strong>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </>
               ) : (
-                <p className="text-sm text-slate-400">
-                  Nada gerado nesta competência ainda.{' '}
-                  <Link to="/folha" className="text-brand-700 hover:underline">
+                <Vazio titulo="Nada gerado nesta competência">
+                  Quando você calcular a folha, o andamento de cada conta
+                  aparece aqui.{' '}
+                  <Link to="/folha" className="font-semibold text-brand-700 hover:underline">
                     Gerar folha
                   </Link>
-                </p>
-              )}
-
-              {folha && folha.porTipo.length > 0 && (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {folha.porTipo.map((t) => (
-                    <span
-                      key={t.tipo}
-                      className="rounded-lg bg-slate-50 px-3 py-1.5 text-xs text-slate-600"
-                    >
-                      {TIPO_LABEL[t.tipo]}:{' '}
-                      <strong className="text-slate-800">
-                        {formatBRL(t.valor)}
-                      </strong>{' '}
-                      ({t.quantidade})
-                    </span>
-                  ))}
-                </div>
+                </Vazio>
               )}
             </Bloco>
 
             <Bloco titulo="Pontos de atenção">
-              <ul className="space-y-2 text-sm">
+              <ul className="space-y-3">
                 <Atencao
                   ok={(f?.semPix ?? 0) === 0}
+                  para="/funcionarios"
                   texto={
                     (f?.semPix ?? 0) === 0
-                      ? 'Todos os ativos têm chave PIX.'
-                      : `${f?.semPix} funcionário(s) ativo(s) sem chave PIX — o pagamento vai falhar.`
+                      ? 'Todo mundo ativo tem chave PIX.'
+                      : `${f?.semPix} pessoa(s) ativa(s) sem chave PIX — o pagamento não sai.`
                   }
-                  para="/funcionarios"
                 />
                 <Atencao
                   ok={(folha?.comErro ?? 0) === 0}
+                  para="/contas-pagar"
                   texto={
                     (folha?.comErro ?? 0) === 0
                       ? 'Nenhuma conta com erro no IXC.'
-                      : `${formatBRL(folha?.comErro)} em contas com erro no IXC.`
+                      : `${formatBRL(folha?.comErro)} em contas que o IXC recusou — reenvie.`
                   }
-                  para="/contas-pagar"
                 />
                 <Atencao
                   ok={(folha?.emAberto ?? 0) === 0}
+                  para="/contas-pagar"
                   texto={
                     (folha?.emAberto ?? 0) === 0
-                      ? 'Nada pendente de pagamento nesta competência.'
-                      : `${formatBRL(folha?.emAberto)} aguardando aprovação ou pagamento.`
+                      ? 'Nada pendente nesta competência.'
+                      : `${formatBRL(folha?.emAberto)} esperando aprovação ou pagamento.`
                   }
-                  para="/contas-pagar"
                 />
               </ul>
               {data.ultimoSync && (
-                <p className="mt-4 text-xs text-slate-400">
-                  Última sincronização com o IXC:{' '}
+                <p className="mt-5 border-t border-tinta-100 pt-4 text-xs text-tinta-400">
+                  Última sincronização com o IXC em{' '}
                   {formatData(
                     data.ultimoSync.concluidoEm ?? data.ultimoSync.iniciadoEm,
                   )}{' '}
@@ -276,114 +259,153 @@ export function Dashboard() {
             </Bloco>
           </div>
 
-          <Bloco titulo="Últimos lançamentos" className="mt-6">
-            {data.ultimasContas.length === 0 ? (
-              <p className="text-sm text-slate-400">Nenhuma conta a pagar ainda.</p>
-            ) : (
-              <table className="w-full text-sm">
-                <thead className="text-left text-xs uppercase text-slate-400">
-                  <tr>
-                    <th className="py-1">Beneficiário</th>
-                    <th className="py-1">Tipo</th>
-                    <th className="py-1">Competência</th>
-                    <th className="py-1">Status</th>
-                    <th className="py-1 text-right">Valor</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.ultimasContas.map((c) => (
-                    <tr key={c.id} className="border-t border-slate-100">
-                      <td className="py-2">{c.beneficiarioNome}</td>
-                      <td className="py-2 text-slate-500">
-                        {TIPO_LABEL[c.tipo]}
-                      </td>
-                      <td className="py-2 text-slate-500">
-                        {c.competencia ? formatComp(c.competencia) : '—'}
-                      </td>
-                      <td className="py-2">
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                            STATUS_CLASSE[c.status]
-                          }`}
-                        >
-                          {STATUS_LABEL[c.status]}
-                        </span>
-                      </td>
-                      <td className="py-2 text-right font-medium">
-                        {formatBRL(c.valor)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </Bloco>
-        </>
+          <div className="surgir surgir-4">
+            <Bloco titulo="Últimos lançamentos" semPadding>
+              {data.ultimasContas.length === 0 ? (
+                <Vazio titulo="Nenhuma conta a pagar ainda">
+                  Comece pela tela Gerar Folha.
+                </Vazio>
+              ) : (
+                <div className="overflow-x-auto rolagem-fina">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-t border-tinta-100">
+                        <th className="th">Beneficiário</th>
+                        <th className="th">Tipo</th>
+                        <th className="th">Competência</th>
+                        <th className="th">Situação</th>
+                        <th className="th text-right">Valor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.ultimasContas.map((c) => (
+                        <tr key={c.id} className="linha">
+                          <td className="td font-medium text-tinta-800">
+                            {c.beneficiarioNome}
+                          </td>
+                          <td className="td text-tinta-500">
+                            {TIPO_LABEL[c.tipo]}
+                          </td>
+                          <td className="td text-tinta-500 num">
+                            {c.competencia ? formatComp(c.competencia) : '—'}
+                          </td>
+                          <td className="td">
+                            <Selo tom={STATUS_TOM[c.status]}>
+                              {STATUS_LABEL[c.status]}
+                            </Selo>
+                          </td>
+                          <td className="td text-right">
+                            <span className="valor">{formatBRL(c.valor)}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Bloco>
+          </div>
+        </div>
       )}
-    </div>
+    </Pagina>
   );
 }
 
-function Card({
-  titulo,
-  valor,
-  detalhe,
-  destaque,
-  link,
+/**
+ * Seis meses de folha. A barra inteira é o que foi gerado; a parte sólida é o
+ * que o banco confirmou — a distância entre as duas é o que falta acontecer.
+ */
+function Serie({
+  serie,
+  atual,
 }: {
-  titulo: string;
-  valor: React.ReactNode;
-  detalhe?: string;
-  destaque?: string;
-  link?: string;
+  serie: { competencia: string; total: number; pago: number }[];
+  atual: string;
 }) {
-  const conteudo = (
-    <div className="h-full rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-        {titulo}
+  const maior = Math.max(1, ...serie.map((s) => s.total));
+  return (
+    <div>
+      <div className="flex h-56 items-end gap-2 sm:gap-4">
+        {serie.map((s, i) => {
+          const altura = (s.total / maior) * 100;
+          const pago = s.total > 0 ? (s.pago / s.total) * 100 : 0;
+          const eAtual = s.competencia === atual;
+          return (
+            <div
+              key={s.competencia}
+              className="group flex min-w-0 flex-1 flex-col items-center justify-end gap-2"
+            >
+              <span
+                className={`num text-[11px] font-semibold transition ${
+                  eAtual ? 'text-tinta-700' : 'text-tinta-400'
+                }`}
+              >
+                {s.total > 0 ? formatBRL(s.total) : ''}
+              </span>
+              <div
+                className="flex w-full origin-bottom animate-crescer items-end justify-center overflow-hidden rounded-t-lg bg-tinta-100 transition group-hover:bg-tinta-200"
+                style={{
+                  height: `${Math.max(altura, 2)}%`,
+                  animationDelay: `${i * 70}ms`,
+                }}
+                title={`${s.competencia} — gerado ${formatBRL(
+                  s.total,
+                )}, pago ${formatBRL(s.pago)}`}
+              >
+                <div
+                  className="w-full rounded-t-lg bg-gradient-to-t from-brand-600 to-brand-400"
+                  style={{ height: `${pago}%` }}
+                />
+              </div>
+              <span
+                className={`text-xs ${
+                  eAtual
+                    ? 'font-semibold text-tinta-800'
+                    : 'text-tinta-400'
+                }`}
+              >
+                {rotuloMes(s.competencia)}
+              </span>
+            </div>
+          );
+        })}
       </div>
-      <div className="mt-1 text-2xl font-semibold text-slate-800">{valor}</div>
-      {detalhe && <div className="mt-0.5 text-xs text-slate-400">{detalhe}</div>}
-      {destaque && (
-        <div className="mt-1 text-xs font-medium text-red-600">{destaque}</div>
-      )}
+      <div className="mt-5 flex flex-wrap items-center gap-4 border-t border-tinta-100 pt-4 text-xs text-tinta-400">
+        <span className="flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-sm bg-gradient-to-t from-brand-600 to-brand-400" />
+          pago
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-sm bg-tinta-100" />
+          gerado, ainda não pago
+        </span>
+      </div>
     </div>
-  );
-  return link ? (
-    <Link to={link} className="block transition hover:opacity-80">
-      {conteudo}
-    </Link>
-  ) : (
-    conteudo
   );
 }
 
-function Bloco({
-  titulo,
-  className = '',
-  children,
+function SaldoVale({
+  rotulo,
+  valor,
+  tom,
 }: {
-  titulo: string;
-  className?: string;
-  children: React.ReactNode;
+  rotulo: string;
+  valor: string;
+  tom: string;
 }) {
   return (
-    <div
-      className={`rounded-xl border border-slate-200 bg-white p-5 shadow-sm ${className}`}
-    >
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
-        {titulo}
-      </h2>
-      {children}
+    <div>
+      <p className="text-xs text-tinta-400">{rotulo}</p>
+      <p className={`font-display text-xl font-semibold num ${tom}`}>{valor}</p>
     </div>
   );
 }
 
 function Linha({ rotulo, valor }: { rotulo: string; valor: string }) {
   return (
-    <div className="flex items-center justify-between border-b border-slate-100 py-2 text-sm last:border-0">
-      <span className="text-slate-500">{rotulo}</span>
-      <span className="font-medium text-slate-800">{valor}</span>
+    <div className="flex items-center justify-between py-1.5 text-sm">
+      <span className="text-tinta-500">{rotulo}</span>
+      <span className="num font-medium text-tinta-800">{valor}</span>
     </div>
   );
 }
@@ -398,14 +420,21 @@ function Atencao({
   para: string;
 }) {
   return (
-    <li className="flex items-start gap-2">
-      <span className={ok ? 'text-green-600' : 'text-amber-600'}>
+    <li className="flex items-start gap-2.5 text-sm">
+      <span
+        className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${
+          ok ? 'bg-emerald-500' : 'bg-amber-500'
+        }`}
+      >
         {ok ? '✓' : '!'}
       </span>
       {ok ? (
-        <span className="text-slate-500">{texto}</span>
+        <span className="text-tinta-500">{texto}</span>
       ) : (
-        <Link to={para} className="text-slate-700 hover:underline">
+        <Link
+          to={para}
+          className="text-tinta-700 underline decoration-tinta-200 underline-offset-4 hover:decoration-tinta-400"
+        >
           {texto}
         </Link>
       )}
