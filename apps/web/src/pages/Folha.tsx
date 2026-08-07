@@ -27,8 +27,8 @@ interface ItemGerar extends LancamentoCalculado {
   funcionarioId: string;
   nome: string;
   selecionado: boolean;
-  /** Carteira assinada + adiantamento: o saldo sai cheio de propósito. */
-  cltComAdiantamento: boolean;
+  /** Carteira assinada: a contabilidade já desconta o dia 25 lá. */
+  carteiraAssinada: boolean;
   /** Situação do dia 25 desta pessoa nesta competência. */
   adiantamento: SituacaoAdiantamento | null;
   /** Como o saldo salarial foi montado. */
@@ -37,10 +37,14 @@ interface ItemGerar extends LancamentoCalculado {
   vales: ParcelaValeFolha[];
   /** Conta de salário que já existe nesta competência. */
   salarioJaGerado: ContaJaGerada | null;
+  /** Valor que a API calculou, antes de a tela mexer no dia 25. */
+  valorOriginal: number;
   /**
-   * Abater o adiantamento do dia 25 deste salário. Vem ligado (é como a API
-   * calculou), mas quem não tem carteira assinada pode desligar — ex.: o dia
-   * 25 não foi gerado, então não há o que descontar.
+   * Abater o adiantamento do dia 25 do que esta pessoa recebe agora. Vem
+   * ligado para quem não tem carteira assinada (é como a API calculou) e pode
+   * ser desligado — ex.: o dia 25 não foi gerado, então não há o que
+   * descontar. Para quem tem carteira assinada vem desligado, porque a
+   * contabilidade já cuida disso; ligar é uma escolha de quem gera a folha.
    */
   descontarAdiantamento: boolean;
 }
@@ -49,11 +53,109 @@ function arredondar(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-/** Valor do salário conforme o desconto do dia 25 esteja ligado ou não. */
-function saldoComOpcao(it: ItemGerar): number {
-  return it.descontarAdiantamento
-    ? it.composicao.saldo
-    : arredondar(it.composicao.saldo + it.composicao.adiantamentoDescontado);
+/** Salário da pessoa sem nenhum abatimento do dia 25 — de onde a opção parte. */
+function salarioCheio(c: ComposicaoSalario): number {
+  return arredondar(c.saldo + c.adiantamentoDescontado);
+}
+
+/**
+ * Como o adiantamento do dia 25 se divide entre os pagamentos da pessoa: sai
+ * primeiro do salário e, se não couber ali, desce para o bônus — na empresa o
+ * bônus também conta como salário. O que nem o bônus cobrir fica de aviso, sem
+ * ser abatido de lugar nenhum.
+ */
+interface RepartoDia25 {
+  /** Quanto do dia 25 está sendo abatido ao todo (0 = desconto desligado). */
+  total: number;
+  /** Parte que saiu do salário. */
+  noSalario: number;
+  /** Parte que desceu para o bônus. */
+  noBonus: number;
+  /** O que não coube em lugar nenhum. */
+  aDescoberto: number;
+  /** Novo valor do salário (null = a pessoa não tem lançamento de salário). */
+  salario: number | null;
+  /** Novo valor do bônus (null = a pessoa não tem lançamento de bônus). */
+  bonus: number | null;
+}
+
+function repartirDia25(
+  total: number,
+  cheioSalario: number | null,
+  cheioBonus: number | null,
+): RepartoDia25 {
+  const noSalario = arredondar(Math.min(total, Math.max(0, cheioSalario ?? 0)));
+  const sobra = arredondar(total - noSalario);
+  const noBonus = arredondar(Math.min(sobra, Math.max(0, cheioBonus ?? 0)));
+  return {
+    total,
+    noSalario,
+    noBonus,
+    aDescoberto: arredondar(sobra - noBonus),
+    salario: cheioSalario === null ? null : arredondar(cheioSalario - noSalario),
+    bonus: cheioBonus === null ? null : arredondar(cheioBonus - noBonus),
+  };
+}
+
+/** Valor de um lançamento depois do reparto do dia 25. */
+function valorComDia25(it: ItemGerar, reparto: RepartoDia25): number {
+  if (it.tipo === 'SALARIO' && reparto.salario !== null) return reparto.salario;
+  if (it.tipo === 'BONUS' && reparto.bonus !== null) return reparto.bonus;
+  return it.valorOriginal;
+}
+
+/**
+ * Este lançamento vira conta a pagar? Zerado, não: a API recusa valor abaixo
+ * de R$ 0,01 e derruba o lote inteiro. Acontece quando o dia 25 come todo o
+ * salário — aí quem paga o resto é o bônus, e a linha de salário some.
+ */
+function vaiGerar(it: ItemGerar): boolean {
+  return it.selecionado && it.valor > 0;
+}
+
+/** Uma pessoa na prévia, com todos os lançamentos que ela recebe. */
+interface Grupo {
+  funcionarioId: string;
+  nome: string;
+  /** Índices em `itens` dos lançamentos desta pessoa. */
+  indices: number[];
+  adiantamento: SituacaoAdiantamento | null;
+  composicao: ComposicaoSalario;
+  carteiraAssinada: boolean;
+  /** Índice do lançamento de SALÁRIO, de onde o dia 25 sai primeiro. */
+  salarioIdx: number | null;
+  /** Índice do lançamento de BÔNUS, que absorve o que não coube no salário. */
+  bonusIdx: number | null;
+  /** Dá para escolher abater o dia 25 desta pessoa nesta prévia? */
+  temOpcaoDia25: boolean;
+  descontarAdiantamento: boolean;
+  reparto: RepartoDia25;
+}
+
+/** Quanto do dia 25 está mesmo saindo — sem contar o que ficou a descoberto. */
+function abatidoDia25(r: RepartoDia25): number {
+  return arredondar(r.noSalario + r.noBonus);
+}
+
+/** O reparto do dia 25 de uma pessoa, do jeito que está agora na tela. */
+function repartoDoGrupo(
+  itens: ItemGerar[],
+  g: Pick<
+    Grupo,
+    | 'composicao'
+    | 'salarioIdx'
+    | 'bonusIdx'
+    | 'temOpcaoDia25'
+    | 'descontarAdiantamento'
+  >,
+): RepartoDia25 {
+  const total =
+    g.temOpcaoDia25 && g.descontarAdiantamento ? g.composicao.adiantamento : 0;
+  return repartirDia25(
+    total,
+    g.salarioIdx === null ? null : salarioCheio(g.composicao),
+    g.bonusIdx === null ? null : itens[g.bonusIdx].valorOriginal,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -68,13 +170,7 @@ interface Termo {
   sinal: '+' | '−';
 }
 
-function Regua({
-  c,
-  descontarAdiantamento,
-}: {
-  c: ComposicaoSalario;
-  descontarAdiantamento: boolean;
-}) {
+function Regua({ c, reparto }: { c: ComposicaoSalario; reparto: RepartoDia25 }) {
   const termos: Termo[] = [
     {
       rotulo: c.usouValorAReceber ? 'A receber na folha' : 'Salário base',
@@ -106,17 +202,20 @@ function Regua({
   if (c.vales > 0) {
     termos.push({ rotulo: 'Vale do mês', valor: c.vales, sinal: '−' });
   }
-  if (c.adiantamentoDescontado > 0 && descontarAdiantamento) {
+  if (reparto.noSalario > 0) {
     termos.push({
       rotulo: 'Adiantamento dia 25',
-      valor: c.adiantamentoDescontado,
+      valor: reparto.noSalario,
+      // Quando o dia 25 não coube no salário, o resto foi para o bônus.
+      nota:
+        reparto.noBonus > 0
+          ? `+ ${formatBRL(reparto.noBonus)} no bônus`
+          : undefined,
       sinal: '−',
     });
   }
 
-  const saldo = descontarAdiantamento
-    ? c.saldo
-    : arredondar(c.saldo + c.adiantamentoDescontado);
+  const saldo = reparto.salario ?? salarioCheio(c);
 
   // Um termo só: o salário fala por si.
   if (termos.length === 1) return null;
@@ -166,44 +265,81 @@ function Regua({
 }
 
 /**
- * Escolha de abater ou não o adiantamento do dia 25 daquele salário. Só existe
- * para quem não tem carteira assinada (quem tem já sai sem desconto, porque a
- * contabilidade cuida disso) e serve principalmente para quando o pagamento do
- * dia 25 não chegou a sair.
+ * Escolha de abater ou não o adiantamento do dia 25 do que a pessoa recebe
+ * agora.
+ *
+ * Para quem não tem carteira assinada vem ligada, que é como a API calculou, e
+ * serve para quando o pagamento do dia 25 não chegou a sair. Para quem tem
+ * carteira assinada vem desligada — a contabilidade já desconta o dia 25 do
+ * salário oficial —, mas dá para ligar quando a empresa também for abater do
+ * que esta folha paga.
  */
 function OpcaoDia25({
-  item,
+  grupo,
   onChange,
 }: {
-  item: ItemGerar | null;
+  grupo: Grupo;
   onChange: (descontar: boolean) => void;
 }) {
-  if (!item || item.composicao.adiantamentoDescontado <= 0) return null;
-  const naoGerado = item.adiantamento?.situacao === 'NAO_GERADO';
+  if (!grupo.temOpcaoDia25) return null;
+  const { composicao, reparto, carteiraAssinada } = grupo;
+  const ligado = grupo.descontarAdiantamento;
+  const naoGerado = grupo.adiantamento?.situacao === 'NAO_GERADO';
   return (
-    <label className="mb-4 flex flex-wrap items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs text-tinta-600 ring-1 ring-tinta-100">
-      <input
-        type="checkbox"
-        className="accent-brand-600"
-        checked={item.descontarAdiantamento}
-        onChange={(e) => onChange(e.target.checked)}
-      />
-      Descontar o adiantamento do dia 25 (
-      <span className="num font-semibold">
-        {formatBRL(item.composicao.adiantamentoDescontado)}
-      </span>
-      ) deste salário
-      {!item.descontarAdiantamento && (
-        <Selo tom="atencao" pequeno>
-          saindo cheio
-        </Selo>
-      )}
-      {naoGerado && item.descontarAdiantamento && (
-        <span className="text-amber-700">
-          — o dia 25 não saiu nesta competência; confira se a pessoa recebeu.
+    <div className="mb-4 rounded-lg bg-white px-3 py-2 ring-1 ring-tinta-100">
+      <label className="flex flex-wrap items-center gap-2 text-xs text-tinta-600">
+        <input
+          type="checkbox"
+          className="accent-brand-600"
+          checked={ligado}
+          onChange={(e) => onChange(e.target.checked)}
+        />
+        Descontar o adiantamento do dia 25 (
+        <span className="num font-semibold">
+          {formatBRL(composicao.adiantamento)}
         </span>
+        ) deste pagamento
+        {!ligado && (
+          <Selo tom="atencao" pequeno>
+            saindo cheio
+          </Selo>
+        )}
+        {ligado && naoGerado && (
+          <span className="text-amber-700">
+            — o dia 25 não saiu nesta competência; confira se a pessoa recebeu.
+          </span>
+        )}
+      </label>
+
+      {carteiraAssinada && !ligado && (
+        <p className="mt-1.5 pl-6 text-[11px] leading-relaxed text-tinta-400">
+          Carteira assinada: a contabilidade já desconta o dia 25 do salário
+          oficial. Marque só se a empresa for abater também do que esta folha
+          paga.
+        </p>
       )}
-    </label>
+      {ligado && reparto.noBonus > 0 && (
+        <p className="mt-1.5 pl-6 text-[11px] leading-relaxed text-tinta-500">
+          Não coube tudo no salário:{' '}
+          <span className="num font-semibold">
+            {formatBRL(reparto.noSalario)}
+          </span>{' '}
+          saem do salário e{' '}
+          <span className="num font-semibold">{formatBRL(reparto.noBonus)}</span>{' '}
+          do bônus — na empresa o bônus também conta como salário.
+        </p>
+      )}
+      {ligado && reparto.aDescoberto > 0 && (
+        <p className="mt-1.5 pl-6 text-[11px] leading-relaxed text-amber-700">
+          Faltou de onde tirar{' '}
+          <span className="num font-semibold">
+            {formatBRL(reparto.aDescoberto)}
+          </span>
+          : o que a folha paga não cobre o dia 25 inteiro. Ajuste na mão antes de
+          gerar.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -255,15 +391,18 @@ function SeloSalarioGerado({ conta }: { conta: ContaJaGerada | null }) {
 function SeloAdiantamento({
   modo,
   adiantamento,
-  descontado,
+  abatido,
 }: {
   modo: ModoPagamento;
   adiantamento: SituacaoAdiantamento | null;
-  /** Se o desconto está mesmo valendo — pode ter sido desligado na tela. */
-  descontado: boolean;
+  /**
+   * Quanto do dia 25 está mesmo saindo deste pagamento. Zero quando o desconto
+   * foi desligado na tela; menos que o valor cheio quando não coube tudo.
+   */
+  abatido: number;
 }) {
   if (!adiantamento) return null;
-  const { situacao, valor, pagoEm } = adiantamento;
+  const { situacao, pagoEm } = adiantamento;
 
   if (modo === 'DIA_25') {
     if (situacao === 'NAO_GERADO') return null;
@@ -298,18 +437,18 @@ function SeloAdiantamento({
       </Selo>
     );
   }
-  const tom: Tom = descontado ? 'erro' : 'neutro';
+  const tom: Tom = abatido > 0 ? 'erro' : 'neutro';
   return (
     <Selo
       pequeno
       tom={tom}
       titulo={
-        descontado
-          ? `Não há conta a pagar do dia 25 nesta competência, mas ${formatBRL(valor)} estão sendo descontados do salário. Confira antes de gerar.`
+        abatido > 0
+          ? `Não há conta a pagar do dia 25 nesta competência, mas ${formatBRL(abatido)} estão sendo descontados do pagamento. Confira antes de gerar.`
           : 'Não há conta a pagar do dia 25 nesta competência.'
       }
     >
-      dia 25 não gerado{descontado ? ` · ${formatBRL(valor)} descontados` : ''}
+      dia 25 não gerado{abatido > 0 ? ` · ${formatBRL(abatido)} descontados` : ''}
     </Selo>
   );
 }
@@ -353,6 +492,20 @@ export function Folha() {
     onSuccess: (data) => {
       const flat: ItemGerar[] = [];
       for (const f of data) {
+        const temSalario = f.lancamentos.some((l) => l.tipo === 'SALARIO');
+        const bonus = f.lancamentos.find((l) => l.tipo === 'BONUS') ?? null;
+        // Quem não tem carteira assinada já veio da API com o dia 25 abatido;
+        // quem tem, não — a contabilidade cuida disso, então aqui a opção
+        // nasce desligada.
+        const descontarAdiantamento = f.composicao.adiantamentoDescontado > 0;
+        const temOpcaoDia25 =
+          f.composicao.adiantamento > 0 && (temSalario || !!bonus);
+        const reparto = repartirDia25(
+          temOpcaoDia25 && descontarAdiantamento ? f.composicao.adiantamento : 0,
+          temSalario ? salarioCheio(f.composicao) : null,
+          bonus ? bonus.valor : null,
+        );
+
         for (const l of f.lancamentos) {
           // Pagamento que já existe na competência vem desmarcado: o certo é
           // conferir em Contas a Pagar antes de gerar outro.
@@ -361,18 +514,20 @@ export function Folha() {
             (l.tipo === 'ADIANTAMENTO' &&
               !!f.adiantamento &&
               f.adiantamento.situacao !== 'NAO_GERADO');
-          flat.push({
+          const item: ItemGerar = {
             ...l,
             funcionarioId: f.funcionarioId,
             nome: f.nome,
             selecionado: !jaExiste,
-            cltComAdiantamento: f.carteiraAssinada && f.recebeAdiantamento,
+            carteiraAssinada: f.carteiraAssinada,
             adiantamento: f.adiantamento,
             composicao: f.composicao,
             vales: f.vales,
             salarioJaGerado: f.salarioJaGerado,
-            descontarAdiantamento: true,
-          });
+            valorOriginal: l.valor,
+            descontarAdiantamento,
+          };
+          flat.push({ ...item, valor: valorComDia25(item, reparto) });
         }
       }
       setItens(flat);
@@ -392,7 +547,7 @@ export function Folha() {
 
   const gerar = useMutation({
     mutationFn: async () => {
-      const selecionados = itens.filter((i) => i.selecionado);
+      const selecionados = itens.filter(vaiGerar);
       const body = {
         itens: selecionados.map((i) => ({
           funcionarioId: i.funcionarioId,
@@ -418,57 +573,47 @@ export function Folha() {
   });
 
   const totalSelecionado = itens
-    .filter((i) => i.selecionado)
+    .filter(vaiGerar)
     .reduce((s, i) => s + i.valor, 0);
 
   // Uma linha por pessoa (com o total), preservando os índices dos lançamentos
   // que a compõem para o detalhamento e para a geração.
-  const grupos = useMemo(() => {
-    const porFuncionario = new Map<
-      string,
-      {
-        funcionarioId: string;
-        nome: string;
-        indices: number[];
-        adiantamento: SituacaoAdiantamento | null;
-        /** Índice do lançamento de SALÁRIO, onde mora a opção do dia 25. */
-        salarioIdx: number | null;
-      }
-    >();
+  const grupos = useMemo<Grupo[]>(() => {
+    const porFuncionario = new Map<string, Grupo>();
     itens.forEach((it, idx) => {
       const grupo = porFuncionario.get(it.funcionarioId) ?? {
         funcionarioId: it.funcionarioId,
         nome: it.nome,
         indices: [],
         adiantamento: it.adiantamento,
+        composicao: it.composicao,
+        carteiraAssinada: it.carteiraAssinada,
         salarioIdx: null,
+        bonusIdx: null,
+        temOpcaoDia25: false,
+        descontarAdiantamento: it.descontarAdiantamento,
+        reparto: repartirDia25(0, null, null),
       };
       grupo.indices.push(idx);
       if (it.tipo === 'SALARIO') grupo.salarioIdx = idx;
+      if (it.tipo === 'BONUS') grupo.bonusIdx = idx;
       porFuncionario.set(it.funcionarioId, grupo);
     });
-    return [...porFuncionario.values()];
+
+    const lista = [...porFuncionario.values()];
+    for (const g of lista) {
+      // No modo dia 25 a lista só tem adiantamentos: não há de onde abater, e
+      // a opção nem aparece.
+      g.temOpcaoDia25 =
+        g.composicao.adiantamento > 0 &&
+        (g.salarioIdx !== null || g.bonusIdx !== null);
+      g.reparto = repartoDoGrupo(itens, g);
+    }
+    return lista;
   }, [itens]);
 
-  /** O desconto do dia 25 está valendo para essa pessoa? */
-  function descontaDia25(salarioIdx: number | null): boolean {
-    if (salarioIdx === null) return false;
-    const it = itens[salarioIdx];
-    return it.descontarAdiantamento && it.composicao.adiantamentoDescontado > 0;
-  }
-
-  /**
-   * Índices dos salários em que dá para escolher descontar o dia 25 ou não.
-   * Só SALÁRIO: a composição existe em todo item, mas o abatimento só acontece
-   * ali (no modo dia 25 não há salário nenhum na lista).
-   */
-  const comOpcaoDia25 = itens
-    .map((it, i) => ({ it, i }))
-    .filter(
-      ({ it }) =>
-        it.tipo === 'SALARIO' && it.composicao.adiantamentoDescontado > 0,
-    )
-    .map(({ i }) => i);
+  /** Pessoas em que dá para escolher descontar o dia 25 ou não. */
+  const comOpcaoDia25 = grupos.filter((g) => g.temOpcaoDia25);
 
   function toggle(idx: number) {
     setItens((prev) =>
@@ -479,24 +624,33 @@ export function Folha() {
     setItens((prev) => prev.map((it, i) => (i === idx ? { ...it, valor } : it)));
   }
   /**
-   * Liga/desliga o abatimento do dia 25 num salário e recalcula o valor. Só
-   * aparece para quem não tem carteira assinada — quem tem já sai sem desconto.
+   * Liga/desliga o abatimento do dia 25 das pessoas indicadas e refaz o
+   * reparto: o valor sai do salário e, no que não couber ali, do bônus.
    */
-  function descontarDia25(indices: number[], descontar: boolean) {
-    const alvo = new Set(indices);
-    setItens((prev) =>
-      prev.map((it, i) => {
-        if (!alvo.has(i) || it.tipo !== 'SALARIO') return it;
-        if (it.composicao.adiantamentoDescontado <= 0) return it;
+  function descontarDia25(alvos: Grupo[], descontar: boolean) {
+    const comOpcao = alvos.filter((g) => g.temOpcaoDia25);
+    if (comOpcao.length === 0) return;
+    setItens((prev) => {
+      const repartos = new Map(
+        comOpcao.map((g) => [
+          g.funcionarioId,
+          repartoDoGrupo(prev, { ...g, descontarAdiantamento: descontar }),
+        ]),
+      );
+      return prev.map((it) => {
+        const reparto = repartos.get(it.funcionarioId);
+        if (!reparto) return it;
         const atualizado = { ...it, descontarAdiantamento: descontar };
-        return { ...atualizado, valor: saldoComOpcao(atualizado) };
-      }),
-    );
+        return { ...atualizado, valor: valorComDia25(atualizado, reparto) };
+      });
+    });
   }
   function selecionarGrupo(indices: number[], selecionado: boolean) {
     const alvo = new Set(indices);
     setItens((prev) =>
-      prev.map((it, i) => (alvo.has(i) ? { ...it, selecionado } : it)),
+      prev.map((it, i) =>
+        alvo.has(i) && it.valor > 0 ? { ...it, selecionado } : it,
+      ),
     );
   }
   /** Trocar de pagamento invalida a prévia anterior. */
@@ -513,12 +667,12 @@ export function Folha() {
   /** Total que a pessoa recebe: só o que está marcado. */
   function totalDoGrupo(indices: number[]): number {
     return indices.reduce(
-      (s, i) => s + (itens[i].selecionado ? itens[i].valor : 0),
+      (s, i) => s + (vaiGerar(itens[i]) ? itens[i].valor : 0),
       0,
     );
   }
 
-  const marcados = itens.filter((i) => i.selecionado).length;
+  const marcados = itens.filter(vaiGerar).length;
 
   return (
     <Pagina>
@@ -530,7 +684,7 @@ export function Folha() {
         descricao={
           modo === 'DIA_25'
             ? 'Só o adiantamento de quem recebe no dia 25.'
-            : 'Salário e bônus. Quem recebeu no dia 25 vem com o adiantamento descontado; quem não recebe, com o salário cheio.'
+            : 'Salário e bônus. Quem recebeu no dia 25 vem com o adiantamento descontado; quem tem carteira assinada vem cheio, mas dá para descontar.'
         }
       />
 
@@ -582,7 +736,7 @@ export function Folha() {
             <strong className="num text-tinta-900">
               {comOpcaoDia25.length}
             </strong>{' '}
-            salário(s) de quem não tem carteira assinada:
+            pessoa(s):
           </span>
           <button
             onClick={() => descontarDia25(comOpcaoDia25, true)}
@@ -597,7 +751,9 @@ export function Folha() {
             Não descontar de ninguém
           </button>
           <span className="text-xs text-tinta-400">
-            Use quando o pagamento do dia 25 não chegou a sair.
+            Desligue quando o pagamento do dia 25 não chegou a sair. Quem tem
+            carteira assinada vem sem desconto — ligue só se a empresa for
+            abater também aqui.
           </span>
         </div>
       )}
@@ -623,10 +779,14 @@ export function Folha() {
                 </tr>
               </thead>
               {grupos.map((g) => {
-                const marcadosGrupo = g.indices.filter(
+                // Linha zerada pelo dia 25 não conta: não há o que gerar nela.
+                const geraveis = g.indices.filter((i) => itens[i].valor > 0);
+                const marcadosGrupo = geraveis.filter(
                   (i) => itens[i].selecionado,
                 );
-                const todos = marcadosGrupo.length === g.indices.length;
+                const todos =
+                  geraveis.length > 0 &&
+                  marcadosGrupo.length === geraveis.length;
                 const aberto = !!abertos[g.funcionarioId];
                 const temSalario = g.salarioIdx !== null;
                 return (
@@ -642,6 +802,12 @@ export function Folha() {
                           type="checkbox"
                           className="accent-brand-600"
                           checked={todos}
+                          disabled={geraveis.length === 0}
+                          title={
+                            geraveis.length === 0
+                              ? 'Sem valor a pagar — não vira conta no IXC.'
+                              : undefined
+                          }
                           ref={(el) => {
                             if (el) {
                               el.indeterminate =
@@ -671,7 +837,7 @@ export function Folha() {
                           <SeloAdiantamento
                             modo={modo}
                             adiantamento={g.adiantamento}
-                            descontado={descontaDia25(g.salarioIdx)}
+                            abatido={abatidoDia25(g.reparto)}
                           />
                           {temSalario && (
                             <SeloSalarioGerado
@@ -692,28 +858,18 @@ export function Folha() {
                         <td colSpan={3} className="bg-tinta-50/80 px-5 pb-5 pt-4">
                           {temSalario && (
                             <>
-                              <Regua
-                                c={itens[g.indices[0]].composicao}
-                                descontarAdiantamento={descontaDia25(
-                                  g.salarioIdx,
-                                )}
-                              />
+                              <Regua c={g.composicao} reparto={g.reparto} />
                               <ValesJaBaixados
                                 vales={itens[g.indices[0]].vales}
                               />
-                              <OpcaoDia25
-                                item={
-                                  g.salarioIdx !== null
-                                    ? itens[g.salarioIdx]
-                                    : null
-                                }
-                                onChange={(descontar) =>
-                                  g.salarioIdx !== null &&
-                                  descontarDia25([g.salarioIdx], descontar)
-                                }
-                              />
                             </>
                           )}
+                          <OpcaoDia25
+                            grupo={g}
+                            onChange={(descontar) =>
+                              descontarDia25([g], descontar)
+                            }
+                          />
 
                           <table className="w-full text-sm">
                             <thead>
@@ -734,14 +890,20 @@ export function Folha() {
                                   <tr
                                     key={idx}
                                     className={`border-t border-tinta-200/70 ${
-                                      it.selecionado ? '' : 'opacity-45'
+                                      vaiGerar(it) ? '' : 'opacity-45'
                                     }`}
                                   >
                                     <td className="td !py-2.5">
                                       <input
                                         type="checkbox"
                                         className="accent-brand-600"
-                                        checked={it.selecionado}
+                                        checked={vaiGerar(it)}
+                                        disabled={it.valor <= 0}
+                                        title={
+                                          it.valor <= 0
+                                            ? 'Sem valor a pagar — não vira conta no IXC.'
+                                            : undefined
+                                        }
                                         onChange={() => toggle(idx)}
                                       />
                                     </td>
@@ -751,31 +913,49 @@ export function Folha() {
                                           {TIPO_LABEL[it.tipo]}
                                         </span>
                                         {it.tipo === 'SALARIO' &&
-                                          it.cltComAdiantamento && (
+                                          g.carteiraAssinada &&
+                                          g.temOpcaoDia25 && (
                                             <Selo
                                               pequeno
                                               tom="atencao"
-                                              titulo="Carteira assinada: a contabilidade já desconta o adiantamento, então o saldo salarial não é reduzido aqui."
+                                              titulo={
+                                                g.reparto.total > 0
+                                                  ? 'Carteira assinada com o desconto ligado nesta prévia: o dia 25 está sendo abatido aqui além do que a contabilidade já desconta.'
+                                                  : 'Carteira assinada: a contabilidade já desconta o adiantamento, então o saldo salarial não é reduzido aqui.'
+                                              }
                                             >
                                               carteira assinada
                                             </Selo>
                                           )}
                                         {it.tipo === 'SALARIO' &&
-                                          it.composicao.adiantamentoDescontado >
-                                            0 &&
-                                          it.descontarAdiantamento && (
+                                          g.reparto.noSalario > 0 && (
                                             <Selo
                                               pequeno
                                               titulo="Valor do dia 25 já abatido deste saldo salarial."
                                             >
-                                              −{' '}
-                                              {formatBRL(
-                                                it.composicao
-                                                  .adiantamentoDescontado,
-                                              )}{' '}
+                                              − {formatBRL(g.reparto.noSalario)}{' '}
                                               do dia 25
                                             </Selo>
                                           )}
+                                        {it.tipo === 'BONUS' &&
+                                          g.reparto.noBonus > 0 && (
+                                            <Selo
+                                              pequeno
+                                              titulo="O dia 25 não coube inteiro no salário; o resto foi abatido do bônus, que na empresa também conta como salário."
+                                            >
+                                              − {formatBRL(g.reparto.noBonus)} do
+                                              dia 25
+                                            </Selo>
+                                          )}
+                                        {it.valor <= 0 && (
+                                          <Selo
+                                            pequeno
+                                            tom="neutro"
+                                            titulo="Sem valor a pagar: não vira conta no IXC."
+                                          >
+                                            não gera
+                                          </Selo>
+                                        )}
                                       </div>
                                     </td>
                                     <td className="td !py-2.5 num text-tinta-400">
