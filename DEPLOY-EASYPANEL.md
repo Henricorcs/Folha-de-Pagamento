@@ -52,7 +52,9 @@ Após o primeiro deploy da API, abra o **Console** do serviço `api` e rode:
 npm run db:seed
 ```
 
-Isso cria o admin com `ADMIN_EMAIL` / `ADMIN_SENHA`.
+Isso cria o admin com `ADMIN_EMAIL` / `ADMIN_SENHA`. Daí em diante os demais
+logins saem pela própria aplicação, em **Usuários** (só administradores veem a
+tela) — o seed serve só para o primeiro acesso.
 
 ## 3. Serviço Web
 

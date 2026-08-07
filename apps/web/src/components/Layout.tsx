@@ -14,6 +14,7 @@ const navItems = [
   { to: '/contas-pagar', label: 'Contas a Pagar', icone: IconeSaida },
   { to: '/avulsos', label: 'Pagamentos Avulsos', icone: IconeRecibo },
   { to: '/configuracoes', label: 'Configurações', icone: IconeEngrenagem },
+  { to: '/usuarios', label: 'Usuários', icone: IconeChave, somenteAdmin: true },
 ];
 
 export function Layout() {
@@ -77,7 +78,9 @@ export function Layout() {
         </div>
 
         <nav className="flex-1 space-y-0.5 overflow-y-auto px-3">
-          {navItems.map((item) => (
+          {navItems
+            .filter((item) => !item.somenteAdmin || usuario?.role === 'ADMIN')
+            .map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -107,12 +110,17 @@ export function Layout() {
                   {item.label}
                 </>
               )}
-            </NavLink>
-          ))}
+              </NavLink>
+            ))}
         </nav>
 
         <div className="m-3 rounded-xl bg-white/[0.04] p-3.5">
-          <div className="flex items-center gap-2.5">
+          <NavLink
+            to="/minha-conta"
+            onClick={() => setMenuAberto(false)}
+            className="flex items-center gap-2.5 rounded-lg transition hover:opacity-80"
+            title="Minha conta"
+          >
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-500/20 font-display text-xs font-semibold text-brand-300">
               {(usuario?.nome ?? '?').slice(0, 2).toUpperCase()}
             </span>
@@ -124,7 +132,7 @@ export function Layout() {
                 {usuario?.email}
               </div>
             </div>
-          </div>
+          </NavLink>
           <button
             onClick={sair}
             className="mt-3 w-full rounded-lg border border-white/10 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-tinta-300 transition hover:border-white/20 hover:bg-white/5 hover:text-white"
@@ -211,6 +219,17 @@ function IconeRecibo({ className }: IconeProps) {
     <svg {...base} className={className}>
       <path d="M5 3.5h14v17l-2.3-1.6-2.3 1.6-2.4-1.6L9.6 20.5 7.3 19 5 20.5z" />
       <path d="M9 8.5h6M9 12.5h6" />
+    </svg>
+  );
+}
+
+function IconeChave({ className }: IconeProps) {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="8" cy="15" r="4" />
+      <path d="m10.9 12.1 8.1-8.1" />
+      <path d="m17 6 2.5 2.5" />
+      <path d="m14.5 8.5 2.5 2.5" />
     </svg>
   );
 }

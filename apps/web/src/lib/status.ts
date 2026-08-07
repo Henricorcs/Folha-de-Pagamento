@@ -1,5 +1,10 @@
 import type { Tom } from '../components/ui';
-import type { SentidoVale, StatusContaPagar, TipoLancamento } from './types';
+import type {
+  PerfilUsuario,
+  SentidoVale,
+  StatusContaPagar,
+  TipoLancamento,
+} from './types';
 
 export const STATUS_LABEL: Record<StatusContaPagar, string> = {
   RASCUNHO: 'Rascunho',
@@ -49,4 +54,23 @@ export const SENTIDO_CURTO: Record<SentidoVale, string> = {
 export const SENTIDO_TOM: Record<SentidoVale, Tom> = {
   DESCONTO: 'atencao',
   CREDITO: 'pago',
+};
+
+/** O que cada perfil pode fazer, em uma linha. */
+export const PERFIL_LABEL: Record<PerfilUsuario, string> = {
+  ADMIN: 'Administrador',
+  RH: 'RH',
+  VISUALIZADOR: 'Visualizador',
+};
+
+export const PERFIL_DESCRICAO: Record<PerfilUsuario, string> = {
+  ADMIN: 'Faz tudo, inclusive criar e remover logins.',
+  RH: 'Usa o app inteiro: folha, vales, contas a pagar. Não mexe em logins.',
+  VISUALIZADOR: 'Só consulta. Não gera folha nem altera cadastro.',
+};
+
+export const PERFIL_TOM: Record<PerfilUsuario, Tom> = {
+  ADMIN: 'marca',
+  RH: 'info',
+  VISUALIZADOR: 'neutro',
 };

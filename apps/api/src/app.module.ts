@@ -10,7 +10,9 @@ import { FinanceiroModule } from './financeiro/financeiro.module';
 import { ValesModule } from './vales/vales.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { AuthModule } from './auth/auth.module';
+import { UsuariosModule } from './usuarios/usuarios.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
+import { RolesGuard } from './auth/roles.guard';
 import { HealthController } from './health/health.controller';
 
 @Module({
@@ -22,6 +24,7 @@ import { HealthController } from './health/health.controller';
     }),
     PrismaModule,
     AuthModule,
+    UsuariosModule,
     IxcModule,
     SyncModule,
     FuncionariosModule,
@@ -33,6 +36,9 @@ import { HealthController } from './health/health.controller';
   providers: [
     // Protege todas as rotas por padrão; use @Public() para abrir exceções.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // Depois do login, o perfil decide o que dá para fazer. A ordem importa:
+    // o JwtAuthGuard precisa ter posto o usuário na requisição antes.
+    { provide: APP_GUARD, useClass: RolesGuard },
   ],
 })
 export class AppModule {}

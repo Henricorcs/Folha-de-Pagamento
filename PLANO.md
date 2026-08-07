@@ -80,7 +80,10 @@ Evolução planejada por fases. Cada fase entrega valor de forma incremental.
 - [ ] Holerite/recibo em PDF por funcionário
 - [ ] Relatórios e exportações (Excel/CSV) por competência
 - [ ] Remessa bancária / lista de PIX para pagamento
-- [ ] Perfis de acesso (ADMIN, RH, VISUALIZADOR) aplicados por rota
+- [x] **Gerenciamento de logins**: criar/editar/desativar usuários (só ADMIN),
+      troca da própria senha em "Minha conta"
+- [x] Perfis de acesso aplicados por rota: `RolesGuard` global — VISUALIZADOR
+      só lê (bloqueia POST/PUT/PATCH/DELETE), `@Roles()` para exceções
 - [ ] Log de auditoria (quem alterou o quê)
 - [ ] Agendamento automático da sincronização com o IXC
 

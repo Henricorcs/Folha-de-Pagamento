@@ -9,6 +9,8 @@ import { Folha } from './pages/Folha';
 import { FuncionarioDetalhe } from './pages/FuncionarioDetalhe';
 import { Funcionarios } from './pages/Funcionarios';
 import { Login } from './pages/Login';
+import { MinhaConta } from './pages/MinhaConta';
+import { Usuarios } from './pages/Usuarios';
 import { Vales } from './pages/Vales';
 import type { ReactNode } from 'react';
 
@@ -22,6 +24,19 @@ function Protegida({ children }: { children: ReactNode }) {
     );
   }
   return usuario ? <>{children}</> : <Navigate to="/login" replace />;
+}
+
+/**
+ * Gerenciar logins é só do administrador. A API já barra, mas esconder a tela
+ * evita a frustração de abrir e levar erro.
+ */
+function SomenteAdmin({ children }: { children: ReactNode }) {
+  const { usuario } = useAuth();
+  return usuario?.role === 'ADMIN' ? (
+    <>{children}</>
+  ) : (
+    <Navigate to="/dashboard" replace />
+  );
 }
 
 export default function App() {
@@ -45,6 +60,15 @@ export default function App() {
         <Route path="contas-pagar" element={<ContasPagar />} />
         <Route path="avulsos" element={<Avulsos />} />
         <Route path="configuracoes" element={<Configuracoes />} />
+        <Route path="minha-conta" element={<MinhaConta />} />
+        <Route
+          path="usuarios"
+          element={
+            <SomenteAdmin>
+              <Usuarios />
+            </SomenteAdmin>
+          }
+        />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

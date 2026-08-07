@@ -1,8 +1,17 @@
+export type PerfilUsuario = 'ADMIN' | 'RH' | 'VISUALIZADOR';
+
 export interface Usuario {
   id: string;
   nome: string;
   email: string;
-  role: 'ADMIN' | 'RH' | 'VISUALIZADOR';
+  role: PerfilUsuario;
+}
+
+/** Login como aparece na tela de gerenciamento (só para ADMIN). */
+export interface UsuarioAdmin extends Usuario {
+  ativo: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Funcionario {
