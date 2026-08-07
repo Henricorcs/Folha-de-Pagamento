@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, mensagemErro } from '../lib/api';
+import { rotuloParcelaAtual } from '../lib/folha';
 import { formatBRL, formatData } from '../lib/format';
 import { SENTIDO_CLASSE, SENTIDO_CURTO, SENTIDO_LABEL } from '../lib/status';
 import type {
@@ -170,7 +171,7 @@ export function Vales() {
               <tr>
                 <th className="px-4 py-3 font-semibold">Pessoa</th>
                 <th className="px-4 py-3 font-semibold">Descrição</th>
-                <th className="px-4 py-3 text-center font-semibold">Parcelas</th>
+                <th className="px-4 py-3 text-center font-semibold">Parcela</th>
                 <th className="px-4 py-3 text-right font-semibold">Parcela</th>
                 <th className="px-4 py-3 text-right font-semibold">Saldo</th>
                 <th className="px-4 py-3 text-center font-semibold">Folha</th>
@@ -240,10 +241,10 @@ export function Vales() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-center text-slate-600">
-                      {v.parcelasDescontadas}/{v.vale.quantidadeParcelas}
+                      {rotuloParcelaAtual(v)}
                       {v.proximaParcela && (
                         <span className="ml-1 text-xs text-slate-400">
-                          · próx. {formatComp(v.proximaParcela.competencia)}
+                          · na folha de {formatComp(v.proximaParcela.competencia)}
                         </span>
                       )}
                     </td>

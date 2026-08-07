@@ -36,9 +36,13 @@ export const SENTIDO_LABEL: Record<SentidoVale, string> = {
   CREDITO: 'Empresa paga o funcionário',
 };
 
+/**
+ * Quem deve — não o que a folha faz. Sem isso o selo brigava com o "fora da
+ * folha" ("Desconta da folha · fora da folha").
+ */
 export const SENTIDO_CURTO: Record<SentidoVale, string> = {
-  DESCONTO: 'Desconta da folha',
-  CREDITO: 'Soma na folha',
+  DESCONTO: 'Funcionário deve',
+  CREDITO: 'Empresa deve',
 };
 
 export const SENTIDO_CLASSE: Record<SentidoVale, string> = {

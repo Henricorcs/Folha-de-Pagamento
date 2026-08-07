@@ -1,4 +1,4 @@
-import type { Funcionario } from './types';
+import type { Funcionario, ValeComSaldo } from './types';
 
 type BaseFuncionario = Pick<
   Funcionario,
@@ -17,4 +17,13 @@ export function usaValorAReceber(f: BaseFuncionario): boolean {
 /** Valor que a folha usa como base para essa pessoa. */
 export function baseDaFolha(f: BaseFuncionario): string {
   return usaValorAReceber(f) ? f.valorAReceberFolha! : f.salarioBase;
+}
+
+/**
+ * Qual parcela está sendo paga agora ("3/7"). Parcela começa em 1: quando
+ * nenhuma foi acertada ainda, a da vez é a primeira. Quitado, mostra a última.
+ */
+export function rotuloParcelaAtual(v: ValeComSaldo): string {
+  const total = v.vale.quantidadeParcelas;
+  return `${v.proximaParcela?.numero ?? total}/${total}`;
 }

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, mensagemErro } from '../lib/api';
+import { rotuloParcelaAtual } from '../lib/folha';
 import { formatBRL, formatData } from '../lib/format';
 import { SENTIDO_CLASSE, SENTIDO_CURTO, TIPO_LABEL } from '../lib/status';
 import type {
@@ -646,7 +647,7 @@ function ValesBloco({ funcionarioId }: { funcionarioId: string }) {
           <thead className="text-left text-xs uppercase text-slate-400">
             <tr>
               <th className="py-1">Descrição</th>
-              <th className="py-1 text-center">Parcelas</th>
+              <th className="py-1 text-center">Parcela</th>
               <th className="py-1 text-right">Saldo</th>
             </tr>
           </thead>
@@ -674,7 +675,7 @@ function ValesBloco({ funcionarioId }: { funcionarioId: string }) {
                   )}
                 </td>
                 <td className="py-1.5 text-center text-slate-600">
-                  {v.parcelasDescontadas}/{v.vale.quantidadeParcelas}
+                  {rotuloParcelaAtual(v)}
                 </td>
                 <td className="py-1.5 text-right font-medium">
                   {formatBRL(v.saldo)}
