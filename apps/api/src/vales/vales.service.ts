@@ -21,7 +21,11 @@ export interface ValeComSaldo {
   proximaParcela: ValeParcela | null;
 }
 
-/** Quanto os vales/acertos mexem no salário de alguém numa competência. */
+/**
+ * Quanto os vales/acertos mexem no salário de alguém numa competência.
+ * Parcela já baixada (folha gerada ou acerto por fora) fica na lista para a
+ * tela explicar, mas não entra nos totais — senão descontaria duas vezes.
+ */
 export interface AcertoValeCompetencia {
   /** O funcionário devia: sai do salário. */
   desconto: number;
@@ -167,7 +171,12 @@ export class ValesService {
     if (!parcela) throw new NotFoundException('Parcela não encontrada');
     await this.prisma.valeParcela.update({
       where: { id: parcelaId },
-      data: { descontada, descontadaEm: descontada ? new Date() : null },
+      data: {
+        descontada,
+        descontadaEm: descontada ? new Date() : null,
+        // Baixa na mão passa a valer sozinha: solta o vínculo com a folha.
+        contaPagarId: null,
+      },
     });
     return this.buscar(parcela.valeId);
   }
@@ -232,10 +241,13 @@ export class ValesService {
         parcelas: [],
       };
       const valor = Number(p.valor);
-      if (p.vale.sentido === SentidoVale.CREDITO) {
-        atual.credito = arredondar(atual.credito + valor);
-      } else {
-        atual.desconto = arredondar(atual.desconto + valor);
+      // Já baixada: entra só como informação, o dinheiro já foi acertado.
+      if (!p.descontada) {
+        if (p.vale.sentido === SentidoVale.CREDITO) {
+          atual.credito = arredondar(atual.credito + valor);
+        } else {
+          atual.desconto = arredondar(atual.desconto + valor);
+        }
       }
       atual.parcelas.push({
         valeId: p.vale.id,
@@ -251,23 +263,39 @@ export class ValesService {
     return mapa;
   }
 
-  /** Fecha as parcelas da competência (dos dois sentidos) quando a folha sai. */
-  async marcarDescontadas(
+  /**
+   * Fecha as parcelas da competência (dos dois sentidos) que entraram numa
+   * conta a pagar recém-gerada, deixando registrado qual conta as consumiu.
+   */
+  async baixarNaFolha(
+    contaPagarId: string,
     competencia: string,
-    funcionarioIds: string[],
+    funcionarioId: string,
   ): Promise<number> {
-    if (funcionarioIds.length === 0) return 0;
     const { count } = await this.prisma.valeParcela.updateMany({
       where: {
         competencia,
         descontada: false,
-        vale: {
-          descontarDaFolha: true,
-          cancelado: false,
-          funcionarioId: { in: funcionarioIds },
-        },
+        vale: { descontarDaFolha: true, cancelado: false, funcionarioId },
       },
-      data: { descontada: true, descontadaEm: new Date() },
+      data: {
+        descontada: true,
+        descontadaEm: new Date(),
+        contaPagarId,
+      },
+    });
+    return count;
+  }
+
+  /**
+   * Devolve para pendente as parcelas baixadas por uma conta a pagar que não
+   * vai mais acontecer (removida ou reprovada). Sem isso, o vale ficaria
+   * quitado sem ninguém ter pago nada.
+   */
+  async estornarBaixa(contaPagarId: string): Promise<number> {
+    const { count } = await this.prisma.valeParcela.updateMany({
+      where: { contaPagarId },
+      data: { descontada: false, descontadaEm: null, contaPagarId: null },
     });
     return count;
   }

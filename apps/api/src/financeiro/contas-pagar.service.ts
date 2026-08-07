@@ -61,6 +61,8 @@ export interface PreviewFuncionario {
   composicao: ComposicaoSalario;
   /** Parcelas de vale/acerto que mexeram nesta competência. */
   vales: AcertoValeCompetencia['parcelas'];
+  /** Conta de SALÁRIO que já existe nesta competência (null = ainda não). */
+  salarioJaGerado: ContaJaGerada | null;
   lancamentos: LancamentoCalculado[];
 }
 
@@ -119,7 +121,17 @@ export class ContasPagarService {
     // Situação do adiantamento do dia 25 desta competência, para mostrar na
     // folha do quinto dia se o valor descontado do salário já foi mesmo pago.
     const ids = funcionarios.map((f) => f.id);
-    const contasDia25 = await this.contasDoAdiantamento(dto.competencia, ids);
+    const contasDia25 = await this.contasPorTipo(
+      dto.competencia,
+      ids,
+      TipoLancamento.ADIANTAMENTO,
+    );
+    // Salário já gerado nesta competência: gerar de novo paga duas vezes.
+    const contasSalario = await this.contasPorTipo(
+      dto.competencia,
+      ids,
+      TipoLancamento.SALARIO,
+    );
     // Vales e acertos só mexem no salário; no dia 25 não há o que abater.
     const acertosVale: Map<string, AcertoValeCompetencia> =
       (dto.incluirSalario ?? true)
@@ -181,21 +193,23 @@ export class ContasPagarService {
             : null,
         composicao: detalharSalario(dados, cfg.percentualAdiantamento),
         vales: vale?.parcelas ?? [],
+        salarioJaGerado: montarContaJaGerada(contasSalario.get(f.id) ?? null),
         lancamentos,
       };
     });
   }
 
-  /** Conta a pagar de ADIANTAMENTO de cada funcionário na competência. */
-  private async contasDoAdiantamento(
+  /** Conta a pagar daquele tipo, por funcionário, na competência. */
+  private async contasPorTipo(
     competencia: string,
     funcionarioIds: string[],
+    tipo: TipoLancamento,
   ): Promise<Map<string, ContaAdiantamento>> {
     if (funcionarioIds.length === 0) return new Map();
     const contas = await this.prisma.contaPagar.findMany({
       where: {
         competencia,
-        tipo: TipoLancamento.ADIANTAMENTO,
+        tipo,
         funcionarioId: { in: funcionarioIds },
       },
       select: { funcionarioId: true, status: true, pagoEm: true },
@@ -235,18 +249,16 @@ export class ContasPagarService {
     return criadas;
   }
 
-  /** Fecha as parcelas de vale que entraram nos salários recém-gerados. */
+  /**
+   * Fecha as parcelas de vale que entraram nos salários recém-gerados,
+   * guardando qual conta consumiu cada uma. A partir daí a parcela sai do
+   * cálculo — gerar a folha de novo não desconta o mesmo vale duas vezes.
+   */
   private async baixarParcelasDeVale(contas: ContaPagar[]): Promise<void> {
-    const porCompetencia = new Map<string, string[]>();
     for (const c of contas) {
       if (c.tipo !== TipoLancamento.SALARIO) continue;
       if (!c.funcionarioId || !c.competencia) continue;
-      const ids = porCompetencia.get(c.competencia) ?? [];
-      ids.push(c.funcionarioId);
-      porCompetencia.set(c.competencia, ids);
-    }
-    for (const [competencia, ids] of porCompetencia) {
-      await this.vales.marcarDescontadas(competencia, ids);
+      await this.vales.baixarNaFolha(c.id, c.competencia, c.funcionarioId);
     }
   }
 
@@ -383,6 +395,9 @@ export class ContasPagarService {
       }),
     );
 
+    // Reprovada não vai ser paga: o vale volta a dever.
+    if (status === 'R') await this.vales.estornarBaixa(id);
+
     return this.prisma.contaPagar.update({
       where: { id },
       data: {
@@ -503,6 +518,8 @@ export class ContasPagarService {
         'Só é possível remover contas em rascunho ou com erro',
       );
     }
+    // Antes de apagar: a FK vira null e a parcela ficaria baixada sem dono.
+    await this.vales.estornarBaixa(id);
     await this.prisma.contaPagar.delete({ where: { id } });
   }
 
@@ -551,6 +568,34 @@ export interface ContaAdiantamento {
   status: StatusContaPagar;
   pago: boolean;
   pagoEm: Date | null;
+}
+
+/** Aviso de que aquele pagamento já existe na competência. */
+export interface ContaJaGerada {
+  situacao: 'PAGO' | 'PENDENTE';
+  status: StatusContaPagar;
+  pagoEm: Date | null;
+}
+
+/**
+ * Conta que ainda vale como "já gerada". Cancelada ou reprovada não conta —
+ * não vai virar pagamento, então gerar de novo é o certo.
+ */
+export function montarContaJaGerada(
+  conta: ContaAdiantamento | null,
+): ContaJaGerada | null {
+  if (!conta) return null;
+  if (
+    conta.status === StatusContaPagar.CANCELADO ||
+    conta.status === StatusContaPagar.REPROVADO
+  ) {
+    return null;
+  }
+  return {
+    situacao: conta.pago ? 'PAGO' : 'PENDENTE',
+    status: conta.status,
+    pagoEm: conta.pagoEm,
+  };
 }
 
 /**

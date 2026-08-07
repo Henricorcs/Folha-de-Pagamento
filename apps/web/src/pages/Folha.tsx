@@ -3,11 +3,13 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, mensagemErro } from '../lib/api';
 import { formatBRL, formatData } from '../lib/format';
-import { TIPO_LABEL } from '../lib/status';
+import { STATUS_LABEL, TIPO_LABEL } from '../lib/status';
 import type {
   ComposicaoSalario,
+  ContaJaGerada,
   ContaPagar,
   LancamentoCalculado,
+  ParcelaValeFolha,
   PreviewFuncionario,
   SituacaoAdiantamento,
 } from '../lib/types';
@@ -22,6 +24,49 @@ interface ItemGerar extends LancamentoCalculado {
   adiantamento: SituacaoAdiantamento | null;
   /** Como o saldo salarial foi montado. */
   composicao: ComposicaoSalario;
+  /** Parcelas de vale/acerto desta competência. */
+  vales: ParcelaValeFolha[];
+  /** Conta de salário que já existe nesta competência. */
+  salarioJaGerado: ContaJaGerada | null;
+}
+
+/**
+ * Avisa quando o salário daquela pessoa já saiu nesta competência. Gerar de
+ * novo cria um segundo pagamento — e é justamente por isso que o vale já
+ * abatido não é descontado outra vez.
+ */
+function SeloSalarioGerado({ conta }: { conta: ContaJaGerada | null }) {
+  if (!conta) return null;
+  return (
+    <Selo
+      cor={conta.situacao === 'PAGO' ? 'vermelho' : 'ambar'}
+      titulo="Já existe conta a pagar de salário nesta competência. Gerar de novo paga duas vezes — confira em Contas a Pagar antes."
+    >
+      {conta.situacao === 'PAGO'
+        ? `salário já pago${conta.pagoEm ? ` em ${formatData(conta.pagoEm)}` : ''}`
+        : `salário já gerado · ${STATUS_LABEL[conta.status].toLowerCase()}`}
+    </Selo>
+  );
+}
+
+/** Parcelas de vale que já foram acertadas e por isso não entram no saldo. */
+function ValesJaBaixados({ vales }: { vales: ParcelaValeFolha[] }) {
+  const baixadas = vales.filter((v) => v.descontada);
+  if (baixadas.length === 0) return null;
+  return (
+    <p className="mb-3 text-xs text-slate-500">
+      Já acertado nesta competência (fora deste saldo):{' '}
+      {baixadas
+        .map(
+          (v) =>
+            `${v.descricao} ${v.numero}/${v.de} ${
+              v.sentido === 'CREDITO' ? '+' : '−'
+            }${formatBRL(v.valor)}`,
+        )
+        .join(' · ')}
+      .
+    </p>
+  );
 }
 
 /** Abre o saldo salarial: o que somou e o que saiu. */
@@ -233,24 +278,36 @@ export function Folha() {
       const flat: ItemGerar[] = [];
       for (const f of data) {
         for (const l of f.lancamentos) {
+          // Pagamento que já existe na competência vem desmarcado: o certo é
+          // conferir em Contas a Pagar antes de gerar outro.
+          const jaExiste =
+            (l.tipo === 'SALARIO' && !!f.salarioJaGerado) ||
+            (l.tipo === 'ADIANTAMENTO' &&
+              !!f.adiantamento &&
+              f.adiantamento.situacao !== 'NAO_GERADO');
           flat.push({
             ...l,
             funcionarioId: f.funcionarioId,
             nome: f.nome,
-            selecionado: true,
+            selecionado: !jaExiste,
             cltComAdiantamento: f.carteiraAssinada && f.recebeAdiantamento,
             adiantamento: f.adiantamento,
             composicao: f.composicao,
+            vales: f.vales,
+            salarioJaGerado: f.salarioJaGerado,
           });
         }
       }
       setItens(flat);
+      const jaGerados = flat.filter((i) => !i.selecionado).length;
       setFeedback(
-        flat.length > 0
-          ? null
-          : modo === 'DIA_25'
+        flat.length === 0
+          ? modo === 'DIA_25'
             ? 'Ninguém está marcado para receber adiantamento no dia 25.'
-            : 'Nenhum salário ou bônus a gerar nesta competência.',
+            : 'Nenhum salário ou bônus a gerar nesta competência.'
+          : jaGerados > 0
+            ? `${jaGerados} pagamento(s) já existem nesta competência e vieram desmarcados — marque só se quiser mesmo gerar de novo.`
+            : null,
       );
     },
     onError: (err) => setFeedback(mensagemErro(err)),
@@ -462,6 +519,11 @@ export function Folha() {
                           modo={modo}
                           adiantamento={g.adiantamento}
                         />
+                        {g.indices.some((i) => itens[i].tipo === 'SALARIO') && (
+                          <SeloSalarioGerado
+                            conta={itens[g.indices[0]].salarioJaGerado}
+                          />
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right font-semibold text-slate-800">
                         {formatBRL(totalDoGrupo(g.indices))}
@@ -474,9 +536,14 @@ export function Folha() {
                           {g.indices.some(
                             (i) => itens[i].tipo === 'SALARIO',
                           ) && (
-                            <ComposicaoSaldo
-                              c={itens[g.indices[0]].composicao}
-                            />
+                            <>
+                              <ComposicaoSaldo
+                                c={itens[g.indices[0]].composicao}
+                              />
+                              <ValesJaBaixados
+                                vales={itens[g.indices[0]].vales}
+                              />
+                            </>
                           )}
                           <table className="w-full text-sm">
                             <thead className="text-left text-[11px] uppercase text-slate-400">

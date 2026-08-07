@@ -196,6 +196,13 @@ export interface ParcelaValeFolha {
   descontada: boolean;
 }
 
+/** Aviso de que aquele pagamento já existe na competência. */
+export interface ContaJaGerada {
+  situacao: 'PAGO' | 'PENDENTE';
+  status: StatusContaPagar;
+  pagoEm: string | null;
+}
+
 export interface PreviewFuncionario {
   funcionarioId: string;
   nome: string;
@@ -205,6 +212,8 @@ export interface PreviewFuncionario {
   adiantamento: SituacaoAdiantamento | null;
   composicao: ComposicaoSalario;
   vales: ParcelaValeFolha[];
+  /** Conta de salário que já existe nesta competência */
+  salarioJaGerado: ContaJaGerada | null;
   lancamentos: LancamentoCalculado[];
 }
 

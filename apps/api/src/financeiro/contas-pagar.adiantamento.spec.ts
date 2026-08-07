@@ -1,5 +1,8 @@
 import { StatusContaPagar } from '@prisma/client';
-import { montarSituacaoAdiantamento } from './contas-pagar.service';
+import {
+  montarContaJaGerada,
+  montarSituacaoAdiantamento,
+} from './contas-pagar.service';
 
 const PAGO_EM = new Date('2026-07-25T12:00:00Z');
 
@@ -52,5 +55,56 @@ describe('montarSituacaoAdiantamento', () => {
     expect(
       montarSituacaoAdiantamento(800, false, null).descontado,
     ).toBe(false);
+  });
+});
+
+describe('montarContaJaGerada', () => {
+  it('sem conta na competência: nada a avisar', () => {
+    expect(montarContaJaGerada(null)).toBeNull();
+  });
+
+  it('conta viva: avisa que gerar de novo duplica', () => {
+    expect(
+      montarContaJaGerada({
+        status: StatusContaPagar.AGUARDANDO_PAGAMENTO,
+        pago: false,
+        pagoEm: null,
+      }),
+    ).toEqual({
+      situacao: 'PENDENTE',
+      status: StatusContaPagar.AGUARDANDO_PAGAMENTO,
+      pagoEm: null,
+    });
+  });
+
+  it('conta paga: avisa com a data', () => {
+    const s = montarContaJaGerada({
+      status: StatusContaPagar.PAGO,
+      pago: true,
+      pagoEm: PAGO_EM,
+    })!;
+    expect(s.situacao).toBe('PAGO');
+    expect(s.pagoEm).toBe(PAGO_EM);
+  });
+
+  it('cancelada ou reprovada não conta: gerar de novo é o certo', () => {
+    for (const status of [
+      StatusContaPagar.CANCELADO,
+      StatusContaPagar.REPROVADO,
+    ]) {
+      expect(
+        montarContaJaGerada({ status, pago: false, pagoEm: null }),
+      ).toBeNull();
+    }
+  });
+
+  it('conta com erro ainda conta: o caminho é reenviar, não gerar de novo', () => {
+    expect(
+      montarContaJaGerada({
+        status: StatusContaPagar.ERRO,
+        pago: false,
+        pagoEm: null,
+      }),
+    ).toMatchObject({ situacao: 'PENDENTE', status: StatusContaPagar.ERRO });
   });
 });

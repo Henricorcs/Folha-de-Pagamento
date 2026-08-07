@@ -344,15 +344,22 @@ model ValeParcela {
   competencia String
   valor       Decimal @db.Decimal(14, 2)
 
-  /// Marcada quando a folha daquela competência é gerada.
+  /// Marcada quando a folha daquela competência é gerada (ou na mão, num
+  /// acerto por fora). Parcela marcada não entra de novo no cálculo.
   descontada   Boolean   @default(false)
   descontadaEm DateTime? @map("descontada_em")
+
+  /// Conta a pagar que consumiu a parcela. Serve para estornar a baixa se essa
+  /// conta for removida ou reprovada; null = baixa manual.
+  contaPagar   ContaPagar? @relation(fields: [contaPagarId], references: [id], onDelete: SetNull)
+  contaPagarId String?     @map("conta_pagar_id")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@unique([valeId, numero])
   @@index([competencia])
+  @@index([contaPagarId])
   @@map("vale_parcelas")
 }
 
@@ -435,6 +442,9 @@ model ContaPagar {
   criadoPor String?  @map("criado_por")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
+
+  /// Parcelas de vale abatidas (ou pagas) por esta conta
+  parcelasVale ValeParcela[]
 
   @@index([status])
   @@index([competencia])
