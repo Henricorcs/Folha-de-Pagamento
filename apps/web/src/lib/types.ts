@@ -38,6 +38,8 @@ export interface Funcionario {
   /** Contratado como CLT (informativo; a folha olha a carteira assinada) */
   clt?: boolean;
   carteiraAssinada?: boolean;
+  /** Só para carteira assinada: o que a folha daqui paga (vira a base) */
+  valorAReceberFolha?: string | null;
   recebeAdiantamento?: boolean;
   /** Valor que a pessoa recebe no dia 25 (null = percentual da configuração) */
   valorAdiantamento?: string | null;
@@ -170,7 +172,9 @@ export interface SituacaoAdiantamento {
 
 /** Saldo salarial aberto: o que entrou e o que saiu. */
 export interface ComposicaoSalario {
+  /** Base usada: salário base ou "a receber na folha" (carteira assinada) */
   salarioBase: number;
+  usouValorAReceber: boolean;
   vendas: number;
   valorPorVenda: number;
   comissao: number;

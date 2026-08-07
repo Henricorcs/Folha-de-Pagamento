@@ -225,6 +225,7 @@ function ConfigFolhaBloco({
   const [carteira, setCarteira] = useState(!!data.carteiraAssinada);
   const [recebeAdto, setRecebeAdto] = useState(!!data.recebeAdiantamento);
   const [salario, setSalario] = useState(String(data.salarioBase ?? '0'));
+  const [aReceber, setAReceber] = useState(data.valorAReceberFolha ?? '');
   const [valorAdto, setValorAdto] = useState(data.valorAdiantamento ?? '');
   const [comissao, setComissao] = useState(() =>
     opcaoComissao(data.valorPorVenda),
@@ -246,6 +247,8 @@ function ConfigFolhaBloco({
           carteiraAssinada: carteira,
           recebeAdiantamento: recebeAdto,
           salarioBase: Number(salario),
+          // Só faz sentido para carteira assinada; sem ela, limpa.
+          valorAReceberFolha: carteira ? aReceber : '',
           valorAdiantamento: recebeAdto ? valorAdto : '',
           valorPorVenda,
         })
@@ -289,6 +292,14 @@ function ConfigFolhaBloco({
             assinada” quando o registro sair.
           </p>
         )}
+        {carteira && (
+          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            O salário oficial sai pela contabilidade. Preencha{' '}
+            <strong>A receber na folha</strong> com o que a empresa paga por
+            aqui — é esse valor que serve de base para o cálculo, no lugar do
+            salário base.
+          </p>
+        )}
         <label className="flex items-center gap-2 text-sm text-slate-700">
           <input
             type="checkbox"
@@ -310,6 +321,21 @@ function ConfigFolhaBloco({
               className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
             />
           </div>
+          {carteira && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-500">
+                A receber na folha (R$)
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={aReceber}
+                onChange={(e) => setAReceber(e.target.value)}
+                placeholder="vazio = salário base"
+                className="w-44 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+          )}
           {recebeAdto && (
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-500">

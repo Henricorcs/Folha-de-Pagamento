@@ -43,6 +43,12 @@ export interface DadosFolhaFuncionario {
   salarioBase: number;
   /** CLT: adiantamento já é descontado pela contabilidade */
   carteiraAssinada: boolean;
+  /**
+   * Só para quem tem carteira assinada: o que a folha daqui paga, já que o
+   * salário oficial sai pela contabilidade. Preenchido, substitui o salário
+   * base como base do cálculo.
+   */
+  valorAReceberFolha?: number | null;
   /** opção de receber o adiantamento do dia 25 */
   recebeAdiantamento: boolean;
   /** valor definido no cadastro para o dia 25; vazio = cai no percentual */
@@ -65,7 +71,10 @@ export interface DadosFolhaFuncionario {
 
 /** Saldo salarial aberto em cada parcela, para mostrar e conferir. */
 export interface ComposicaoSalario {
+  /** Base usada: salário base ou "a receber na folha" (carteira assinada). */
   salarioBase: number;
+  /** true quando a base veio do "a receber na folha". */
+  usouValorAReceber: boolean;
   vendas: number;
   valorPorVenda: number;
   comissao: number;
@@ -94,9 +103,25 @@ export interface ParametrosLancamento {
 }
 
 /**
+ * Base do cálculo da folha. Quem tem carteira assinada recebe o salário
+ * oficial pela contabilidade, então a folha daqui trabalha em cima do
+ * combinado ("a receber na folha"); sem esse valor, cai no salário base.
+ */
+export function baseDaFolha(d: DadosFolhaFuncionario): number {
+  return usaValorAReceber(d)
+    ? arredondar(d.valorAReceberFolha ?? 0)
+    : arredondar(d.salarioBase);
+}
+
+/** A base veio do "a receber na folha" (e não do salário base)? */
+export function usaValorAReceber(d: DadosFolhaFuncionario): boolean {
+  return d.carteiraAssinada && arredondar(d.valorAReceberFolha ?? 0) > 0;
+}
+
+/**
  * Valor do adiantamento do dia 25. Quem não recebe adiantamento fica em zero.
  * Ordem: valor definido no cadastro → lançamento de ADIANTAMENTO → percentual
- * do salário base (40% por padrão).
+ * da base da folha (40% por padrão).
  */
 export function calcularAdiantamento(
   d: DadosFolhaFuncionario,
@@ -107,7 +132,7 @@ export function calcularAdiantamento(
   if (doCadastro > 0) return doCadastro;
   const fixo = arredondar(d.adiantamentoFixo);
   if (fixo > 0) return fixo;
-  return arredondar((d.salarioBase * percentual) / 100);
+  return arredondar((baseDaFolha(d) * percentual) / 100);
 }
 
 export interface OpcoesGeracao {
@@ -153,9 +178,11 @@ export function detalharSalario(
   const descontos = arredondar(d.descontosFixos);
   const vales = arredondar(d.descontoVales ?? 0);
   const valesCredito = arredondar(d.creditoVales ?? 0);
+  const base = baseDaFolha(d);
 
   return {
-    salarioBase: arredondar(d.salarioBase),
+    salarioBase: base,
+    usouValorAReceber: usaValorAReceber(d),
     vendas: d.vendas ?? 0,
     valorPorVenda: arredondar(d.valorPorVenda ?? 0),
     comissao,
@@ -166,7 +193,7 @@ export function detalharSalario(
     adiantamento,
     adiantamentoDescontado,
     saldo: arredondar(
-      d.salarioBase +
+      base +
         comissao +
         horasExtras +
         valesCredito -

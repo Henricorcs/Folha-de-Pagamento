@@ -150,6 +150,9 @@ export class ContasPagarService {
       const dados: DadosFolhaFuncionario = {
         salarioBase: Number(f.salarioBase),
         carteiraAssinada: f.carteiraAssinada,
+        // Carteira assinada: a folha daqui trabalha em cima do combinado.
+        valorAReceberFolha:
+          f.valorAReceberFolha === null ? null : Number(f.valorAReceberFolha),
         recebeAdiantamento: f.recebeAdiantamento,
         valorAdiantamento:
           f.valorAdiantamento === null ? null : Number(f.valorAdiantamento),

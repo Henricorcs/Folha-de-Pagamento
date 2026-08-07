@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, mensagemErro } from '../lib/api';
+import { baseDaFolha, usaValorAReceber } from '../lib/folha';
 import { formatBRL } from '../lib/format';
 import type { Funcionario, Paginado, Resumo, SyncResult } from '../lib/types';
 
@@ -130,7 +131,7 @@ export function Funcionarios() {
                 <th className="px-4 py-3 font-semibold">CPF/CNPJ</th>
                 <th className="px-4 py-3 font-semibold">Chave PIX</th>
                 <th className="px-4 py-3 text-right font-semibold">
-                  Salário base
+                  Base da folha
                 </th>
                 <th className="px-4 py-3 text-center font-semibold">Status</th>
               </tr>
@@ -179,7 +180,12 @@ export function Funcionarios() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-right font-medium text-slate-700">
-                    {formatBRL(f.salarioBase)}
+                    {formatBRL(baseDaFolha(f))}
+                    {usaValorAReceber(f) && (
+                      <div className="text-[10px] font-normal text-slate-400">
+                        salário base {formatBRL(f.salarioBase)}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <StatusBadge ativo={f.ativo} />

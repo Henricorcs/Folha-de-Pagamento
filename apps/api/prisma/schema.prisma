@@ -79,6 +79,10 @@ model Funcionario {
   // Carteira assinada: aí sim o adiantamento já é descontado pela
   // contabilidade e NÃO é subtraído do saldo salarial aqui. Ver [[project]].
   carteiraAssinada Boolean @default(false) @map("carteira_assinada")
+  // Só para quem tem carteira assinada: o salário oficial sai pela
+  // contabilidade e a folha daqui paga este valor. Quando preenchido, é ele
+  // (e não o salário base) que serve de base para o cálculo da folha.
+  valorAReceberFolha Decimal? @map("valor_a_receber_folha") @db.Decimal(14, 2)
   // Opção de receber o adiantamento do dia 25
   recebeAdiantamento Boolean @default(false) @map("recebe_adiantamento")
   // Quanto essa pessoa recebe no dia 25. Vazio = percentual da configuração

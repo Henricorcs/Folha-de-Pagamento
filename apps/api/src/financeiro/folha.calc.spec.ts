@@ -1,5 +1,6 @@
 import { TipoLancamento } from '@prisma/client';
 import {
+  baseDaFolha,
   calcularAdiantamento,
   calcularComissao,
   calcularHorasExtras,
@@ -142,6 +143,57 @@ describe('calcularSaldoSalarial', () => {
     expect(
       calcularSaldoSalarial(base({ adiantamentoFixo: 0, valorAdiantamento: 700 })),
     ).toBe(1100);
+  });
+});
+
+describe('a receber na folha (carteira assinada)', () => {
+  const comCarteira = (over: Partial<DadosFolhaFuncionario> = {}) =>
+    base({ carteiraAssinada: true, valorAReceberFolha: 1200, ...over });
+
+  it('substitui o salário base como base do cálculo', () => {
+    expect(baseDaFolha(comCarteira())).toBe(1200);
+    // 1200 - 200 desconto (carteira não abate o adiantamento)
+    expect(calcularSaldoSalarial(comCarteira())).toBe(1000);
+  });
+
+  it('a composição mostra que a base veio do "a receber"', () => {
+    const c = detalharSalario(comCarteira());
+    expect(c.salarioBase).toBe(1200);
+    expect(c.usouValorAReceber).toBe(true);
+  });
+
+  it('vazio ou zero: continua valendo o salário base', () => {
+    expect(baseDaFolha(comCarteira({ valorAReceberFolha: null }))).toBe(2000);
+    expect(baseDaFolha(comCarteira({ valorAReceberFolha: 0 }))).toBe(2000);
+    expect(detalharSalario(base()).usouValorAReceber).toBe(false);
+  });
+
+  it('sem carteira assinada o campo é ignorado', () => {
+    const d = base({ carteiraAssinada: false, valorAReceberFolha: 1200 });
+    expect(baseDaFolha(d)).toBe(2000);
+    expect(detalharSalario(d).usouValorAReceber).toBe(false);
+  });
+
+  it('o adiantamento por percentual também sai da nova base', () => {
+    // 40% de 1200, e não de 2000
+    expect(
+      calcularAdiantamento(comCarteira({ adiantamentoFixo: 0 })),
+    ).toBe(480);
+  });
+
+  it('proventos e descontos do mês continuam entrando', () => {
+    // 1200 + 300 comissão + 150 horas extras (ignoradas: tem carteira)
+    //      - 200 desconto - 100 vale = 1200
+    expect(
+      calcularSaldoSalarial(
+        comCarteira({
+          vendas: 6,
+          valorPorVenda: 50,
+          horasExtras: 150,
+          descontoVales: 100,
+        }),
+      ),
+    ).toBe(1200);
   });
 });
 

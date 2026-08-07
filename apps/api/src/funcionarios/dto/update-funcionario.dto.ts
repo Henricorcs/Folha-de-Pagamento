@@ -64,6 +64,16 @@ export class UpdateFuncionarioDto {
   @Min(0)
   valorAdiantamento?: number | null;
 
+  /**
+   * Só para carteira assinada: o que a folha daqui paga. Preenchido, vira a
+   * base do cálculo no lugar do salário base; 0 ou vazio limpa.
+   */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value == null ? null : Number(value)))
+  @IsNumber()
+  @Min(0)
+  valorAReceberFolha?: number | null;
+
   /** Quanto a pessoa ganha por venda (R$ 5 ou R$ 50); vazio = sem comissão. */
   @IsOptional()
   @Transform(({ value }) => (value === '' || value == null ? null : Number(value)))

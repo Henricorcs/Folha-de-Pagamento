@@ -72,7 +72,11 @@ function ValesJaBaixados({ vales }: { vales: ParcelaValeFolha[] }) {
 /** Abre o saldo salarial: o que somou e o que saiu. */
 function ComposicaoSaldo({ c }: { c: ComposicaoSalario }) {
   const partes: { rotulo: string; valor: number; sinal: '+' | '-' }[] = [
-    { rotulo: 'Salário base', valor: c.salarioBase, sinal: '+' },
+    {
+      rotulo: c.usouValorAReceber ? 'A receber na folha' : 'Salário base',
+      valor: c.salarioBase,
+      sinal: '+',
+    },
   ];
   if (c.comissao > 0) {
     partes.push({
