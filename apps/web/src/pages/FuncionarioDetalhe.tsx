@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   Bloco,
+  CampoDinheiro,
   Carregando,
   Pagina,
   Selo,
@@ -315,22 +316,18 @@ function ConfigFolhaBloco({
       <div className="mt-5 flex flex-wrap items-end gap-4 border-t border-tinta-100 pt-5">
         <div>
           <label className="rotulo">Salário base (R$)</label>
-          <input
-            type="number"
-            step="0.01"
-            value={salario}
-            onChange={(e) => setSalario(e.target.value)}
+          <CampoDinheiro
+            valor={salario}
+            onChange={setSalario}
             className="campo w-40"
           />
         </div>
         {carteira && (
           <div>
             <label className="rotulo">A receber na folha (R$)</label>
-            <input
-              type="number"
-              step="0.01"
-              value={aReceber}
-              onChange={(e) => setAReceber(e.target.value)}
+            <CampoDinheiro
+              valor={aReceber}
+              onChange={setAReceber}
               placeholder="vazio = salário base"
               className="campo w-44"
             />
@@ -339,11 +336,9 @@ function ConfigFolhaBloco({
         {recebeAdto && (
           <div>
             <label className="rotulo">Valor do dia 25 (R$)</label>
-            <input
-              type="number"
-              step="0.01"
-              value={valorAdto}
-              onChange={(e) => setValorAdto(e.target.value)}
+            <CampoDinheiro
+              valor={valorAdto}
+              onChange={setValorAdto}
               placeholder="vazio = 40% do salário base"
               className="campo w-40"
             />
@@ -365,11 +360,9 @@ function ConfigFolhaBloco({
         {comissao === 'outro' && (
           <div>
             <label className="rotulo">Valor por venda (R$)</label>
-            <input
-              type="number"
-              step="0.01"
-              value={comissaoOutro}
-              onChange={(e) => setComissaoOutro(e.target.value)}
+            <CampoDinheiro
+              valor={comissaoOutro}
+              onChange={setComissaoOutro}
               className="campo w-40"
             />
           </div>
@@ -530,11 +523,9 @@ function VariaveisMesBloco({
         </div>
         <div>
           <label className="rotulo">Valor por venda (R$)</label>
-          <input
-            type="number"
-            step="0.01"
-            value={valorVenda}
-            onChange={(e) => setValorVenda(e.target.value)}
+          <CampoDinheiro
+            valor={valorVenda}
+            onChange={setValorVenda}
             placeholder={
               valorPorVendaPadrao
                 ? `padrão ${formatBRL(valorPorVendaPadrao)}`
@@ -546,11 +537,9 @@ function VariaveisMesBloco({
         {!carteiraAssinada && (
           <div>
             <label className="rotulo">Horas extras (R$)</label>
-            <input
-              type="number"
-              step="0.01"
-              value={horasExtras}
-              onChange={(e) => setHorasExtras(e.target.value)}
+            <CampoDinheiro
+              valor={horasExtras}
+              onChange={setHorasExtras}
               placeholder="0,00"
               className="campo w-36"
             />
@@ -839,11 +828,9 @@ function LancamentosBloco({
         </div>
         <div>
           <label className="rotulo">Valor (R$)</label>
-          <input
-            type="number"
-            step="0.01"
-            value={valor}
-            onChange={(e) => setValor(e.target.value)}
+          <CampoDinheiro
+            valor={valor}
+            onChange={setValor}
             className="campo w-32"
           />
         </div>

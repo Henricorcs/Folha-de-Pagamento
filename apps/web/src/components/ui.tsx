@@ -1,9 +1,75 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { formatNumeroBR, parseValorBR } from '../lib/format';
 
 /**
  * Peças compartilhadas da interface. A regra da casa: o número é o herói —
  * tudo em volta (rótulo, moldura, cor) existe para deixá-lo conferível.
  */
+
+/**
+ * Campo de dinheiro. É `text` de propósito: `input type="number"` não entende
+ * o formato que a gente escreve e cola do IXC ("2.107,03") — o navegador
+ * devolvia string vazia e o valor sumia sem avisar ninguém.
+ *
+ * Entra do jeito que vier (ponto de milhar, vírgula, "R$", ponto decimal) e
+ * sai sempre canônico — ponto decimal, como a API espera. Ao sair do campo, o
+ * que ficou valendo aparece formatado, para conferir antes de salvar.
+ */
+export function CampoDinheiro({
+  valor,
+  onChange,
+  className = 'campo',
+  placeholder,
+}: {
+  /** Valor canônico: "2107.03" ou "" quando vazio. */
+  valor: string;
+  onChange: (valor: string) => void;
+  className?: string;
+  placeholder?: string;
+}) {
+  const [texto, setTexto] = useState(() => paraExibicao(valor));
+  const emitido = useRef(valor);
+
+  // Valor que não saiu daqui veio de fora (recarregou o cadastro, recalculou a
+  // folha): aí sim reescreve o campo. Enquanto se digita, o que está na tela é
+  // o que a pessoa escreveu — nada de reformatar embaixo do cursor.
+  useEffect(() => {
+    if (valor === emitido.current) return;
+    emitido.current = valor;
+    setTexto(paraExibicao(valor));
+  }, [valor]);
+
+  function emitir(digitado: string) {
+    setTexto(digitado);
+    const n = parseValorBR(digitado);
+    const canonico = n === null ? '' : String(n);
+    emitido.current = canonico;
+    onChange(canonico);
+  }
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={texto}
+      placeholder={placeholder}
+      className={className}
+      onChange={(e) => emitir(e.target.value)}
+      onBlur={() => {
+        // Mostra o que ficou valendo, para conferir antes de salvar.
+        const n = parseValorBR(texto);
+        setTexto(n === null ? '' : formatNumeroBR(n));
+      }}
+    />
+  );
+}
+
+/** Canônico ("2107.03") → o que se lê no campo ("2.107,03"). */
+function paraExibicao(valor: string): string {
+  if (!valor) return '';
+  const n = Number(valor);
+  return Number.isFinite(n) ? formatNumeroBR(n) : '';
+}
 
 export function Pagina({ children }: { children: ReactNode }) {
   return (

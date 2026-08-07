@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Aviso,
   CabecalhoPagina,
+  CampoDinheiro,
   Pagina,
   Selo,
   Vazio,
@@ -784,12 +785,10 @@ export function Folha() {
                                       {it.observacao}
                                     </td>
                                     <td className="td !py-2.5 text-right">
-                                      <input
-                                        type="number"
-                                        step="0.01"
-                                        value={it.valor}
-                                        onChange={(e) =>
-                                          editarValor(idx, Number(e.target.value))
+                                      <CampoDinheiro
+                                        valor={String(it.valor)}
+                                        onChange={(v) =>
+                                          editarValor(idx, Number(v) || 0)
                                         }
                                         className="campo w-32 py-1.5 text-right"
                                       />

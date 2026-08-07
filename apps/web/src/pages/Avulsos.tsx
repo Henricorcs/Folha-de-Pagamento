@@ -1,7 +1,13 @@
 import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Aviso, Bloco, CabecalhoPagina, Pagina } from '../components/ui';
+import {
+  Aviso,
+  Bloco,
+  CabecalhoPagina,
+  CampoDinheiro,
+  Pagina,
+} from '../components/ui';
 import { api, mensagemErro } from '../lib/api';
 import { formatBRL } from '../lib/format';
 import type { ContaPagar } from '../lib/types';
@@ -114,12 +120,9 @@ export function Avulsos() {
               />
             </Campo>
             <Campo label="Valor (R$)" span2>
-              <input
-                type="number"
-                step="0.01"
-                value={form.valor}
-                onChange={(e) => set('valor', e.target.value)}
-                className="campo"
+              <CampoDinheiro
+                valor={form.valor}
+                onChange={(v) => set('valor', v)}
               />
             </Campo>
             <Campo label="Observação — é o que aparece no IXC" span2>

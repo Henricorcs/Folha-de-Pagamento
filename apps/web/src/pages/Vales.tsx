@@ -5,6 +5,7 @@ import {
   Aviso,
   Bloco,
   CabecalhoPagina,
+  CampoDinheiro,
   Carregando,
   Indicador,
   Pagina,
@@ -530,13 +531,7 @@ function NovoVale({ onCriado }: { onCriado: () => void }) {
           />
         </Campo>
         <Campo label="Valor de cada parcela (R$)">
-          <input
-            type="number"
-            step="0.01"
-            value={valorParcela}
-            onChange={(e) => setValorParcela(e.target.value)}
-            className="campo"
-          />
+          <CampoDinheiro valor={valorParcela} onChange={setValorParcela} />
         </Campo>
         <Campo label="Primeira parcela na folha de">
           <input
