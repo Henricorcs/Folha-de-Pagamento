@@ -28,6 +28,23 @@ interface ItemGerar extends LancamentoCalculado {
   vales: ParcelaValeFolha[];
   /** Conta de salário que já existe nesta competência. */
   salarioJaGerado: ContaJaGerada | null;
+  /**
+   * Abater o adiantamento do dia 25 deste salário. Vem ligado (é como a API
+   * calculou), mas quem não tem carteira assinada pode desligar — ex.: o dia
+   * 25 não foi gerado, então não há o que descontar.
+   */
+  descontarAdiantamento: boolean;
+}
+
+function arredondar(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/** Valor do salário conforme o desconto do dia 25 esteja ligado ou não. */
+function saldoComOpcao(it: ItemGerar): number {
+  return it.descontarAdiantamento
+    ? it.composicao.saldo
+    : arredondar(it.composicao.saldo + it.composicao.adiantamentoDescontado);
 }
 
 /**
@@ -46,6 +63,45 @@ function SeloSalarioGerado({ conta }: { conta: ContaJaGerada | null }) {
         ? `salário já pago${conta.pagoEm ? ` em ${formatData(conta.pagoEm)}` : ''}`
         : `salário já gerado · ${STATUS_LABEL[conta.status].toLowerCase()}`}
     </Selo>
+  );
+}
+
+/**
+ * Escolha de abater ou não o adiantamento do dia 25 daquele salário. Só existe
+ * para quem não tem carteira assinada (quem tem já sai sem desconto, porque a
+ * contabilidade cuida disso) e serve principalmente para quando o pagamento do
+ * dia 25 não chegou a sair.
+ */
+function OpcaoDia25({
+  item,
+  onChange,
+}: {
+  item: ItemGerar | null;
+  onChange: (descontar: boolean) => void;
+}) {
+  if (!item || item.composicao.adiantamentoDescontado <= 0) return null;
+  const naoGerado = item.adiantamento?.situacao === 'NAO_GERADO';
+  return (
+    <label className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+      <input
+        type="checkbox"
+        checked={item.descontarAdiantamento}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      Descontar o adiantamento do dia 25 (
+      {formatBRL(item.composicao.adiantamentoDescontado)}) deste salário
+      {!item.descontarAdiantamento && (
+        <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700">
+          saindo cheio
+        </span>
+      )}
+      {naoGerado && item.descontarAdiantamento && (
+        <span className="text-amber-700">
+          — o dia 25 não foi gerado nesta competência; confira se a pessoa
+          recebeu mesmo.
+        </span>
+      )}
+    </label>
   );
 }
 
@@ -70,7 +126,13 @@ function ValesJaBaixados({ vales }: { vales: ParcelaValeFolha[] }) {
 }
 
 /** Abre o saldo salarial: o que somou e o que saiu. */
-function ComposicaoSaldo({ c }: { c: ComposicaoSalario }) {
+function ComposicaoSaldo({
+  c,
+  descontarAdiantamento,
+}: {
+  c: ComposicaoSalario;
+  descontarAdiantamento: boolean;
+}) {
   const partes: { rotulo: string; valor: number; sinal: '+' | '-' }[] = [
     {
       rotulo: c.usouValorAReceber ? 'A receber na folha' : 'Salário base',
@@ -101,13 +163,16 @@ function ComposicaoSaldo({ c }: { c: ComposicaoSalario }) {
   if (c.vales > 0) {
     partes.push({ rotulo: 'Vale (parcela do mês)', valor: c.vales, sinal: '-' });
   }
-  if (c.adiantamentoDescontado > 0) {
+  if (c.adiantamentoDescontado > 0 && descontarAdiantamento) {
     partes.push({
       rotulo: 'Adiantamento do dia 25',
       valor: c.adiantamentoDescontado,
       sinal: '-',
     });
   }
+  const saldo = descontarAdiantamento
+    ? c.saldo
+    : Math.round((c.saldo + c.adiantamentoDescontado) * 100) / 100;
 
   // Só salário base: não há o que explicar.
   if (partes.length === 1) return null;
@@ -127,7 +192,7 @@ function ComposicaoSaldo({ c }: { c: ComposicaoSalario }) {
       ))}
       <span className="whitespace-nowrap">
         <span className="mr-1 text-slate-400">=</span>
-        <strong className="text-slate-800">{formatBRL(c.saldo)}</strong>
+        <strong className="text-slate-800">{formatBRL(saldo)}</strong>
       </span>
     </div>
   );
@@ -141,12 +206,15 @@ function ComposicaoSaldo({ c }: { c: ComposicaoSalario }) {
 function SeloAdiantamento({
   modo,
   adiantamento,
+  descontado,
 }: {
   modo: ModoPagamento;
   adiantamento: SituacaoAdiantamento | null;
+  /** Se o desconto está mesmo valendo — pode ter sido desligado na tela. */
+  descontado: boolean;
 }) {
   if (!adiantamento) return null;
-  const { situacao, descontado, valor, pagoEm } = adiantamento;
+  const { situacao, valor, pagoEm } = adiantamento;
 
   if (modo === 'DIA_25') {
     if (situacao === 'NAO_GERADO') return null;
@@ -299,6 +367,7 @@ export function Folha() {
             composicao: f.composicao,
             vales: f.vales,
             salarioJaGerado: f.salarioJaGerado,
+            descontarAdiantamento: true,
           });
         }
       }
@@ -358,6 +427,8 @@ export function Folha() {
         nome: string;
         indices: number[];
         adiantamento: SituacaoAdiantamento | null;
+        /** Índice do lançamento de SALÁRIO, onde mora a opção do dia 25. */
+        salarioIdx: number | null;
       }
     >();
     itens.forEach((it, idx) => {
@@ -366,12 +437,34 @@ export function Folha() {
         nome: it.nome,
         indices: [],
         adiantamento: it.adiantamento,
+        salarioIdx: null,
       };
       grupo.indices.push(idx);
+      if (it.tipo === 'SALARIO') grupo.salarioIdx = idx;
       porFuncionario.set(it.funcionarioId, grupo);
     });
     return [...porFuncionario.values()];
   }, [itens]);
+
+  /** O desconto do dia 25 está valendo para essa pessoa? */
+  function descontaDia25(salarioIdx: number | null): boolean {
+    if (salarioIdx === null) return false;
+    const it = itens[salarioIdx];
+    return it.descontarAdiantamento && it.composicao.adiantamentoDescontado > 0;
+  }
+
+  /**
+   * Índices dos salários em que dá para escolher descontar o dia 25 ou não.
+   * Só SALÁRIO: a composição existe em todo item, mas o abatimento só acontece
+   * ali (no modo dia 25 não há salário nenhum na lista).
+   */
+  const comOpcaoDia25 = itens
+    .map((it, i) => ({ it, i }))
+    .filter(
+      ({ it }) =>
+        it.tipo === 'SALARIO' && it.composicao.adiantamentoDescontado > 0,
+    )
+    .map(({ i }) => i);
 
   function toggle(idx: number) {
     setItens((prev) =>
@@ -380,6 +473,21 @@ export function Folha() {
   }
   function editarValor(idx: number, valor: number) {
     setItens((prev) => prev.map((it, i) => (i === idx ? { ...it, valor } : it)));
+  }
+  /**
+   * Liga/desliga o abatimento do dia 25 num salário e recalcula o valor. Só
+   * aparece para quem não tem carteira assinada — quem tem já sai sem desconto.
+   */
+  function descontarDia25(indices: number[], descontar: boolean) {
+    const alvo = new Set(indices);
+    setItens((prev) =>
+      prev.map((it, i) => {
+        if (!alvo.has(i) || it.tipo !== 'SALARIO') return it;
+        if (it.composicao.adiantamentoDescontado <= 0) return it;
+        const atualizado = { ...it, descontarAdiantamento: descontar };
+        return { ...atualizado, valor: saldoComOpcao(atualizado) };
+      }),
+    );
   }
   function selecionarGrupo(indices: number[], selecionado: boolean) {
     const alvo = new Set(indices);
@@ -466,6 +574,31 @@ export function Folha() {
         </div>
       )}
 
+      {comOpcaoDia25.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+          <span>
+            Adiantamento do dia 25 em{' '}
+            <strong className="text-slate-800">{comOpcaoDia25.length}</strong>{' '}
+            salário(s) de quem não tem carteira assinada:
+          </span>
+          <button
+            onClick={() => descontarDia25(comOpcaoDia25, true)}
+            className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium hover:bg-slate-50"
+          >
+            Descontar de todos
+          </button>
+          <button
+            onClick={() => descontarDia25(comOpcaoDia25, false)}
+            className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium hover:bg-slate-50"
+          >
+            Não descontar de ninguém
+          </button>
+          <span className="text-xs text-slate-400">
+            Use quando o pagamento do dia 25 não chegou a sair.
+          </span>
+        </div>
+      )}
+
       {itens.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
@@ -522,6 +655,7 @@ export function Folha() {
                         <SeloAdiantamento
                           modo={modo}
                           adiantamento={g.adiantamento}
+                          descontado={descontaDia25(g.salarioIdx)}
                         />
                         {g.indices.some((i) => itens[i].tipo === 'SALARIO') && (
                           <SeloSalarioGerado
@@ -543,9 +677,23 @@ export function Folha() {
                             <>
                               <ComposicaoSaldo
                                 c={itens[g.indices[0]].composicao}
+                                descontarAdiantamento={descontaDia25(
+                                  g.salarioIdx,
+                                )}
                               />
                               <ValesJaBaixados
                                 vales={itens[g.indices[0]].vales}
+                              />
+                              <OpcaoDia25
+                                item={
+                                  g.salarioIdx !== null
+                                    ? itens[g.salarioIdx]
+                                    : null
+                                }
+                                onChange={(descontar) =>
+                                  g.salarioIdx !== null &&
+                                  descontarDia25([g.salarioIdx], descontar)
+                                }
                               />
                             </>
                           )}
@@ -588,13 +736,19 @@ export function Folha() {
                                           </Selo>
                                         )}
                                       {it.tipo === 'SALARIO' &&
-                                        it.adiantamento?.descontado && (
+                                        it.composicao.adiantamentoDescontado >
+                                          0 &&
+                                        it.descontarAdiantamento && (
                                           <Selo
                                             cor="cinza"
                                             titulo="Valor do dia 25 já abatido deste saldo salarial."
                                           >
-                                            − {formatBRL(it.adiantamento.valor)} do
-                                            dia 25
+                                            −{' '}
+                                            {formatBRL(
+                                              it.composicao
+                                                .adiantamentoDescontado,
+                                            )}{' '}
+                                            do dia 25
                                           </Selo>
                                         )}
                                     </td>
