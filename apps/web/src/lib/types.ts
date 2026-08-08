@@ -84,7 +84,8 @@ export type TipoLancamento =
   | 'ADIANTAMENTO'
   | 'BONUS'
   | 'DESCONTO'
-  | 'AVULSO';
+  | 'AVULSO'
+  | 'DIARIA';
 
 export interface Lancamento {
   id: string;
@@ -280,6 +281,7 @@ export interface ConfigFinanceira {
   contaContabilSalario: number;
   contaContabilAdiantamento: number;
   contaContabilBonus: number;
+  contaContabilDiaria: number;
   cidadePadraoId: number;
   /** % do salário base no adiantamento do dia 25 (padrão 40) */
   percentualAdiantamento: number;
@@ -293,12 +295,89 @@ export interface ConfigFinanceira {
   fornecedorIcmsIsento: string;
   /** Tabela da aba "Dados bancários" do fornecedor ("" = descobrir sozinho) */
   fornecedorTabelaBanco: string;
+  /** Caixa de onde sai o dinheiro pago em mãos (0 = procurar pelo nome) */
+  caixaEmMaosId: number;
+  caixaEmMaosNome: string;
+  /** Tabelas do IXC ("" = descobrir sozinho) */
+  caixaTabelaContas: string;
+  caixaTabelaMovimento: string;
 }
 
 export interface BeneficiarioAvulso {
   id: string;
   nome: string;
   cpfCnpj: string | null;
+}
+
+// --- Diaristas: quem trabalha por dia e recebe por diária ---
+/** IXC = conta a pagar (banco). EM_MAOS = dinheiro, sai do caixa. */
+export type FormaPagamentoDiaria = 'IXC' | 'EM_MAOS';
+
+export interface Diarista {
+  id: string;
+  nome: string;
+  cpfCnpj: string | null;
+  telefone: string | null;
+  chavePix: string | null;
+  tipoChavePix: string | null;
+  valorDiaria: string | null;
+  formaPagamento: FormaPagamentoDiaria;
+  observacoes: string | null;
+  ativo: boolean;
+  idFornecedorIxc: number | null;
+}
+
+export interface DiaristaComResumo {
+  diarista: Diarista;
+  quantidadeDiarias: number;
+  totalPago: number;
+  ultimaDiaria: string | null;
+  /** Diárias em mãos que ainda não viraram lançamento no caixa do IXC */
+  pendentesNoCaixa: number;
+}
+
+export interface Diaria {
+  id: string;
+  diaristaId: string;
+  data: string;
+  quantidade: string;
+  valorDiaria: string;
+  valor: string;
+  descricao: string;
+  forma: FormaPagamentoDiaria;
+  contaPagarId: string | null;
+  /** Caixa do IXC de onde o dinheiro saiu (pagamento em mãos) */
+  caixaIxc: number | null;
+  /** Lançamento criado na movimentação financeira do IXC */
+  idLancamentoIxc: number | null;
+  lancadoEm: string | null;
+  /** Alguém lançou no IXC à mão */
+  lancadoManual: boolean;
+  /** Por que a saída no caixa não saiu (null = sem pendência) */
+  erroIxc: string | null;
+  diarista?: { nome: string };
+  contaPagar?: {
+    id: string;
+    status: StatusContaPagar;
+    erro: string | null;
+    idFnApagarIxc: number | null;
+  } | null;
+}
+
+/** Um caixa/conta do IXC, para configurar de onde sai o dinheiro em mãos. */
+export interface CaixaIxc {
+  id: number;
+  nome: string;
+  tipo: string | null;
+}
+
+export interface CaixasIxc {
+  /** Tabela do IXC que respondeu (null = nenhuma encontrada) */
+  tabela: string | null;
+  caixas: CaixaIxc[];
+  /** Código que está valendo hoje para o pagamento em mãos */
+  emUso: number | null;
+  nomeProcurado: string;
 }
 
 export interface Paginado<T> {

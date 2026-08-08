@@ -9,6 +9,7 @@ import { useAuth } from '../lib/auth';
 const navItems = [
   { to: '/dashboard', label: 'Dashboard', icone: IconePainel },
   { to: '/funcionarios', label: 'Funcionários', icone: IconePessoas },
+  { to: '/diaristas', label: 'Diaristas', icone: IconeDia },
   { to: '/vales', label: 'Vales e Acertos', icone: IconeMoeda },
   { to: '/folha', label: 'Gerar Folha', icone: IconeCalculo },
   { to: '/contas-pagar', label: 'Contas a Pagar', icone: IconeSaida },
@@ -180,6 +181,18 @@ function IconePessoas({ className }: IconeProps) {
       <path d="M3.5 20a5.5 5.5 0 0 1 11 0" />
       <path d="M16 5.5a3 3 0 0 1 0 5.6" />
       <path d="M17.5 14.5A5.5 5.5 0 0 1 20.5 20" />
+    </svg>
+  );
+}
+
+/** Um dia marcado no calendário: o trabalho que se conta por diária. */
+function IconeDia({ className }: IconeProps) {
+  return (
+    <svg {...base} className={className}>
+      <rect x="3.5" y="4.5" width="17" height="16" rx="2.5" />
+      <path d="M3.5 9.5h17" />
+      <path d="M8 3v3M16 3v3" />
+      <circle cx="12" cy="14.5" r="2" />
     </svg>
   );
 }

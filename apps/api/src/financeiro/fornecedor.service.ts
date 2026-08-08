@@ -44,6 +44,31 @@ export class FornecedorService {
     return idFornecedor;
   }
 
+  /** Retorna (criando se preciso) o id_fornecedor do diarista. */
+  async garantirParaDiarista(diaristaId: string): Promise<number> {
+    const d = await this.prisma.diarista.findUnique({
+      where: { id: diaristaId },
+    });
+    if (!d) throw new NotFoundException('Diarista não encontrado');
+    if (d.idFornecedorIxc) return d.idFornecedorIxc;
+
+    const cfg = await this.config.obter();
+    const idFornecedor = await this.criarFornecedor({
+      nome: d.nome,
+      cpfCnpj: d.cpfCnpj,
+      tipoPessoa: 'F',
+      cidadeId: d.cidadeIxc ?? cfg.cidadePadraoId,
+      celular: d.telefone,
+      obs: 'Diarista — pagamento por diária',
+    });
+
+    await this.prisma.diarista.update({
+      where: { id: diaristaId },
+      data: { idFornecedorIxc: idFornecedor },
+    });
+    return idFornecedor;
+  }
+
   /** Retorna (criando se preciso) o id_fornecedor do beneficiário avulso. */
   async garantirParaAvulso(beneficiarioId: string): Promise<number> {
     const ben = await this.prisma.beneficiarioAvulso.findUnique({

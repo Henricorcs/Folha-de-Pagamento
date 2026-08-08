@@ -153,6 +153,7 @@ const ORDEM_TIPO: TipoLancamento[] = [
   TipoLancamento.SALARIO,
   TipoLancamento.ADIANTAMENTO,
   TipoLancamento.BONUS,
+  TipoLancamento.DIARIA,
   TipoLancamento.AVULSO,
   TipoLancamento.DESCONTO,
 ];

@@ -324,9 +324,9 @@ export class ContasPagarService {
     item: ItemContaPagarDto,
     usuarioId?: string,
   ): Promise<ContaPagar> {
-    if (!item.funcionarioId && !item.beneficiarioAvulsoId) {
+    if (!item.funcionarioId && !item.beneficiarioAvulsoId && !item.diaristaId) {
       throw new BadRequestException(
-        'Informe funcionarioId ou beneficiarioAvulsoId',
+        'Informe funcionarioId, beneficiarioAvulsoId ou diaristaId',
       );
     }
     const cfg = await this.config.obter();
@@ -346,10 +346,13 @@ export class ContasPagarService {
         tipo: item.tipo,
         funcionarioId: item.funcionarioId ?? null,
         beneficiarioAvulsoId: item.beneficiarioAvulsoId ?? null,
+        diaristaId: item.diaristaId ?? null,
         beneficiarioNome,
         valor: new Prisma.Decimal(item.valor),
         contaContabil,
-        contaPagamento: cfg.contaPagamentoId,
+        // Dá para pagar por outra conta que não a padrão (ex.: um caixa).
+        contaPagamento: item.contaPagamento ?? cfg.contaPagamentoId,
+        tipoPagamentoIxc: item.tipoPagamentoIxc ?? null,
         filialId: cfg.filialId,
         dataEmissao: hoje,
         dataVencimento: hoje,
@@ -375,12 +378,14 @@ export class ContasPagarService {
     }
 
     try {
-      const idFornecedor = conta.funcionarioId
-        ? await this.fornecedores.garantirParaFuncionario(conta.funcionarioId)
-        : await this.fornecedores.garantirParaAvulso(conta.beneficiarioAvulsoId!);
+      const idFornecedor = await this.fornecedorDaConta(conta);
 
       const cfg = await this.config.obter();
       const pix = await this.pixDoBeneficiario(conta);
+      // Conta com tipo próprio (ex.: diária em dinheiro) manda no payload.
+      const tipoPagamento = conta.tipoPagamentoIxc ?? cfg.tipoPagamentoPadrao;
+      // Chave PIX só faz sentido em pagamento por PIX.
+      const ehPix = /pix/i.test(tipoPagamento);
 
       const payload = buildContaPagarPayload({
         idFornecedor,
@@ -391,9 +396,9 @@ export class ContasPagarService {
         dataEmissao: conta.dataEmissao,
         dataVencimento: conta.dataVencimento,
         observacao: conta.observacao,
-        tipoPagamento: cfg.tipoPagamentoPadrao,
-        chavePix: pix.chave,
-        tipoChavePix: pix.tipo,
+        tipoPagamento,
+        chavePix: ehPix ? pix.chave : null,
+        tipoChavePix: ehPix ? pix.tipo : null,
       });
 
       const { id: idFnApagar } = await this.ixc.create('fn_apagar', payload);
@@ -792,6 +797,21 @@ export class ContasPagarService {
     await this.prisma.contaPagar.delete({ where: { id } });
   }
 
+  /** O fornecedor do IXC de quem vai receber (cria na primeira vez). */
+  private async fornecedorDaConta(conta: {
+    funcionarioId: string | null;
+    beneficiarioAvulsoId: string | null;
+    diaristaId: string | null;
+  }): Promise<number> {
+    if (conta.funcionarioId) {
+      return this.fornecedores.garantirParaFuncionario(conta.funcionarioId);
+    }
+    if (conta.diaristaId) {
+      return this.fornecedores.garantirParaDiarista(conta.diaristaId);
+    }
+    return this.fornecedores.garantirParaAvulso(conta.beneficiarioAvulsoId!);
+  }
+
   /**
    * Chave PIX do beneficiário e o tipo dela. O tipo vem do cadastro do
    * fornecedor no IXC (aba "Dados bancários"), para a conta a pagar marcar o
@@ -800,6 +820,7 @@ export class ContasPagarService {
   private async pixDoBeneficiario(conta: {
     funcionarioId: string | null;
     beneficiarioAvulsoId: string | null;
+    diaristaId: string | null;
   }): Promise<{ chave: string | null; tipo: TipoChavePix | null }> {
     if (conta.funcionarioId) {
       const f = await this.prisma.funcionario.findUnique({
@@ -809,6 +830,16 @@ export class ContasPagarService {
       return {
         chave: f?.chavePix ?? null,
         tipo: normalizarTipoChavePix(f?.tipoChavePix),
+      };
+    }
+    if (conta.diaristaId) {
+      const d = await this.prisma.diarista.findUnique({
+        where: { id: conta.diaristaId },
+        select: { chavePix: true, tipoChavePix: true },
+      });
+      return {
+        chave: d?.chavePix ?? null,
+        tipo: normalizarTipoChavePix(d?.tipoChavePix),
       };
     }
     if (conta.beneficiarioAvulsoId) {
@@ -829,6 +860,14 @@ export class ContasPagarService {
       });
       if (!f) throw new NotFoundException('Funcionário não encontrado');
       return f.nome;
+    }
+    if (item.diaristaId) {
+      const d = await this.prisma.diarista.findUnique({
+        where: { id: item.diaristaId },
+        select: { nome: true },
+      });
+      if (!d) throw new NotFoundException('Diarista não encontrado');
+      return d.nome;
     }
     const b = await this.prisma.beneficiarioAvulso.findUnique({
       where: { id: item.beneficiarioAvulsoId! },
@@ -952,13 +991,20 @@ function diasAtras(dias: number): Date {
 
 function contaContabilPorTipo(
   tipo: TipoLancamento,
-  cfg: { contaContabilSalario: number; contaContabilAdiantamento: number; contaContabilBonus: number },
+  cfg: {
+    contaContabilSalario: number;
+    contaContabilAdiantamento: number;
+    contaContabilBonus: number;
+    contaContabilDiaria: number;
+  },
 ): number {
   switch (tipo) {
     case TipoLancamento.ADIANTAMENTO:
       return cfg.contaContabilAdiantamento;
     case TipoLancamento.BONUS:
       return cfg.contaContabilBonus;
+    case TipoLancamento.DIARIA:
+      return cfg.contaContabilDiaria;
     default:
       return cfg.contaContabilSalario;
   }

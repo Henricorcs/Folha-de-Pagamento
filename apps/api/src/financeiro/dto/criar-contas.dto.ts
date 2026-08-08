@@ -16,6 +16,7 @@ import { TipoLancamento } from '@prisma/client';
 export class ItemContaPagarDto {
   @IsOptional() @IsString() funcionarioId?: string;
   @IsOptional() @IsString() beneficiarioAvulsoId?: string;
+  @IsOptional() @IsString() diaristaId?: string;
 
   @IsEnum(TipoLancamento)
   tipo!: TipoLancamento;
@@ -24,6 +25,15 @@ export class ItemContaPagarDto {
 
   /** Conta contábil (id_conta). Se omitida, usa o padrão por tipo. */
   @IsOptional() @IsInt() @Min(1) contaContabil?: number;
+
+  /** Conta de pagamento (id_contas). Se omitida, usa a da configuração. */
+  @IsOptional() @IsInt() @Min(1) contaPagamento?: number;
+
+  /**
+   * fn_apagar.tipo_pagamento desta conta (ex.: "Dinheiro" numa diária paga em
+   * mãos). Omitido = o padrão da configuração, hoje "Pix".
+   */
+  @IsOptional() @IsString() tipoPagamentoIxc?: string;
 
   @IsOptional() @IsString() observacao?: string;
 

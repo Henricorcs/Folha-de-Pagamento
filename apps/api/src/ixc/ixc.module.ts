@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { AppConfig } from '../config/configuration';
+import { CaixaService } from './caixa.service';
 import { DadosBancariosService } from './dados-bancarios.service';
 import { IxcClient } from './ixc.client';
 import { createIxcHttp, IXC_HTTP } from './ixc.http';
@@ -15,7 +16,8 @@ import { createIxcHttp, IXC_HTTP } from './ixc.http';
     },
     IxcClient,
     DadosBancariosService,
+    CaixaService,
   ],
-  exports: [IxcClient, DadosBancariosService],
+  exports: [IxcClient, DadosBancariosService, CaixaService],
 })
 export class IxcModule {}

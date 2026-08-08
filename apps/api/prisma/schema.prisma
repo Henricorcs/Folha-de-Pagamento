@@ -194,6 +194,19 @@ model ConfiguracaoFinanceira {
   contaContabilSalario      Int @default(2420) @map("conta_contabil_salario")
   contaContabilAdiantamento Int @default(2662) @map("conta_contabil_adiantamento")
   contaContabilBonus        Int @default(13916) @map("conta_contabil_bonus")
+  /// Diárias. Nasce igual à de salário — confirme com a contabilidade.
+  contaContabilDiaria       Int @default(2420) @map("conta_contabil_diaria")
+
+  // --- Caixa de onde sai o dinheiro pago em mãos (Financeiro > Movimentação >
+  // Financeira, "CX - Werick"). ---
+  /// Código do caixa no IXC. 0 = não configurado (o app procura pelo nome).
+  caixaEmMaosId Int @default(0) @map("caixa_em_maos_id")
+  /// Nome do caixa, usado para descobrir o código sozinho.
+  caixaEmMaosNome String @default("CX - Werick") @map("caixa_em_maos_nome")
+  /// Tabela de contas/caixas do IXC ("" = descobre testando os nomes conhecidos).
+  caixaTabelaContas String @default("") @map("caixa_tabela_contas")
+  /// Tabela dos lançamentos da movimentação financeira ("" = descobre sozinho).
+  caixaTabelaMovimento String @default("") @map("caixa_tabela_movimento")
 
   // Cidade padrão usada ao criar fornecedores
   cidadePadraoId Int @default(1) @map("cidade_padrao_id")
@@ -240,6 +253,8 @@ enum TipoLancamento {
   BONUS
   DESCONTO
   AVULSO
+  /// Diária de quem trabalha por dia (ver `Diarista`)
+  DIARIA
 }
 
 model Lancamento {
@@ -394,6 +409,92 @@ model BeneficiarioAvulso {
 }
 
 // ---------------------------------------------------------------------------
+// Diaristas: quem trabalha por dia e recebe por diária, sem vínculo de folha.
+// O pagamento sai pelo IXC (conta a pagar, como qualquer beneficiário) ou em
+// mãos — e aí o dinheiro sai do caixa configurado (ver `caixaEmMaosId`).
+// ---------------------------------------------------------------------------
+enum FormaPagamentoDiaria {
+  /// Conta a pagar no IXC: auditoria e pagamento pelo banco
+  IXC
+  /// Dinheiro entregue na hora, descontado do caixa
+  EM_MAOS
+}
+
+model Diarista {
+  id String @id @default(uuid())
+
+  nome     String
+  cpfCnpj  String? @map("cpf_cnpj")
+  telefone String?
+  chavePix String? @map("chave_pix")
+  /// Tipo da chave acima; vazio = deduzir pelo formato (igual ao funcionário)
+  tipoChavePix String? @map("tipo_chave_pix")
+
+  /// Quanto essa pessoa cobra por dia. Só sugere o valor no pagamento.
+  valorDiaria Decimal? @map("valor_diaria") @db.Decimal(14, 2)
+  /// Forma habitual de pagar essa pessoa (dá para mudar em cada diária)
+  formaPagamento FormaPagamentoDiaria @default(IXC) @map("forma_pagamento")
+
+  observacoes String?
+  ativo       Boolean @default(true)
+
+  /// Fornecedor no IXC, criado na primeira diária paga pelo IXC
+  idFornecedorIxc Int? @map("id_fornecedor_ixc")
+  cidadeIxc       Int? @map("cidade_ixc")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  diarias     Diaria[]
+  contasPagar ContaPagar[]
+
+  @@index([ativo])
+  @@index([nome])
+  @@map("diaristas")
+}
+
+/// Uma diária paga (ou a pagar): quantos dias, por quanto, e por onde saiu.
+model Diaria {
+  id String @id @default(uuid())
+
+  diarista   Diarista @relation(fields: [diaristaId], references: [id], onDelete: Cascade)
+  diaristaId String   @map("diarista_id")
+
+  /// Dia trabalhado (ou o primeiro, quando são vários)
+  data        DateTime
+  quantidade  Decimal  @default(1) @db.Decimal(8, 2)
+  valorDiaria Decimal  @map("valor_diaria") @db.Decimal(14, 2)
+  /// Total pago = quantidade × valor da diária, editável na tela
+  valor     Decimal @db.Decimal(14, 2)
+  descricao String
+
+  forma FormaPagamentoDiaria
+
+  /// Conta a pagar gerada no IXC (só na forma IXC)
+  contaPagar   ContaPagar? @relation(fields: [contaPagarId], references: [id], onDelete: SetNull)
+  contaPagarId String?     @unique @map("conta_pagar_id")
+
+  // --- Pagamento em mãos: a saída no caixa do IXC ---
+  /// Caixa de onde o dinheiro saiu
+  caixaIxc Int? @map("caixa_ixc")
+  /// Lançamento criado na movimentação financeira do IXC
+  idLancamentoIxc Int?      @map("id_lancamento_ixc")
+  lancadoEm       DateTime? @map("lancado_em")
+  /// Lançado no IXC à mão por alguém (o app não conseguiu)
+  lancadoManual Boolean @default(false) @map("lancado_manual")
+  /// Por que o lançamento no caixa não saiu (null = sem pendência)
+  erroIxc String? @map("erro_ixc")
+
+  criadoPor String?  @map("criado_por")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([diaristaId])
+  @@index([data])
+  @@map("diarias")
+}
+
+// ---------------------------------------------------------------------------
 // Conta a pagar (espelho local do fn_apagar do IXC) com o fluxo de aprovação
 // ---------------------------------------------------------------------------
 enum StatusContaPagar {
@@ -420,6 +521,9 @@ model ContaPagar {
   beneficiarioAvulso   BeneficiarioAvulso? @relation(fields: [beneficiarioAvulsoId], references: [id], onDelete: SetNull)
   beneficiarioAvulsoId String?             @map("beneficiario_avulso_id")
 
+  diarista   Diarista? @relation(fields: [diaristaId], references: [id], onDelete: SetNull)
+  diaristaId String?   @map("diarista_id")
+
   // Snapshot do beneficiário (não muda se o cadastro mudar depois)
   beneficiarioNome String @map("beneficiario_nome")
   idFornecedorIxc  Int?   @map("id_fornecedor_ixc")
@@ -427,6 +531,8 @@ model ContaPagar {
   valor         Decimal @db.Decimal(14, 2)
   contaContabil Int     @map("conta_contabil") // fn_apagar.id_conta
   contaPagamento Int    @map("conta_pagamento") // fn_apagar.id_contas
+  /// fn_apagar.tipo_pagamento desta conta; null = o padrão da configuração
+  tipoPagamentoIxc String? @map("tipo_pagamento_ixc")
   filialId      Int     @map("filial_id")
   dataEmissao   DateTime @map("data_emissao")
   dataVencimento DateTime @map("data_vencimento")
@@ -453,10 +559,13 @@ model ContaPagar {
 
   /// Parcelas de vale abatidas (ou pagas) por esta conta
   parcelasVale ValeParcela[]
+  /// Diária que gerou esta conta, quando foi paga pelo IXC
+  diaria Diaria?
 
   @@index([status])
   @@index([competencia])
   @@index([funcionarioId])
+  @@index([diaristaId])
   @@index([idFnApagarIxc])
   @@map("contas_pagar")
 }

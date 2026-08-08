@@ -5,6 +5,7 @@ import { Avulsos } from './pages/Avulsos';
 import { Configuracoes } from './pages/Configuracoes';
 import { ContasPagar } from './pages/ContasPagar';
 import { Dashboard } from './pages/Dashboard';
+import { Diaristas } from './pages/Diaristas';
 import { Folha } from './pages/Folha';
 import { FuncionarioDetalhe } from './pages/FuncionarioDetalhe';
 import { Funcionarios } from './pages/Funcionarios';
@@ -55,6 +56,7 @@ export default function App() {
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="funcionarios" element={<Funcionarios />} />
         <Route path="funcionarios/:id" element={<FuncionarioDetalhe />} />
+        <Route path="diaristas" element={<Diaristas />} />
         <Route path="vales" element={<Vales />} />
         <Route path="folha" element={<Folha />} />
         <Route path="contas-pagar" element={<ContasPagar />} />

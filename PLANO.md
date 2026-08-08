@@ -28,7 +28,11 @@ Evolução planejada por fases. Cada fase entrega valor de forma incremental.
 - [x] Fluxo: salvar → **aprovar na auditoria** (`fn_apagar_auditoria`) →
       pagar com ModoBank (no IXC) → **monitorar retorno do banco** (polling do status)
 - [x] **Pagamentos avulsos** (ex.: patrocínio a quem não é funcionário)
-- [x] Telas: Gerar Folha, Contas a Pagar (com ações), Avulsos, Configurações
+- [x] **Diaristas**: cadastro de quem recebe por diária e histórico das diárias
+      pagas, com duas formas — conta a pagar no IXC ou **em mãos**, descontando
+      do caixa configurado (movimentação financeira, "CX - Werick")
+- [x] Telas: Gerar Folha, Contas a Pagar (com ações), Avulsos, Diaristas,
+      Configurações
 
 - [x] Lançamentos **avulsos** por funcionário (competência específica), além dos fixos
 - [x] Polling automático do retorno do banco (SYNC_PAGAMENTOS_INTERVALO_MIN, padrão 10 min)
@@ -42,6 +46,11 @@ Evolução planejada por fases. Cada fase entrega valor de forma incremental.
 ### Pendências desta fase (dependem de você)
 - [ ] Automatizar o clique "pagar com ModoBank" — só se o IXC expuser esse
       endpoint (hoje é ação manual na tela do IXC; o app cria/aprova/monitora)
+- [ ] **Nome da tabela da movimentação financeira no IXC** (para o lançamento
+      no caixa do pagamento em mãos sair sozinho). O app tenta descobrir e, se
+      não achar, a diária fica registrada com a pendência; peça o nome ao
+      suporte do IXC e informe em Configurações
+- [ ] Confirmar a **conta contábil das diárias** (hoje nasce igual à do salário)
 - [ ] Confirmar `cidade` padrão para criação de fornecedores no seu IXC
 - [ ] Conferir o rótulo exato do tipo de pagamento PIX no seu IXC (Configurações)
 

@@ -8,7 +8,7 @@ import {
   Pagina,
 } from '../components/ui';
 import { api, mensagemErro } from '../lib/api';
-import type { ConfigFinanceira } from '../lib/types';
+import type { CaixasIxc, ConfigFinanceira } from '../lib/types';
 
 export function Configuracoes() {
   const qc = useQueryClient();
@@ -120,8 +120,19 @@ export function Configuracoes() {
               valor={form.contaContabilBonus}
               onChange={(v) => num('contaContabilBonus', v)}
             />
+            <CampoNum
+              label="Diária"
+              valor={form.contaContabilDiaria}
+              onChange={(v) => num('contaContabilDiaria', v)}
+            />
           </div>
+          <p className="mt-3 text-xs leading-relaxed text-tinta-400">
+            A conta da diária nasce igual à do salário. Confirme com quem cuida
+            da contabilidade se as diárias devem entrar em outra conta.
+          </p>
         </Bloco>
+
+        <CaixaEmMaos form={form} num={num} txt={txt} />
 
         <Bloco titulo="Quem conta como funcionário" className="surgir surgir-3">
           <p className="mb-4 text-xs leading-relaxed text-tinta-500">
@@ -192,6 +203,127 @@ export function Configuracoes() {
         </button>
       </div>
     </Pagina>
+  );
+}
+
+/**
+ * De onde sai o dinheiro pago em mãos (diaristas). O código do caixa pode ser
+ * digitado, mas o normal é o app achar pelo nome — o botão lista os caixas do
+ * IXC para conferir qual é qual sem sair da tela.
+ *
+ * As duas tabelas existem porque o webservice do IXC não documenta a
+ * movimentação financeira: os nomes são descobertos por tentativa e só
+ * precisam ser preenchidos se a descoberta falhar.
+ */
+function CaixaEmMaos({
+  form,
+  num,
+  txt,
+}: {
+  form: ConfigFinanceira;
+  num: (k: keyof ConfigFinanceira, v: string) => void;
+  txt: (k: keyof ConfigFinanceira, v: string) => void;
+}) {
+  const [ver, setVer] = useState(false);
+  const caixas = useQuery({
+    queryKey: ['caixas-ixc'],
+    queryFn: async () =>
+      (await api.get<CaixasIxc>('/config-financeira/caixas')).data,
+    enabled: ver,
+  });
+
+  return (
+    <Bloco titulo="Caixa do pagamento em mãos" className="surgir surgir-3">
+      <p className="mb-4 text-xs leading-relaxed text-tinta-500">
+        Diária paga em dinheiro é descontada deste caixa na movimentação
+        financeira do IXC. Deixe o código em <span className="num">0</span> para
+        o app procurar pelo nome.
+      </p>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <CampoNum
+          label="Código do caixa (0 = pelo nome)"
+          valor={form.caixaEmMaosId}
+          onChange={(v) => num('caixaEmMaosId', v)}
+        />
+        <div className="sm:col-span-2">
+          <label className="rotulo">Nome do caixa no IXC</label>
+          <input
+            value={form.caixaEmMaosNome}
+            onChange={(e) => txt('caixaEmMaosNome', e.target.value)}
+            className="campo"
+            placeholder="Ex.: CX - Werick"
+          />
+        </div>
+        <div>
+          <label className="rotulo">Tabela de contas/caixas</label>
+          <input
+            value={form.caixaTabelaContas}
+            onChange={(e) => txt('caixaTabelaContas', e.target.value)}
+            className="campo"
+            placeholder="vazio = descobrir"
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="rotulo">Tabela da movimentação financeira</label>
+          <input
+            value={form.caixaTabelaMovimento}
+            onChange={(e) => txt('caixaTabelaMovimento', e.target.value)}
+            className="campo"
+            placeholder="vazio = descobrir"
+          />
+        </div>
+      </div>
+
+      <div className="mt-4 border-t border-tinta-100 pt-4">
+        <button onClick={() => setVer(true)} className="btn btn-neutro btn-p">
+          {caixas.isFetching ? 'Consultando o IXC…' : 'Ver os caixas do IXC'}
+        </button>
+
+        {ver && caixas.data && (
+          <div className="mt-3 text-sm">
+            {caixas.data.tabela === null ? (
+              <p className="text-rose-600">
+                Não encontrei a tabela de contas/caixas no seu IXC. Peça o nome
+                dela ao suporte e informe no campo acima.
+              </p>
+            ) : (
+              <>
+                <p className="mb-2 text-xs text-tinta-400">
+                  Lidos da tabela{' '}
+                  <span className="num">{caixas.data.tabela}</span>
+                  {caixas.data.emUso
+                    ? ` · em uso hoje: código ${caixas.data.emUso}`
+                    : ` · nenhum caixa casou com "${caixas.data.nomeProcurado}"`}
+                </p>
+                <div className="max-h-64 overflow-y-auto rolagem-fina rounded-lg ring-1 ring-tinta-100">
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {caixas.data.caixas.map((c) => (
+                        <tr key={c.id} className="linha">
+                          <td className="td num w-20 text-tinta-500">{c.id}</td>
+                          <td className="td">{c.nome}</td>
+                          <td className="td text-xs text-tinta-400">
+                            {c.tipo ?? ''}
+                          </td>
+                          <td className="td text-right">
+                            <button
+                              onClick={() => num('caixaEmMaosId', String(c.id))}
+                              className="btn btn-sutil btn-p"
+                            >
+                              Usar este
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </Bloco>
   );
 }
 

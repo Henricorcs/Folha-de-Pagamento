@@ -7,6 +7,7 @@ import { IxcModule } from './ixc/ixc.module';
 import { SyncModule } from './sync/sync.module';
 import { FuncionariosModule } from './funcionarios/funcionarios.module';
 import { FinanceiroModule } from './financeiro/financeiro.module';
+import { DiaristasModule } from './diaristas/diaristas.module';
 import { ValesModule } from './vales/vales.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { AuthModule } from './auth/auth.module';
@@ -29,6 +30,7 @@ import { HealthController } from './health/health.controller';
     SyncModule,
     FuncionariosModule,
     FinanceiroModule,
+    DiaristasModule,
     ValesModule,
     DashboardModule,
   ],
