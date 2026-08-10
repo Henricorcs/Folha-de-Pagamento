@@ -603,3 +603,75 @@ model ContaPagar {
   @@index([idFnApagarIxc])
   @@map("contas_pagar")
 }
+
+// ---------------------------------------------------------------------------
+// Guias de imposto que a contabilidade manda todo mês (DARF, FGTS, DAS).
+// Lidas do PDF, conferidas na tela e só então gravadas.
+// ---------------------------------------------------------------------------
+enum TipoGuia {
+  /// DARF previdenciário (INSS)
+  DARF_INSS
+  /// Guia do FGTS Digital
+  FGTS
+  /// DAS do Simples Nacional
+  DAS_SIMPLES
+  OUTRA
+}
+
+/// O que o item representa no bolso da empresa. Somar tudo junto mente: ver
+/// `guias.parse.ts`.
+enum ClasseTributo {
+  /// Custo da empresa com pessoal: FGTS e a parte patronal do INSS
+  FOLHA_PATRONAL
+  /// Retido de quem trabalha e só repassado: INSS do segurado, consignado
+  FOLHA_RETIDO
+  /// Tributo sobre faturamento: IRPJ, CSLL, COFINS, PIS, ICMS
+  FATURAMENTO
+}
+
+model Guia {
+  id String @id @default(uuid())
+
+  tipo TipoGuia
+  /// Período de apuração ("AAAA-MM") — o mês a que o imposto se refere
+  competencia String
+  vencimento  DateTime
+  valorTotal  Decimal  @map("valor_total") @db.Decimal(14, 2)
+
+  numeroDocumento String? @map("numero_documento")
+  cnpj            String?
+  razaoSocial     String? @map("razao_social")
+  /// Quantos trabalhadores a guia do FGTS declarou
+  trabalhadores Int?
+
+  arquivoNome String @map("arquivo_nome")
+  /// Texto extraído do PDF, para reconferir a leitura sem o arquivo original
+  textoOriginal String? @map("texto_original")
+
+  criadoPor String?  @map("criado_por")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  itens GuiaItem[]
+
+  /// O mesmo documento não entra duas vezes — senão o gráfico conta em dobro
+  @@unique([tipo, competencia, numeroDocumento])
+  @@index([competencia])
+  @@map("guias")
+}
+
+model GuiaItem {
+  id String @id @default(uuid())
+
+  guia   Guia   @relation(fields: [guiaId], references: [id], onDelete: Cascade)
+  guiaId String @map("guia_id")
+
+  /// Código de receita; o FGTS não tem
+  codigo      String?
+  denominacao String
+  valor       Decimal       @db.Decimal(14, 2)
+  classe      ClasseTributo
+
+  @@index([guiaId])
+  @@map("guia_itens")
+}

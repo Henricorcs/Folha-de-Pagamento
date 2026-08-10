@@ -1,0 +1,274 @@
+import type { ReactNode } from 'react';
+import { formatBRL } from '../lib/format';
+
+/**
+ * Sequência categórica da casa, na ordem fixa em que as fatias são servidas —
+ * nunca ciclada, nunca por ranking. Começa no turquesa da marca e segue por
+ * matizes que se distinguem em daltonismo (verificado em protanopia,
+ * deuteranopia e tritanopia, com contraste ≥ 3:1 sobre o cartão branco).
+ *
+ * Trocar um valor aqui exige revalidar: cor de gráfico é o que separa uma
+ * série da outra para quem lê.
+ */
+export const PALETA = [
+  '#0E9E91', // turquesa da marca
+  '#D97706', // âmbar
+  '#0284C7', // azul
+  '#E11D48', // vermelho
+  '#7C3AED', // violeta
+] as const;
+
+export interface SerieGrafico {
+  /** Campo do objeto de cada mês que guarda o valor desta série. */
+  chave: string;
+  rotulo: string;
+  cor: string;
+}
+
+const MES_CURTO = [
+  'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
+  'jul', 'ago', 'set', 'out', 'nov', 'dez',
+];
+
+export function rotuloMes(competencia: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(competencia);
+  return m ? `${MES_CURTO[Number(m[2]) - 1]}/${m[1].slice(2)}` : competencia;
+}
+
+type LinhaDoMes = { competencia: string } & Record<string, number | string>;
+
+/**
+ * Barras empilhadas por mês. Cada segmento é uma série; a altura da coluna é a
+ * soma delas, então o que se compara entre meses é o total — e dentro de cada
+ * mês, a composição.
+ *
+ * Só o total ganha rótulo fixo: número em cada segmento vira ruído. O resto
+ * aparece ao passar o mouse.
+ */
+export function BarrasEmpilhadas({
+  meses,
+  series,
+  atual,
+  altura = 'h-56',
+}: {
+  meses: LinhaDoMes[];
+  series: SerieGrafico[];
+  /** Competência em foco, destacada nos rótulos. */
+  atual?: string;
+  altura?: string;
+}) {
+  const totais = meses.map((m) => somar(m, series));
+  const maior = Math.max(1, ...totais);
+  const vazio = totais.every((t) => t === 0);
+
+  return (
+    <div>
+      <div className={`flex ${altura} items-end gap-2 sm:gap-3`}>
+        {meses.map((mes, i) => {
+          const total = totais[i];
+          const eAtual = mes.competencia === atual;
+          return (
+            <div
+              key={mes.competencia}
+              // `h-full` não é enfeite: sem altura definida na coluna, a
+              // altura em % da barra não resolve e ela colapsa para nada.
+              className="group relative flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-2"
+            >
+              <span
+                className={`num text-[10px] font-semibold transition ${
+                  eAtual ? 'text-tinta-700' : 'text-tinta-400'
+                }`}
+              >
+                {total > 0 ? formatCompacto(total) : ''}
+              </span>
+
+              <div
+                className="flex w-full origin-bottom animate-crescer flex-col-reverse justify-start overflow-hidden rounded-t-md"
+                style={{
+                  height: `${Math.max((total / maior) * 100, total > 0 ? 3 : 1)}%`,
+                  animationDelay: `${i * 50}ms`,
+                }}
+              >
+                {total === 0 ? (
+                  <div className="h-full w-full rounded-t-md bg-tinta-100" />
+                ) : (
+                  series.map((s) => {
+                    const valor = Number(mes[s.chave] ?? 0);
+                    if (valor <= 0) return null;
+                    return (
+                      <div
+                        key={s.chave}
+                        // A borda branca é o respiro de 2px entre fatias: sem
+                        // ela, duas cores vizinhas viram uma mancha só. Fica
+                        // embaixo porque a coluna é `flex-col-reverse`: a
+                        // primeira série é a de baixo, e ela não separa nada.
+                        className="w-full border-b-2 border-white first:border-b-0"
+                        style={{
+                          height: `${(valor / total) * 100}%`,
+                          background: s.cor,
+                        }}
+                      />
+                    );
+                  })
+                )}
+              </div>
+
+              <span
+                className={`text-[11px] ${
+                  eAtual ? 'font-semibold text-tinta-800' : 'text-tinta-400'
+                }`}
+              >
+                {rotuloMes(mes.competencia)}
+              </span>
+
+              {total > 0 && (
+                <Balao>
+                  <p className="mb-1.5 font-semibold text-tinta-100">
+                    {rotuloMes(mes.competencia)}
+                  </p>
+                  {series.map((s) => (
+                    <LinhaBalao
+                      key={s.chave}
+                      cor={s.cor}
+                      rotulo={s.rotulo}
+                      valor={Number(mes[s.chave] ?? 0)}
+                    />
+                  ))}
+                  <p className="mt-1.5 flex justify-between gap-4 border-t border-tinta-600 pt-1.5 font-semibold text-tinta-100">
+                    <span>Total</span>
+                    <span className="num">{formatBRL(total)}</span>
+                  </p>
+                </Balao>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <Legenda series={series} meses={meses} />
+      {vazio && (
+        <p className="mt-3 text-xs text-tinta-400">
+          Nada lançado no período escolhido.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Comparação de valores de um mesmo mês. Barra horizontal em vez de rosca: o
+ * olho compara comprimento muito melhor do que ângulo, e aqui o que importa é
+ * quanto uma linha é maior que a outra.
+ */
+export function BarrasComparadas({
+  itens,
+}: {
+  itens: { rotulo: string; valor: number; cor: string; detalhe?: string }[];
+}) {
+  const maior = Math.max(1, ...itens.map((i) => i.valor));
+  return (
+    <div className="space-y-3">
+      {itens.map((item) => (
+        <div key={item.rotulo}>
+          <div className="flex items-baseline justify-between gap-3 text-sm">
+            <span className="text-tinta-600">{item.rotulo}</span>
+            <span className="valor text-[13px]">{formatBRL(item.valor)}</span>
+          </div>
+          <div className="mt-1 flex items-center gap-2">
+            <div className="h-2 flex-1 overflow-hidden rounded-full bg-tinta-100">
+              <div
+                className="h-full animate-crescer rounded-full"
+                style={{
+                  width: `${(item.valor / maior) * 100}%`,
+                  background: item.cor,
+                }}
+              />
+            </div>
+            {item.detalhe && (
+              <span className="w-16 shrink-0 text-right text-[11px] text-tinta-400">
+                {item.detalhe}
+              </span>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Legenda com o total de cada série no período. É o que garante que a
+ * identidade não dependa só da cor — e serve de leitura em texto de tudo que
+ * as barras mostram.
+ */
+function Legenda({
+  series,
+  meses,
+}: {
+  series: SerieGrafico[];
+  meses: LinhaDoMes[];
+}) {
+  return (
+    <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 border-t border-tinta-100 pt-4">
+      {series.map((s) => {
+        const total = meses.reduce((soma, m) => soma + Number(m[s.chave] ?? 0), 0);
+        return (
+          <span key={s.chave} className="flex items-center gap-2 text-xs">
+            <span
+              className="h-2.5 w-2.5 shrink-0 rounded-sm"
+              style={{ background: s.cor }}
+            />
+            <span className="text-tinta-500">{s.rotulo}</span>
+            <span className="valor text-[12px] text-tinta-700">
+              {formatBRL(total)}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function Balao({ children }: { children: ReactNode }) {
+  return (
+    <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-max -translate-x-1/2 scale-95 rounded-xl bg-tinta-800 px-3 py-2 text-[11px] leading-relaxed text-tinta-300 opacity-0 shadow-card-hover transition duration-150 group-hover:scale-100 group-hover:opacity-100">
+      {children}
+    </div>
+  );
+}
+
+function LinhaBalao({
+  cor,
+  rotulo,
+  valor,
+}: {
+  cor: string;
+  rotulo: string;
+  valor: number;
+}) {
+  return (
+    <p className="flex items-center justify-between gap-4">
+      <span className="flex items-center gap-1.5">
+        <span
+          className="h-2 w-2 shrink-0 rounded-sm"
+          style={{ background: cor }}
+        />
+        {rotulo}
+      </span>
+      <span className="num">{formatBRL(valor)}</span>
+    </p>
+  );
+}
+
+function somar(mes: LinhaDoMes, series: SerieGrafico[]): number {
+  return series.reduce((s, serie) => s + Number(mes[serie.chave] ?? 0), 0);
+}
+
+/** "R$ 12,4 mil" — cabe em cima da barra sem virar sopa de dígitos. */
+function formatCompacto(valor: number): string {
+  if (valor >= 1000) {
+    const mil = valor / 1000;
+    return `${mil.toFixed(mil >= 100 ? 0 : 1).replace('.', ',')} mil`;
+  }
+  return valor.toFixed(0);
+}

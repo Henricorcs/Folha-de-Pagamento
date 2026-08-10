@@ -9,6 +9,7 @@ import { Diaristas } from './pages/Diaristas';
 import { Folha } from './pages/Folha';
 import { FuncionarioDetalhe } from './pages/FuncionarioDetalhe';
 import { Funcionarios } from './pages/Funcionarios';
+import { Impostos } from './pages/Impostos';
 import { Login } from './pages/Login';
 import { MinhaConta } from './pages/MinhaConta';
 import { Usuarios } from './pages/Usuarios';
@@ -61,6 +62,7 @@ export default function App() {
         <Route path="folha" element={<Folha />} />
         <Route path="contas-pagar" element={<ContasPagar />} />
         <Route path="avulsos" element={<Avulsos />} />
+        <Route path="impostos" element={<Impostos />} />
         <Route path="configuracoes" element={<Configuracoes />} />
         <Route path="minha-conta" element={<MinhaConta />} />
         <Route

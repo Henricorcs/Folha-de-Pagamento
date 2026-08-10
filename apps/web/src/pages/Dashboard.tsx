@@ -2,6 +2,12 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
+  BarrasComparadas,
+  BarrasEmpilhadas,
+  PALETA,
+  type SerieGrafico,
+} from '../components/graficos';
+import {
   Bloco,
   CabecalhoPagina,
   Carregando,
@@ -13,7 +19,7 @@ import {
 import { api, mensagemErro } from '../lib/api';
 import { formatBRL, formatData } from '../lib/format';
 import { STATUS_LABEL, STATUS_TOM, TIPO_LABEL } from '../lib/status';
-import type { Dashboard as TDashboard } from '../lib/types';
+import type { Dashboard as TDashboard, TipoLancamento } from '../lib/types';
 
 function competenciaAtual(): string {
   const d = new Date();
@@ -25,48 +31,110 @@ function formatComp(comp: string): string {
   return m ? `${m[2]}/${m[1]}` : comp;
 }
 
-const MES_CURTO = [
-  'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
-  'jul', 'ago', 'set', 'out', 'nov', 'dez',
+/** Quantos meses as séries cobrem. Um mês só vira leitura do mês fechado. */
+const PERIODOS = [1, 3, 6, 12];
+
+/** Do que a empresa gasta com gente — ordem fixa, do maior ao mais eventual. */
+const SERIES_CUSTO: SerieGrafico[] = [
+  { chave: 'folha', rotulo: 'Folha', cor: PALETA[0] },
+  { chave: 'diaristas', rotulo: 'Diaristas', cor: PALETA[1] },
+  { chave: 'encargos', rotulo: 'Encargos patronais', cor: PALETA[2] },
 ];
 
-function rotuloMes(comp: string): string {
-  const m = /^(\d{4})-(\d{2})$/.exec(comp);
-  return m ? `${MES_CURTO[Number(m[2]) - 1]}/${m[1].slice(2)}` : comp;
-}
+const SERIES_TIPO: SerieGrafico[] = [
+  { chave: 'salario', rotulo: 'Salário', cor: PALETA[0] },
+  { chave: 'adiantamento', rotulo: 'Adiantamento', cor: PALETA[1] },
+  { chave: 'bonus', rotulo: 'Bônus', cor: PALETA[2] },
+  { chave: 'diaria', rotulo: 'Diária', cor: PALETA[3] },
+  { chave: 'avulso', rotulo: 'Avulso', cor: PALETA[4] },
+];
+
+/**
+ * Mesma cor para o mesmo tipo em toda a tela: o bônus é azul na barra do mês e
+ * azul na repartição. Cor segue a coisa, nunca a posição no ranking.
+ */
+const COR_DO_TIPO: Record<TipoLancamento, string> = {
+  SALARIO: PALETA[0],
+  ADIANTAMENTO: PALETA[1],
+  BONUS: PALETA[2],
+  DIARIA: PALETA[3],
+  AVULSO: PALETA[4],
+  DESCONTO: PALETA[4],
+};
+
+const SERIES_IMPOSTO: SerieGrafico[] = [
+  { chave: 'folhaPatronal', rotulo: 'Patronal (custo)', cor: PALETA[0] },
+  { chave: 'folhaRetido', rotulo: 'Retido (repasse)', cor: PALETA[1] },
+  { chave: 'faturamento', rotulo: 'Sobre faturamento', cor: PALETA[2] },
+];
 
 export function Dashboard() {
   const [competencia, setCompetencia] = useState(competenciaAtual());
+  const [meses, setMeses] = useState(12);
 
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['dashboard', competencia],
+    queryKey: ['dashboard', competencia, meses],
     queryFn: async () =>
-      (await api.get<TDashboard>('/dashboard', { params: { competencia } }))
-        .data,
+      (
+        await api.get<TDashboard>('/dashboard', {
+          params: { competencia, meses },
+        })
+      ).data,
   });
 
   const f = data?.funcionarios;
   const folha = data?.folha;
   const vales = data?.vales;
 
+  // Números do mês em foco, que é sobre o que os cartões falam.
+  const custoDoMes = data?.custoPessoal.find((c) => c.competencia === competencia);
+  const tiposDoMes = data?.serieTipos.find((t) => t.competencia === competencia);
+  const diariasDoMes = data?.diaristas.serie.find(
+    (d) => d.competencia === competencia,
+  );
+  const impostoDoMes = data?.impostos.serie.find(
+    (i) => i.competencia === competencia,
+  );
+  const semGuia = (data?.impostos.guias.length ?? 0) === 0;
+
   return (
     <Pagina>
       <CabecalhoPagina
         secao="Dashboard"
         titulo={`Folha de ${formatComp(competencia)}`}
-        descricao="O que já saiu, o que está parado esperando alguém e o que a competência ainda deve."
+        descricao="Quanto custa a operação, para onde o dinheiro foi e o que ainda está parado esperando alguém."
         acoes={
-          <div>
-            <label className="rotulo" htmlFor="competencia">
-              Competência
-            </label>
-            <input
-              id="competencia"
-              type="month"
-              value={competencia}
-              onChange={(e) => setCompetencia(e.target.value)}
-              className="campo"
-            />
+          <div className="flex flex-wrap items-end gap-4">
+            <div>
+              <label className="rotulo" htmlFor="competencia">
+                Competência
+              </label>
+              <input
+                id="competencia"
+                type="month"
+                value={competencia}
+                onChange={(e) => setCompetencia(e.target.value)}
+                className="campo"
+              />
+            </div>
+            <div>
+              <span className="rotulo">Histórico</span>
+              <div className="flex gap-1 rounded-xl bg-tinta-100 p-1">
+                {PERIODOS.map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setMeses(n)}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                      meses === n
+                        ? 'bg-white text-tinta-800 shadow-aba'
+                        : 'text-tinta-500 hover:text-tinta-700'
+                    }`}
+                  >
+                    {n === 1 ? '1 mês' : `${n} meses`}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         }
       />
@@ -87,42 +155,178 @@ export function Dashboard() {
           <div className="surgir surgir-1 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Indicador
               acento
-              rotulo="Folha base mensal"
-              valor={formatBRL(f?.folhaBaseMensal)}
+              rotulo={`Custo com pessoal em ${formatComp(competencia)}`}
+              valor={formatBRL(custoDoMes?.total)}
               detalhe={
-                f && f.bonusFixoMensal > 0
-                  ? `${formatBRL(f.salarioBaseMensal)} de base + ${formatBRL(f.bonusFixoMensal)} de bônus fixos`
-                  : 'soma da base de quem está ativo'
+                custoDoMes
+                  ? `${formatBRL(custoDoMes.folha)} de folha + ${formatBRL(custoDoMes.diaristas)} de diárias + ${formatBRL(custoDoMes.encargos)} de encargos`
+                  : 'nada lançado nesta competência'
               }
             />
             <Indicador
-              rotulo="Gerado na competência"
-              valor={formatBRL(folha?.total)}
-              detalhe={`${folha?.quantidade ?? 0} conta(s) a pagar`}
+              rotulo="Bônus pago"
+              valor={formatBRL(tiposDoMes?.bonus)}
+              detalhe={
+                f && f.bonusFixoMensal > 0
+                  ? `${formatBRL(f.bonusFixoMensal)} de bônus fixos no cadastro`
+                  : 'sem bônus fixo no cadastro'
+              }
             />
             <Indicador
-              rotulo="Confirmado pelo banco"
-              valor={formatBRL(folha?.pago)}
-              detalhe={`${formatBRL(folha?.emAberto)} ainda em aberto`}
+              rotulo="Gasto com diaristas"
+              valor={formatBRL(diariasDoMes?.valor)}
+              detalhe={`${diariasDoMes?.quantidade ?? 0} diária(s) · ${diariasDoMes?.pessoas ?? 0} pessoa(s)`}
               alerta={
-                (folha?.comErro ?? 0) > 0
-                  ? `${formatBRL(folha?.comErro)} com erro no IXC`
+                diariasDoMes && diariasDoMes.valor > diariasDoMes.pago
+                  ? `${formatBRL(diariasDoMes.valor - diariasDoMes.pago)} ainda não saiu`
                   : undefined
               }
             />
             <Indicador
-              rotulo="Pessoas ativas"
-              valor={f?.ativos ?? '—'}
-              detalhe={`${f?.inativos ?? 0} inativas`}
-              alerta={
-                (f?.semPix ?? 0) > 0 ? `${f?.semPix} sem chave PIX` : undefined
+              rotulo="Encargos patronais"
+              valor={formatBRL(impostoDoMes?.folhaPatronal)}
+              detalhe={
+                impostoDoMes && impostoDoMes.folhaRetido > 0
+                  ? `+ ${formatBRL(impostoDoMes.folhaRetido)} retido do trabalhador`
+                  : 'FGTS e a parte patronal do INSS'
               }
+              alerta={semGuia ? 'nenhuma guia lançada' : undefined}
             />
           </div>
 
           <div className="surgir surgir-2 grid grid-cols-1 gap-6 lg:grid-cols-3">
-            <Bloco titulo="Últimos 6 meses" className="lg:col-span-2">
-              <Serie serie={data.serie} atual={competencia} />
+            <Bloco
+              titulo={
+                meses === 1
+                  ? 'Custo com pessoal no mês'
+                  : `Custo com pessoal — ${meses} meses`
+              }
+              className="lg:col-span-2"
+            >
+              <BarrasEmpilhadas
+                meses={data.custoPessoal}
+                series={SERIES_CUSTO}
+                atual={competencia}
+              />
+              <p className="mt-3 text-xs leading-relaxed text-tinta-400">
+                O INSS descontado do trabalhador fica fora: é dinheiro dele
+                passando pela conta da empresa, e somar aqui contaria o mesmo
+                salário duas vezes.
+              </p>
+            </Bloco>
+
+            <Bloco titulo={`Para onde foi em ${formatComp(competencia)}`}>
+              {folha && folha.porTipo.length > 0 ? (
+                <BarrasComparadas
+                  itens={folha.porTipo
+                    .filter((t) => t.valor > 0)
+                    .map((t) => ({
+                      rotulo: TIPO_LABEL[t.tipo],
+                      valor: t.valor,
+                      cor: COR_DO_TIPO[t.tipo],
+                      detalhe: `${t.quantidade}×`,
+                    }))}
+                />
+              ) : (
+                <Vazio titulo="Nada gerado nesta competência">
+                  Quando você calcular a folha, a repartição aparece aqui.{' '}
+                  <Link
+                    to="/folha"
+                    className="font-semibold text-brand-700 hover:underline"
+                  >
+                    Gerar folha
+                  </Link>
+                </Vazio>
+              )}
+            </Bloco>
+          </div>
+
+          <div className="surgir surgir-3 grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <Bloco titulo="O que a folha pagou, mês a mês">
+              <BarrasEmpilhadas
+                meses={data.serieTipos}
+                series={SERIES_TIPO}
+                atual={competencia}
+                altura="h-48"
+              />
+            </Bloco>
+
+            <Bloco
+              titulo="Impostos"
+              acao={
+                <Link
+                  to="/impostos"
+                  className="text-xs font-semibold text-brand-700 hover:underline"
+                >
+                  Lançar guia
+                </Link>
+              }
+            >
+              {semGuia ? (
+                <Vazio titulo="Nenhuma guia lançada">
+                  Suba o PDF do DARF, do FGTS ou do DAS que a contabilidade
+                  manda e o imposto entra aqui.{' '}
+                  <Link
+                    to="/impostos"
+                    className="font-semibold text-brand-700 hover:underline"
+                  >
+                    Lançar a primeira
+                  </Link>
+                </Vazio>
+              ) : (
+                <>
+                  <BarrasEmpilhadas
+                    meses={data.impostos.serie}
+                    series={SERIES_IMPOSTO}
+                    atual={competencia}
+                    altura="h-48"
+                  />
+                  <p className="mt-3 text-xs leading-relaxed text-tinta-400">
+                    Só o patronal é custo da empresa. O retido é do trabalhador,
+                    e o de faturamento não tem a ver com gente.
+                  </p>
+                </>
+              )}
+            </Bloco>
+          </div>
+
+          <div className="surgir surgir-3 grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <Bloco titulo="Diaristas">
+              <BarrasEmpilhadas
+                meses={data.diaristas.serie}
+                series={[
+                  { chave: 'valor', rotulo: 'Diárias', cor: PALETA[1] },
+                ]}
+                atual={competencia}
+                altura="h-40"
+              />
+            </Bloco>
+
+            <Bloco titulo={`Situação em ${formatComp(competencia)}`}>
+              {folha && folha.porStatus.length > 0 ? (
+                <div className="space-y-2.5">
+                  {folha.porStatus.map((s) => (
+                    <div
+                      key={s.status}
+                      className="flex items-center justify-between gap-3"
+                    >
+                      <Selo tom={STATUS_TOM[s.status]} ponto>
+                        {STATUS_LABEL[s.status]}
+                      </Selo>
+                      <div className="flex items-baseline gap-3">
+                        <span className="text-xs text-tinta-400">
+                          {s.quantidade}
+                        </span>
+                        <span className="valor text-sm">
+                          {formatBRL(s.valor)}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Vazio titulo="Nada gerado nesta competência" />
+              )}
             </Bloco>
 
             <Bloco
@@ -165,57 +369,7 @@ export function Dashboard() {
             </Bloco>
           </div>
 
-          <div className="surgir surgir-3 grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <Bloco titulo={`Situação em ${formatComp(competencia)}`}>
-              {folha && folha.porStatus.length > 0 ? (
-                <>
-                  <div className="space-y-2.5">
-                    {folha.porStatus.map((s) => (
-                      <div
-                        key={s.status}
-                        className="flex items-center justify-between gap-3"
-                      >
-                        <Selo tom={STATUS_TOM[s.status]} ponto>
-                          {STATUS_LABEL[s.status]}
-                        </Selo>
-                        <div className="flex items-baseline gap-3">
-                          <span className="text-xs text-tinta-400">
-                            {s.quantidade}
-                          </span>
-                          <span className="valor text-sm">
-                            {formatBRL(s.valor)}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  {folha.porTipo.length > 0 && (
-                    <div className="mt-5 flex flex-wrap gap-2 border-t border-tinta-100 pt-4">
-                      {folha.porTipo.map((t) => (
-                        <span
-                          key={t.tipo}
-                          className="rounded-lg bg-tinta-50 px-3 py-1.5 text-xs text-tinta-500"
-                        >
-                          {TIPO_LABEL[t.tipo]}{' '}
-                          <strong className="valor text-[13px]">
-                            {formatBRL(t.valor)}
-                          </strong>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <Vazio titulo="Nada gerado nesta competência">
-                  Quando você calcular a folha, o andamento de cada conta
-                  aparece aqui.{' '}
-                  <Link to="/folha" className="font-semibold text-brand-700 hover:underline">
-                    Gerar folha
-                  </Link>
-                </Vazio>
-              )}
-            </Bloco>
-
+          <div className="surgir surgir-4 grid grid-cols-1 gap-6 lg:grid-cols-3">
             <Bloco titulo="Pontos de atenção">
               <ul className="space-y-3">
                 <Atencao
@@ -245,6 +399,15 @@ export function Dashboard() {
                       : `${formatBRL(folha?.emAberto)} esperando aprovação ou pagamento.`
                   }
                 />
+                <Atencao
+                  ok={!semGuia}
+                  para="/impostos"
+                  texto={
+                    semGuia
+                      ? 'Nenhuma guia de imposto lançada — o custo com pessoal está incompleto.'
+                      : `${data.impostos.guias.length} guia(s) lançada(s) no período.`
+                  }
+                />
               </ul>
               {data.ultimoSync && (
                 <p className="mt-5 border-t border-tinta-100 pt-4 text-xs text-tinta-400">
@@ -257,10 +420,8 @@ export function Dashboard() {
                 </p>
               )}
             </Bloco>
-          </div>
 
-          <div className="surgir surgir-4">
-            <Bloco titulo="Últimos lançamentos" semPadding>
+            <Bloco titulo="Últimos lançamentos" className="lg:col-span-2" semPadding>
               {data.ultimasContas.length === 0 ? (
                 <Vazio titulo="Nenhuma conta a pagar ainda">
                   Comece pela tela Gerar Folha.
@@ -286,7 +447,7 @@ export function Dashboard() {
                           <td className="td text-tinta-500">
                             {TIPO_LABEL[c.tipo]}
                           </td>
-                          <td className="td text-tinta-500 num">
+                          <td className="td num text-tinta-500">
                             {c.competencia ? formatComp(c.competencia) : '—'}
                           </td>
                           <td className="td">
@@ -308,79 +469,6 @@ export function Dashboard() {
         </div>
       )}
     </Pagina>
-  );
-}
-
-/**
- * Seis meses de folha. A barra inteira é o que foi gerado; a parte sólida é o
- * que o banco confirmou — a distância entre as duas é o que falta acontecer.
- */
-function Serie({
-  serie,
-  atual,
-}: {
-  serie: { competencia: string; total: number; pago: number }[];
-  atual: string;
-}) {
-  const maior = Math.max(1, ...serie.map((s) => s.total));
-  return (
-    <div>
-      <div className="flex h-56 items-end gap-2 sm:gap-4">
-        {serie.map((s, i) => {
-          const altura = (s.total / maior) * 100;
-          const pago = s.total > 0 ? (s.pago / s.total) * 100 : 0;
-          const eAtual = s.competencia === atual;
-          return (
-            <div
-              key={s.competencia}
-              className="group flex min-w-0 flex-1 flex-col items-center justify-end gap-2"
-            >
-              <span
-                className={`num text-[11px] font-semibold transition ${
-                  eAtual ? 'text-tinta-700' : 'text-tinta-400'
-                }`}
-              >
-                {s.total > 0 ? formatBRL(s.total) : ''}
-              </span>
-              <div
-                className="flex w-full origin-bottom animate-crescer items-end justify-center overflow-hidden rounded-t-lg bg-tinta-100 transition group-hover:bg-tinta-200"
-                style={{
-                  height: `${Math.max(altura, 2)}%`,
-                  animationDelay: `${i * 70}ms`,
-                }}
-                title={`${s.competencia} — gerado ${formatBRL(
-                  s.total,
-                )}, pago ${formatBRL(s.pago)}`}
-              >
-                <div
-                  className="w-full rounded-t-lg bg-gradient-to-t from-brand-600 to-brand-400"
-                  style={{ height: `${pago}%` }}
-                />
-              </div>
-              <span
-                className={`text-xs ${
-                  eAtual
-                    ? 'font-semibold text-tinta-800'
-                    : 'text-tinta-400'
-                }`}
-              >
-                {rotuloMes(s.competencia)}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-      <div className="mt-5 flex flex-wrap items-center gap-4 border-t border-tinta-100 pt-4 text-xs text-tinta-400">
-        <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-gradient-to-t from-brand-600 to-brand-400" />
-          pago
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-tinta-100" />
-          gerado, ainda não pago
-        </span>
-      </div>
-    </div>
   );
 }
 

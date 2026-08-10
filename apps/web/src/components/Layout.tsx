@@ -14,6 +14,7 @@ const navItems = [
   { to: '/folha', label: 'Gerar Folha', icone: IconeCalculo },
   { to: '/contas-pagar', label: 'Contas a Pagar', icone: IconeSaida },
   { to: '/avulsos', label: 'Pagamentos Avulsos', icone: IconeRecibo },
+  { to: '/impostos', label: 'Impostos', icone: IconeGuia },
   { to: '/configuracoes', label: 'Configurações', icone: IconeEngrenagem },
   { to: '/usuarios', label: 'Usuários', icone: IconeChave, somenteAdmin: true },
 ];
@@ -232,6 +233,17 @@ function IconeRecibo({ className }: IconeProps) {
     <svg {...base} className={className}>
       <path d="M5 3.5h14v17l-2.3-1.6-2.3 1.6-2.4-1.6L9.6 20.5 7.3 19 5 20.5z" />
       <path d="M9 8.5h6M9 12.5h6" />
+    </svg>
+  );
+}
+
+/** Guia de imposto: papel timbrado com o código de barras embaixo. */
+function IconeGuia({ className }: IconeProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M5.5 2.5h13v19h-13z" />
+      <path d="M9 7h6M9 10.5h6" />
+      <path d="M9 16v2.5M11.5 16v2.5M14 16v2.5" />
     </svg>
   );
 }

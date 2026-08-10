@@ -1,5 +1,6 @@
 import { Controller, Get, Query } from '@nestjs/common';
-import { IsOptional, Matches } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsInt, IsOptional, Matches, Max, Min } from 'class-validator';
 import { DashboardService } from './dashboard.service';
 
 class QueryDashboardDto {
@@ -9,6 +10,14 @@ class QueryDashboardDto {
     message: 'competencia deve estar no formato AAAA-MM',
   })
   competencia?: string;
+
+  /** Quantos meses as séries cobrem, contando a competência. Padrão 12. */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value == null ? undefined : Number(value)))
+  @IsInt()
+  @Min(1)
+  @Max(24)
+  meses?: number;
 }
 
 @Controller('dashboard')
@@ -17,6 +26,6 @@ export class DashboardController {
 
   @Get()
   resumo(@Query() query: QueryDashboardDto) {
-    return this.dashboard.resumo(query.competencia);
+    return this.dashboard.resumo(query.competencia, query.meses);
   }
 }

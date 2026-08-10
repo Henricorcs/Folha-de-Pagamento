@@ -457,6 +457,42 @@ export interface Dashboard {
     creditoNaCompetencia: number;
   };
   serie: { competencia: string; total: number; pago: number }[];
+  /** Quantos meses as séries cobrem, contando a competência escolhida. */
+  meses: number;
+  /** O que foi gerado em cada mês, aberto por tipo de lançamento. */
+  serieTipos: {
+    competencia: string;
+    salario: number;
+    adiantamento: number;
+    bonus: number;
+    avulso: number;
+    diaria: number;
+    desconto: number;
+  }[];
+  diaristas: {
+    serie: {
+      competencia: string;
+      valor: number;
+      pago: number;
+      quantidade: number;
+      pessoas: number;
+    }[];
+    total: number;
+    totalPago: number;
+    quantidade: number;
+  };
+  impostos: ResumoImpostos;
+  /**
+   * O que a empresa gasta com gente. O INSS retido do trabalhador fica de
+   * fora: é dinheiro dele passando pela conta da empresa.
+   */
+  custoPessoal: {
+    competencia: string;
+    folha: number;
+    diaristas: number;
+    encargos: number;
+    total: number;
+  }[];
   ultimasContas: ContaPagar[];
   ultimoSync: {
     recurso: string;
@@ -522,4 +558,100 @@ export interface PreviewDiaristas {
   distribuicao: OcorrenciaCampo[];
   camposDisponiveis: string[];
   diaristas: Array<PessoaDoFornecedor & { jaEhFuncionario: boolean }>;
+}
+
+// ---------------------------------------------------------------------------
+// Guias de imposto lidas do PDF da contabilidade
+// ---------------------------------------------------------------------------
+export type TipoGuia = 'DARF_INSS' | 'FGTS' | 'DAS_SIMPLES' | 'OUTRA';
+
+/**
+ * O que o item representa no bolso da empresa. Somar tudo junto mente: o INSS
+ * descontado do trabalhador só passa pela conta, e IRPJ/COFINS/ICMS são
+ * imposto sobre faturamento, não sobre gente.
+ */
+export type ClasseTributo = 'FOLHA_PATRONAL' | 'FOLHA_RETIDO' | 'FATURAMENTO';
+
+export const TIPO_GUIA_LABEL: Record<TipoGuia, string> = {
+  DARF_INSS: 'DARF — INSS',
+  FGTS: 'FGTS',
+  DAS_SIMPLES: 'DAS — Simples Nacional',
+  OUTRA: 'Outra guia',
+};
+
+export const CLASSE_LABEL: Record<ClasseTributo, string> = {
+  FOLHA_PATRONAL: 'Custo da empresa com pessoal',
+  FOLHA_RETIDO: 'Retido do trabalhador (repasse)',
+  FATURAMENTO: 'Tributo sobre faturamento',
+};
+
+export const CLASSE_CURTA: Record<ClasseTributo, string> = {
+  FOLHA_PATRONAL: 'Patronal',
+  FOLHA_RETIDO: 'Retido',
+  FATURAMENTO: 'Faturamento',
+};
+
+export interface ItemGuia {
+  id?: string;
+  codigo: string | null;
+  denominacao: string;
+  valor: number;
+  classe: ClasseTributo;
+  /** O leitor não conhecia o código e chutou pela denominação. */
+  classeIncerta?: boolean;
+}
+
+export interface Guia {
+  id: string;
+  tipo: TipoGuia;
+  competencia: string;
+  vencimento: string;
+  valorTotal: number;
+  numeroDocumento: string | null;
+  cnpj: string | null;
+  razaoSocial: string | null;
+  trabalhadores: number | null;
+  arquivoNome: string;
+  itens: ItemGuia[];
+}
+
+/** O que o leitor entendeu do PDF, antes de alguém confirmar. */
+export interface LeituraDaGuia {
+  guia: {
+    tipo: TipoGuia;
+    competencia: string;
+    vencimento: string;
+    valorTotal: number;
+    numeroDocumento: string | null;
+    cnpj: string | null;
+    razaoSocial: string | null;
+    trabalhadores: number | null;
+    itens: ItemGuia[];
+  };
+  arquivoNome: string;
+  textoOriginal: string;
+  divergencia: string | null;
+  jaExiste: { id: string; competencia: string; valorTotal: number } | null;
+}
+
+export interface ResumoImpostos {
+  serie: {
+    competencia: string;
+    folhaPatronal: number;
+    folhaRetido: number;
+    faturamento: number;
+  }[];
+  total: {
+    folhaPatronal: number;
+    folhaRetido: number;
+    faturamento: number;
+  };
+  guias: {
+    id: string;
+    tipo: TipoGuia;
+    competencia: string;
+    vencimento: string;
+    valorTotal: number;
+    trabalhadores: number | null;
+  }[];
 }
