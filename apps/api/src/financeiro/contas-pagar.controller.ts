@@ -46,6 +46,15 @@ export class ContasPagarController {
     return this.service.listar(query);
   }
 
+  /**
+   * O que o app entendeu do rádio "Tipo da chave Pix" no fn_apagar desta base.
+   * Antes de ":id" para não ser lido como um id de conta.
+   */
+  @Get('diagnostico-pix')
+  diagnosticoPix() {
+    return this.service.diagnosticoTipoChavePix();
+  }
+
   @Get(':id')
   buscar(@Param('id') id: string) {
     return this.service.buscar(id);

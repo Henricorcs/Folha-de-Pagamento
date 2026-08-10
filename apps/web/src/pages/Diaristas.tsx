@@ -19,11 +19,13 @@ import type {
   Diarista,
   DiaristaComResumo,
   FormaPagamentoDiaria,
+  SyncDiaristasResult,
 } from '../lib/types';
 
 /** Cadastro em branco: a forma habitual começa no IXC, que é a rastreável. */
 const CADASTRO_VAZIO = {
   nome: '',
+  nomeFantasia: '',
   cpfCnpj: '',
   telefone: '',
   chavePix: '',
@@ -93,10 +95,43 @@ export function Diaristas() {
     setFeedback(texto);
   }
 
+  /**
+   * Importa do IXC quem está marcado como "Estrangeiro" no fornecedor. Quem já
+   * é funcionário fica de fora — a mesma pessoa não pode receber pela folha e
+   * por diária ao mesmo tempo.
+   */
+  const sincronizar = useMutation({
+    mutationFn: async () =>
+      (
+        await api.post<{ resultado: SyncDiaristasResult }>('/sync/diaristas')
+      ).data.resultado,
+    onSuccess: (r) => {
+      const partes = [
+        `${r.totalLidos} estrangeiro(s) no IXC — ${r.totalNovos} novo(s), ${r.totalAtualizados} atualizado(s).`,
+      ];
+      if (r.ignoradosPorSerFuncionario.length > 0) {
+        partes.push(
+          `Fora por já serem funcionários: ${r.ignoradosPorSerFuncionario.join(', ')}.`,
+        );
+      }
+      if (r.totalLidos === 0) {
+        partes.push(
+          r.campoTipoPessoa
+            ? `Nenhum fornecedor com o código configurado no campo "${r.campoTipoPessoa}". Confira em Configurações.`
+            : 'Não achei o campo de tipo de pessoa no fornecedor. Informe o nome dele em Configurações.',
+        );
+      }
+      avisar(partes.join(' '), r.totalLidos === 0);
+      invalidar();
+    },
+    onError: (err) => avisar(mensagemErro(err), true),
+  });
+
   const salvar = useMutation({
     mutationFn: async () => {
       const body = {
         nome: form.nome,
+        nomeFantasia: form.nomeFantasia || undefined,
         cpfCnpj: form.cpfCnpj || undefined,
         telefone: form.telefone || undefined,
         chavePix: form.chavePix || undefined,
@@ -189,6 +224,7 @@ export function Diaristas() {
   function abrirEdicao(d: Diarista) {
     setForm({
       nome: d.nome,
+      nomeFantasia: d.nomeFantasia ?? '',
       cpfCnpj: d.cpfCnpj ?? '',
       telefone: d.telefone ?? '',
       chavePix: d.chavePix ?? '',
@@ -206,6 +242,7 @@ export function Diaristas() {
 
   const itens = lista.data ?? [];
   const pendentes = itens.reduce((s, i) => s + i.pendentesNoCaixa, 0);
+  const abertoDiarista = itens.find((i) => i.diarista.id === aberto)?.diarista;
   const editandoNovo = editando === 'novo';
   const nomeValido = form.nome.trim().length >= 2;
 
@@ -214,11 +251,20 @@ export function Diaristas() {
       <CabecalhoPagina
         secao="Diaristas"
         titulo="Quem trabalha por dia"
-        descricao="Cadastro de quem recebe por diária e o histórico do que já foi pago. O pagamento sai pelo IXC (conta a pagar, como a folha) ou em mãos — e aí o dinheiro é descontado do caixa configurado."
+        descricao="Quem está marcado como “Estrangeiro” no cadastro de fornecedor do IXC é diarista (quem é isento de ICMS é funcionário, e aparece na outra tela). O pagamento sai pelo IXC (conta a pagar, como a folha) ou em mãos — e aí o dinheiro é descontado do caixa configurado."
         acoes={
-          <button onClick={abrirNovo} className="btn btn-primario">
-            Cadastrar diarista
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => sincronizar.mutate()}
+              disabled={sincronizar.isPending}
+              className="btn btn-acao"
+            >
+              {sincronizar.isPending ? 'Importando…' : 'Sincronizar com o IXC'}
+            </button>
+            <button onClick={abrirNovo} className="btn btn-primario">
+              Cadastrar diarista
+            </button>
+          </div>
         }
       />
 
@@ -243,6 +289,16 @@ export function Diaristas() {
                 onChange={(e) => setForm({ ...form, nome: e.target.value })}
                 className="campo"
                 placeholder="Ex.: João da Silva"
+              />
+            </Campo>
+            <Campo label="Como é conhecido">
+              <input
+                value={form.nomeFantasia}
+                onChange={(e) =>
+                  setForm({ ...form, nomeFantasia: e.target.value })
+                }
+                className="campo"
+                placeholder="Ex.: Deda pedreiro"
               />
             </Campo>
             <Campo label="CPF">
@@ -336,7 +392,7 @@ export function Diaristas() {
         <input
           value={busca}
           onChange={(e) => setBusca(e.target.value)}
-          placeholder="Buscar por nome ou CPF"
+          placeholder="Buscar por nome, fantasia ou CPF"
           className="campo max-w-xs"
         />
         <label className="flex items-center gap-2 text-sm text-tinta-600">
@@ -356,6 +412,7 @@ export function Diaristas() {
             <thead>
               <tr>
                 <th className="th">Diarista</th>
+                <th className="th">Chave PIX</th>
                 <th className="th">Costuma receber</th>
                 <th className="th text-right">Diária</th>
                 <th className="th text-right">Já pago</th>
@@ -366,14 +423,14 @@ export function Diaristas() {
             <tbody>
               {lista.isLoading && (
                 <tr>
-                  <td colSpan={6}>
+                  <td colSpan={7}>
                     <Carregando />
                   </td>
                 </tr>
               )}
               {!lista.isLoading && itens.length === 0 && (
                 <tr>
-                  <td colSpan={6}>
+                  <td colSpan={7}>
                     <Vazio titulo="Nenhum diarista cadastrado">
                       Cadastre quem trabalha por dia para registrar as diárias
                       pagas — pelo IXC ou em mãos.
@@ -404,16 +461,37 @@ export function Diaristas() {
                           desativado
                         </Selo>
                       )}
+                      {d.importadoDoIxc && (
+                        <Selo
+                          tom="info"
+                          pequeno
+                          titulo="Veio do cadastro de fornecedor do IXC (tipo de pessoa Estrangeiro)"
+                        >
+                          do IXC
+                        </Selo>
+                      )}
                       {resumo.pendentesNoCaixa > 0 && (
                         <Selo tom="atencao" pequeno>
                           {resumo.pendentesNoCaixa} fora do caixa
                         </Selo>
                       )}
                     </button>
+                    {d.nomeFantasia && (
+                      <div className="mt-0.5 text-xs text-tinta-500">
+                        {d.nomeFantasia}
+                      </div>
+                    )}
                     {d.cpfCnpj && (
                       <div className="mt-0.5 num text-xs text-tinta-400">
                         {d.cpfCnpj}
                       </div>
+                    )}
+                  </td>
+                  <td className="td text-tinta-500">
+                    {d.chavePix || (
+                      <Selo tom="atencao" pequeno>
+                        sem PIX
+                      </Selo>
                     )}
                   </td>
                   <td className="td text-tinta-500">
@@ -476,6 +554,8 @@ export function Diaristas() {
           </table>
         </div>
       </Bloco>
+
+      {abertoDiarista && <DadosBancarios diarista={abertoDiarista} />}
 
       {aberto && (
         <Bloco
@@ -601,6 +681,59 @@ export function Diaristas() {
         />
       )}
     </Pagina>
+  );
+}
+
+/**
+ * Como essa pessoa recebe. Vem da aba "Dados bancários" do fornecedor no IXC,
+ * a mesma fonte usada para os funcionários. É a chave PIX que de fato paga.
+ */
+function DadosBancarios({ diarista }: { diarista: Diarista }) {
+  const nada =
+    !diarista.banco &&
+    !diarista.agencia &&
+    !diarista.conta &&
+    !diarista.chavePix;
+
+  return (
+    <Bloco titulo="Como recebe" className="surgir surgir-3 mt-6">
+      {nada ? (
+        <p className="text-sm text-tinta-500">
+          Sem dados de pagamento. Edite o cadastro para informar a chave PIX, ou
+          preencha a aba “Dados bancários” do fornecedor no IXC e sincronize.
+        </p>
+      ) : (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+          <CampoLeitura rotulo="Banco" valor={diarista.banco} />
+          <CampoLeitura rotulo="Agência" valor={diarista.agencia} mono />
+          <CampoLeitura rotulo="Conta" valor={diarista.conta} mono />
+          <CampoLeitura rotulo="Chave PIX" valor={diarista.chavePix} mono />
+          <CampoLeitura
+            rotulo="Tipo da chave"
+            valor={diarista.tipoChavePix ?? 'pelo formato da chave'}
+          />
+        </div>
+      )}
+    </Bloco>
+  );
+}
+
+function CampoLeitura({
+  rotulo,
+  valor,
+  mono,
+}: {
+  rotulo: string;
+  valor: string | null;
+  mono?: boolean;
+}) {
+  return (
+    <div>
+      <div className="rotulo">{rotulo}</div>
+      <div className={`text-sm text-tinta-800 ${mono ? 'num' : ''}`}>
+        {valor || '—'}
+      </div>
+    </div>
   );
 }
 

@@ -16,8 +16,14 @@ import { TIPOS_CHAVE_PIX } from '../../ixc/ixc.financeiro';
 export class CriarDiaristaDto {
   @IsString() @MinLength(2) nome!: string;
 
+  /** Como a pessoa é conhecida no dia a dia; também é buscável. */
+  @IsOptional() @IsString() nomeFantasia?: string;
+
   @IsOptional() @IsString() cpfCnpj?: string;
   @IsOptional() @IsString() telefone?: string;
+  @IsOptional() @IsString() banco?: string;
+  @IsOptional() @IsString() agencia?: string;
+  @IsOptional() @IsString() conta?: string;
   @IsOptional() @IsString() chavePix?: string;
 
   /** Tipo da chave PIX; vazio = deduzir pelo formato. */

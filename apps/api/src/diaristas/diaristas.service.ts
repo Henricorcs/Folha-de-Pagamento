@@ -52,8 +52,11 @@ export class DiaristasService {
     const where: Prisma.DiaristaWhereInput = {};
     if (!todos) where.ativo = true;
     if (busca) {
+      // A fantasia entra na busca porque é por ela que a pessoa é conhecida:
+      // procura-se "Deda pedreiro", não "Antonio Clebes Alves da Silva".
       where.OR = [
         { nome: { contains: busca, mode: 'insensitive' } },
+        { nomeFantasia: { contains: busca, mode: 'insensitive' } },
         { cpfCnpj: { contains: busca, mode: 'insensitive' } },
       ];
     }
@@ -128,8 +131,14 @@ export class DiaristasService {
   private dadosDoCadastro(dto: CriarDiaristaDto) {
     return {
       ...(dto.nome === undefined ? {} : { nome: dto.nome.trim() }),
+      ...(dto.nomeFantasia === undefined
+        ? {}
+        : { nomeFantasia: dto.nomeFantasia.trim() || null }),
       ...(dto.cpfCnpj === undefined ? {} : { cpfCnpj: dto.cpfCnpj || null }),
       ...(dto.telefone === undefined ? {} : { telefone: dto.telefone || null }),
+      ...(dto.banco === undefined ? {} : { banco: dto.banco || null }),
+      ...(dto.agencia === undefined ? {} : { agencia: dto.agencia || null }),
+      ...(dto.conta === undefined ? {} : { conta: dto.conta || null }),
       ...(dto.chavePix === undefined ? {} : { chavePix: dto.chavePix || null }),
       ...(dto.tipoChavePix === undefined
         ? {}

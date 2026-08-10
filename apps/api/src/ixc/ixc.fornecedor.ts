@@ -1,15 +1,18 @@
 /**
- * Filtro que identifica funcionários dentro do cadastro de `fornecedor` do IXC.
+ * Filtros que identificam pessoas dentro do cadastro de `fornecedor` do IXC.
  *
- * Regra do usuário: **fornecedor com "Contribuinte ICMS" = Isento é
- * funcionário**. O cadastro de fornecedor é onde ficam, de fato, os dados
- * bancários e a chave PIX usados no pagamento — por isso ele é a fonte tanto da
- * lista de funcionários ativos quanto dos dados de pagamento.
+ * Duas regras do usuário, com a mesma mecânica:
+ * - **"Contribuinte ICMS" = Isento** → é **funcionário** (entra na folha);
+ * - **"Tipo de pessoa" = Estrangeiro** → é **diarista** (recebe por diária).
  *
- * O nome exato da coluna de ICMS e o código que representa "Isento" variam
- * entre bases do IXC, então aqui nada é chutado às cegas: o campo é detectado
- * pelo nome (qualquer coluna com "icms") e os valores aceitos são
- * parametrizáveis. `distribuicaoIcms` existe para diagnosticar a base real.
+ * O cadastro de fornecedor é onde ficam, de fato, os dados bancários e a chave
+ * PIX usados no pagamento — por isso ele é a fonte tanto das listas quanto dos
+ * dados de pagamento.
+ *
+ * Em nenhum dos dois casos o nome da coluna nem o código do valor são chutados
+ * às cegas: a coluna é detectada pelo nome, os valores aceitos são
+ * parametrizáveis, e `distribuicaoDoCampo` existe para diagnosticar a base
+ * real quando o filtro vier vazio.
  */
 import { Prisma } from '@prisma/client';
 import { normalizarTipoChavePix, type TipoChavePix } from './ixc.financeiro';
@@ -17,13 +20,51 @@ import { extrairDadosBancarios } from './ixc.mappers';
 import { parseIxcId } from './ixc.parse';
 import type { IxcFornecedor } from './ixc.types';
 
-/** Valores textuais que indicam "Isento" sem ambiguidade. */
-export const VALORES_ICMS_ISENTO_PADRAO = ['I', 'ISENTO'];
+/**
+ * Como reconhecer uma dessas regras numa base qualquer do IXC. Existe porque os
+ * nomes de coluna e os códigos mudam de instalação para instalação.
+ */
+export interface RegraFornecedor {
+  /** Colunas candidatas quando a configuração não diz qual usar. */
+  busca: RegExp;
+  /** Desempate entre as candidatas, na ordem. */
+  preferencias: RegExp[];
+  /** Texto inequívoco: casa mesmo fora dos valores configurados. */
+  marca: RegExp;
+  /** Valores aceitos quando a configuração vem vazia. */
+  padrao: string[];
+}
 
-/** Dados de um funcionário extraídos do cadastro de fornecedor. */
-export interface FuncionarioDoFornecedor {
+/** Fornecedor isento de ICMS é funcionário. */
+export const REGRA_ICMS_ISENTO: RegraFornecedor = {
+  busca: /icms/i,
+  preferencias: [/contribu/i, /^icms$/i],
+  marca: /ISENT/,
+  padrao: ['I', 'ISENTO'],
+};
+
+/**
+ * Fornecedor com tipo de pessoa "Estrangeiro" é diarista.
+ *
+ * A busca inclui `estrang` de propósito: se esta base guardar a marcação numa
+ * coluna própria (e não como terceiro valor de `tipo_pessoa`), é assim que ela
+ * é encontrada. O código real de "Estrangeiro" não está documentado — o padrão
+ * abaixo é a aposta, e o preview mostra a distribuição verdadeira da base.
+ */
+export const REGRA_ESTRANGEIRO: RegraFornecedor = {
+  busca: /estrang|pessoa/i,
+  preferencias: [/^tipo_pessoa$/i, /estrang/i],
+  marca: /ESTRANG/,
+  padrao: ['E', 'ESTRANGEIRO'],
+};
+
+/** Dados de uma pessoa extraídos do cadastro de fornecedor. */
+export interface PessoaDoFornecedor {
   idFornecedor: number;
+  /** Razão social — é o nome que vai para a conta a pagar no IXC. */
   nome: string;
+  /** Como a pessoa é conhecida no dia a dia ("Deda pedreiro"). */
+  nomeFantasia: string | null;
   cpfCnpj: string | null;
   email: string | null;
   telefone: string | null;
@@ -34,32 +75,32 @@ export interface FuncionarioDoFornecedor {
   chavePix: string | null;
   /** Tipo da chave acima, para a conta a pagar marcar o mesmo do cadastro. */
   tipoChavePix: TipoChavePix | null;
-  /** Valor cru do campo de ICMS que fez o registro entrar no filtro. */
-  icms: string;
+  /** Valor cru do campo que fez o registro entrar no filtro. */
+  valorFiltro: string;
 }
 
 /**
- * Descobre qual coluna do fornecedor guarda o "Contribuinte ICMS".
- * Prefere a que também menciona "contribuinte" (ex.: `contribuinte_icms`),
- * depois um campo chamado exatamente `icms`, e por fim qualquer uma com "icms".
+ * Descobre qual coluna do fornecedor guarda o valor da regra. Entre as
+ * candidatas, as preferências desempatam na ordem em que vêm.
  */
-export function detectarCampoIcms(
+export function detectarCampo(
   registros: Array<Record<string, unknown>>,
+  regra: RegraFornecedor,
 ): string | null {
   for (const raw of registros) {
-    const comIcms = Object.keys(raw).filter((k) => /icms/i.test(k));
-    if (comIcms.length === 0) continue;
-    return (
-      comIcms.find((k) => /contribu/i.test(k)) ??
-      comIcms.find((k) => /^icms$/i.test(k)) ??
-      comIcms[0]
-    );
+    const candidatos = Object.keys(raw).filter((k) => regra.busca.test(k));
+    if (candidatos.length === 0) continue;
+    for (const preferencia of regra.preferencias) {
+      const escolhido = candidatos.find((k) => preferencia.test(k));
+      if (escolhido) return escolhido;
+    }
+    return candidatos[0];
   }
   return null;
 }
 
-/** Valor normalizado (maiúsculas, sem espaços) do campo de ICMS. */
-export function lerIcms(
+/** Valor normalizado (maiúsculas, sem espaços) de um campo do fornecedor. */
+export function lerCampo(
   raw: Record<string, unknown>,
   campo: string | null,
 ): string {
@@ -69,23 +110,30 @@ export function lerIcms(
 
 /**
  * Converte a lista configurada ("I, ISENTO, 2") em valores comparáveis.
- * Vazio cai no padrão textual.
+ * Vazio cai no padrão da regra.
  */
-export function parseValoresIsento(config?: string | null): string[] {
+export function parseValores(
+  config: string | null | undefined,
+  regra: RegraFornecedor,
+): string[] {
   const itens = String(config ?? '')
     .split(/[,;\s]+/)
     .map((v) => v.trim().toUpperCase())
     .filter(Boolean);
-  return itens.length > 0 ? itens : [...VALORES_ICMS_ISENTO_PADRAO];
+  return itens.length > 0 ? itens : [...regra.padrao];
 }
 
-/** true quando o valor do campo de ICMS significa "Isento". */
-export function ehIcmsIsento(valor: string, valoresIsento: string[]): boolean {
+/** true quando o valor lido satisfaz a regra. */
+export function casaValor(
+  valor: string,
+  valores: string[],
+  regra: RegraFornecedor,
+): boolean {
   const v = valor.trim().toUpperCase();
   if (!v) return false;
-  // Texto é inequívoco ("ISENTO", "Isento de ICMS"): vale sempre.
-  if (v.includes('ISENT')) return true;
-  return valoresIsento.includes(v);
+  // Texto por extenso é inequívoco ("ISENTO", "ESTRANGEIRO"): vale sempre.
+  if (regra.marca.test(v)) return true;
+  return valores.includes(v);
 }
 
 /** Só os dígitos do CPF/CNPJ, para comparar "082.935.753-01" com "08293575301". */
@@ -103,11 +151,11 @@ export function nomeFornecedor(raw: IxcFornecedor): string {
   );
 }
 
-/** Converte um fornecedor cru em dados de funcionário (null se id inválido). */
-export function mapFornecedorParaFuncionario(
+/** Converte um fornecedor cru em dados de pessoa (null se id inválido). */
+export function mapFornecedorParaPessoa(
   raw: IxcFornecedor,
-  icms = '',
-): FuncionarioDoFornecedor | null {
+  valorFiltro = '',
+): PessoaDoFornecedor | null {
   const idFornecedor = parseIxcId(raw.id);
   if (idFornecedor === null) return null;
 
@@ -115,6 +163,7 @@ export function mapFornecedorParaFuncionario(
   return {
     idFornecedor,
     nome: nomeFornecedor(raw) || `Fornecedor ${idFornecedor}`,
+    nomeFantasia: textoOuNull(raw.fantasia),
     cpfCnpj: textoOuNull(raw.cnpj_cpf) ?? textoOuNull(raw.cpf_cnpj),
     email: textoOuNull(raw.email),
     telefone:
@@ -126,55 +175,60 @@ export function mapFornecedorParaFuncionario(
     // Chave e tipo saem juntos, da mesma coluna. O grid de dados bancários
     // sobrescreve isso depois (é lá que a chave de verdade mora).
     ...escolherPix(raw),
-    icms,
+    valorFiltro,
   };
 }
 
 /**
- * Aplica o filtro sobre os fornecedores lidos do IXC e devolve os que são
- * funcionários, junto do campo de ICMS efetivamente usado.
+ * Aplica uma regra sobre os fornecedores lidos do IXC e devolve quem casou,
+ * junto do campo efetivamente usado.
  */
-export function filtrarFuncionariosIsentos(
+export function filtrarFornecedores(
   registros: IxcFornecedor[],
-  opts: { campoIcms?: string | null; valoresIsento?: string[] } = {},
-): { campoIcms: string | null; funcionarios: FuncionarioDoFornecedor[] } {
-  const campoIcms = opts.campoIcms?.trim() || detectarCampoIcms(registros);
-  if (!campoIcms) return { campoIcms: null, funcionarios: [] };
+  regra: RegraFornecedor,
+  opts: { campo?: string | null; valores?: string[] } = {},
+): { campo: string | null; pessoas: PessoaDoFornecedor[] } {
+  const campo = opts.campo?.trim() || detectarCampo(registros, regra);
+  if (!campo) return { campo: null, pessoas: [] };
 
-  const valores = opts.valoresIsento?.length
-    ? opts.valoresIsento.map((v) => v.trim().toUpperCase())
-    : [...VALORES_ICMS_ISENTO_PADRAO];
+  const valores = opts.valores?.length
+    ? opts.valores.map((v) => v.trim().toUpperCase())
+    : [...regra.padrao];
 
-  const funcionarios: FuncionarioDoFornecedor[] = [];
+  const pessoas: PessoaDoFornecedor[] = [];
   for (const raw of registros) {
-    const icms = lerIcms(raw, campoIcms);
-    if (!ehIcmsIsento(icms, valores)) continue;
-    const mapeado = mapFornecedorParaFuncionario(raw, icms);
-    if (mapeado) funcionarios.push(mapeado);
+    const valor = lerCampo(raw, campo);
+    if (!casaValor(valor, valores, regra)) continue;
+    const mapeado = mapFornecedorParaPessoa(raw, valor);
+    if (mapeado) pessoas.push(mapeado);
   }
-  return { campoIcms, funcionarios };
+  return { campo, pessoas };
 }
 
-/** Um valor distinto do campo de ICMS e quantos fornecedores o usam. */
-export interface OcorrenciaIcms {
+/** Um valor distinto do campo filtrado e quantos fornecedores o usam. */
+export interface OcorrenciaCampo {
   valor: string;
   quantidade: number;
   exemplos: string[];
 }
 
 /**
- * Distribuição dos valores do campo de ICMS na base — é o que permite
- * confirmar qual código significa "Isento" sem adivinhação.
+ * Distribuição dos valores de um campo na base — é o que permite confirmar
+ * qual código significa "Isento" (ou "Estrangeiro") sem adivinhação.
  */
-export function distribuicaoIcms(
+export function distribuicaoDoCampo(
   registros: IxcFornecedor[],
-  campoIcms: string | null,
+  campo: string | null,
   maxExemplos = 3,
-): OcorrenciaIcms[] {
-  const mapa = new Map<string, OcorrenciaIcms>();
+): OcorrenciaCampo[] {
+  const mapa = new Map<string, OcorrenciaCampo>();
   for (const raw of registros) {
-    const valor = lerIcms(raw, campoIcms) || '(vazio)';
-    const atual = mapa.get(valor) ?? { valor, quantidade: 0, exemplos: [] };
+    const valor = lerCampo(raw, campo) || '(vazio)';
+    const atual: OcorrenciaCampo = mapa.get(valor) ?? {
+      valor,
+      quantidade: 0,
+      exemplos: [],
+    };
     atual.quantidade += 1;
     if (atual.exemplos.length < maxExemplos) {
       const nome = nomeFornecedor(raw);
@@ -403,16 +457,32 @@ function pixPorNomeDeCampo(raw: Record<string, unknown>): {
   return { chavePix: null, tipoChavePix: null };
 }
 
-/** Projeção local usada para decidir o que atualizar. */
-export interface FuncionarioLocal {
+/** O mínimo para casar um cadastro local com um fornecedor do IXC. */
+export interface VinculoLocal {
   id: string;
+  cpfCnpj: string | null;
+  idFornecedorIxc: number | null;
+}
+
+/** Projeção local usada para decidir o que atualizar. */
+export interface FuncionarioLocal extends VinculoLocal {
   ixcId: number | null;
   nome: string;
-  cpfCnpj: string | null;
   email: string | null;
   telefone: string | null;
   cidadeIxc: number | null;
-  idFornecedorIxc: number | null;
+}
+
+/** Projeção local do diarista usada para decidir o que atualizar. */
+export interface DiaristaLocal extends VinculoLocal {
+  nome: string;
+  nomeFantasia: string | null;
+  telefone: string | null;
+  banco: string | null;
+  agencia: string | null;
+  conta: string | null;
+  chavePix: string | null;
+  cidadeIxc: number | null;
 }
 
 /**
@@ -426,7 +496,7 @@ export interface FuncionarioLocal {
  */
 export function montarUpdateDoFornecedor(
   local: FuncionarioLocal,
-  dados: FuncionarioDoFornecedor,
+  dados: PessoaDoFornecedor,
 ): Prisma.FuncionarioUpdateInput {
   const data: Prisma.FuncionarioUpdateInput = {};
 
@@ -452,6 +522,50 @@ export function montarUpdateDoFornecedor(
   }
   if (dados.telefone && (doFornecedor || vazio(local.telefone))) {
     data.telefone = dados.telefone;
+  }
+  if (dados.cidadeIxc && local.cidadeIxc === null) {
+    data.cidadeIxc = dados.cidadeIxc;
+  }
+
+  return data;
+}
+
+/**
+ * Monta o update de um diarista já cadastrado a partir do fornecedor.
+ *
+ * Ao contrário do funcionário, aqui **o que está escrito localmente vence**:
+ * a importação só completa campo vazio. Quem corrige a chave PIX na tela
+ * (porque o IXC está desatualizado) não pode ver a correção desfeita na
+ * sincronização seguinte.
+ *
+ * O vínculo com o fornecedor só é gravado quando ainda não existe: sobrescrevê-lo
+ * por casamento de CPF faria o vínculo oscilar a cada rodada quando dois
+ * fornecedores compartilham o mesmo documento — e é ele que decide contra qual
+ * cadastro do IXC as próximas contas a pagar são lançadas.
+ */
+export function montarUpdateDiaristaDoFornecedor(
+  local: DiaristaLocal,
+  dados: PessoaDoFornecedor,
+): Prisma.DiaristaUpdateInput {
+  const data: Prisma.DiaristaUpdateInput = {};
+
+  if (local.idFornecedorIxc === null) {
+    data.idFornecedorIxc = dados.idFornecedor;
+  }
+
+  if (dados.nome && vazio(local.nome)) data.nome = dados.nome;
+  if (dados.nomeFantasia && vazio(local.nomeFantasia)) {
+    data.nomeFantasia = dados.nomeFantasia;
+  }
+  if (dados.cpfCnpj && vazio(local.cpfCnpj)) data.cpfCnpj = dados.cpfCnpj;
+  if (dados.telefone && vazio(local.telefone)) data.telefone = dados.telefone;
+  if (dados.banco && vazio(local.banco)) data.banco = dados.banco;
+  if (dados.agencia && vazio(local.agencia)) data.agencia = dados.agencia;
+  if (dados.conta && vazio(local.conta)) data.conta = dados.conta;
+  // Chave e tipo andam juntos: são a mesma decisão de pagamento.
+  if (dados.chavePix && vazio(local.chavePix)) {
+    data.chavePix = dados.chavePix;
+    data.tipoChavePix = dados.tipoChavePix;
   }
   if (dados.cidadeIxc && local.cidadeIxc === null) {
     data.cidadeIxc = dados.cidadeIxc;

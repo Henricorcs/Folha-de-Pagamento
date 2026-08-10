@@ -12,11 +12,14 @@ import {
 } from '@prisma/client';
 import { IxcClient } from '../ixc/ixc.client';
 import {
+  aprenderTipoChavePix,
   buildAuditoriaPayload,
   buildContaPagarPayload,
   lerSituacaoContaPagar,
   lerStatusAuditoria,
   normalizarTipoChavePix,
+  parseCodigosTipoChavePix,
+  type MapaTipoChavePix,
   type StatusAuditoriaIxc,
   type TipoChavePix,
 } from '../ixc/ixc.financeiro';
@@ -117,6 +120,11 @@ export class ContasPagarService {
   private readonly logger = new Logger(ContasPagarService.name);
   /** Até quando parar de consultar a tabela de auditoria (ver `auditoriaNoIxc`). */
   private auditoriaIndisponivelAte = 0;
+  /**
+   * Formato do "Tipo da chave Pix" nesta base do IXC.
+   * undefined = ainda não procurou; null = procurou e não achou exemplo.
+   */
+  private mapaPix: MapaTipoChavePix | null | undefined;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -399,6 +407,7 @@ export class ContasPagarService {
         tipoPagamento,
         chavePix: ehPix ? pix.chave : null,
         tipoChavePix: ehPix ? pix.tipo : null,
+        mapaTipoChave: ehPix ? await this.mapaTipoChavePix(cfg) : null,
       });
 
       const { id: idFnApagar } = await this.ixc.create('fn_apagar', payload);
@@ -810,6 +819,128 @@ export class ContasPagarService {
       return this.fornecedores.garantirParaDiarista(conta.diaristaId);
     }
     return this.fornecedores.garantirParaAvulso(conta.beneficiarioAvulsoId!);
+  }
+
+  /**
+   * Como esta base do IXC guarda o rádio "Tipo da chave Pix" no fn_apagar.
+   *
+   * Sem isso a conta nasce com a chave preenchida e o tipo em branco, e o
+   * pagamento não sai. O nome da coluna e o código de cada tipo variam por
+   * instalação, então são aprendidos das contas que já existem no IXC — feitas
+   * na tela, onde chave e tipo estão coerentes. Resolvido uma vez por processo.
+   */
+  private async mapaTipoChavePix(cfg: {
+    pixCampoTipoChave: string;
+    pixCodigosTipoChave: string;
+  }): Promise<MapaTipoChavePix | null> {
+    const campoConfig = cfg.pixCampoTipoChave.trim();
+    const codigosConfig = parseCodigosTipoChavePix(cfg.pixCodigosTipoChave);
+
+    // O que foi informado à mão manda: é a saída quando não há conta antiga
+    // com PIX no IXC de onde aprender.
+    if (campoConfig) {
+      return { campo: campoConfig, codigos: codigosConfig };
+    }
+    if (this.mapaPix !== undefined) return this.mapaPix;
+
+    this.mapaPix = await this.aprenderTipoChavePixDoIxc();
+    if (this.mapaPix) {
+      const { campo, codigos } = this.mapaPix;
+      this.logger.log(
+        `Tipo da chave PIX no fn_apagar: coluna "${campo}" — ${JSON.stringify(codigos)}`,
+      );
+    } else {
+      this.logger.warn(
+        'Não achei conta a pagar antiga com PIX no IXC para aprender o "Tipo ' +
+          'da chave Pix". Vou mandar o rótulo em `tipo_chave_pix`; se o rádio ' +
+          'ficar em branco, marque o tipo à mão numa conta no IXC e envie outra, ' +
+          'ou informe a coluna em Configurações.',
+      );
+    }
+    // Sobrepõe com o que foi configurado à mão, quando houver.
+    return this.mapaPix && Object.keys(codigosConfig).length > 0
+      ? {
+          campo: this.mapaPix.campo,
+          codigos: { ...this.mapaPix.codigos, ...codigosConfig },
+        }
+      : this.mapaPix;
+  }
+
+  /** Lê contas a pagar recentes do IXC e deduz o formato do tipo da chave. */
+  private async aprenderTipoChavePixDoIxc(): Promise<MapaTipoChavePix | null> {
+    try {
+      const registros = await this.contasDeReferenciaNoIxc();
+      return aprenderTipoChavePix(registros);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Falha ao aprender o tipo da chave PIX: ${message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Contas a pagar do IXC que servem de modelo: as feitas **na tela do IXC**.
+   *
+   * As criadas por este app ficam de fora de propósito — se o formato que ele
+   * manda estiver errado, aprender delas seria só confirmar o próprio erro.
+   */
+  private async contasDeReferenciaNoIxc(): Promise<
+    Array<Record<string, unknown>>
+  > {
+    const res = await this.ixc.list<Record<string, unknown>>('fn_apagar', {
+      qtype: 'fn_apagar.id',
+      query: '0',
+      oper: '>',
+      rp: 200,
+      sortname: 'fn_apagar.id',
+      sortorder: 'desc',
+    });
+
+    const nossas = await this.prisma.contaPagar.findMany({
+      where: { idFnApagarIxc: { not: null } },
+      select: { idFnApagarIxc: true },
+    });
+    const ignorar = new Set(nossas.map((c) => String(c.idFnApagarIxc)));
+
+    return res.registros.filter((r) => !ignorar.has(String(r.id ?? '')));
+  }
+
+  /**
+   * O que o app entendeu do "Tipo da chave Pix" nesta base, com as colunas
+   * cruas encontradas. É por aqui que se descobre o nome certo quando o rádio
+   * continua em branco.
+   */
+  async diagnosticoTipoChavePix(): Promise<{
+    mapa: MapaTipoChavePix | null;
+    campoConfigurado: string;
+    codigosConfigurados: Partial<Record<TipoChavePix, string>>;
+    /** Colunas do fn_apagar que mencionam PIX, com exemplos de valor. */
+    colunasPix: Array<{ coluna: string; valores: string[] }>;
+  }> {
+    const cfg = await this.config.obter();
+    const registros = await this.contasDeReferenciaNoIxc();
+
+    const porColuna = new Map<string, Set<string>>();
+    for (const raw of registros) {
+      for (const [coluna, valor] of Object.entries(raw)) {
+        if (!/pix/i.test(coluna)) continue;
+        const s = String(valor ?? '').trim();
+        if (!s) continue;
+        const vistos = porColuna.get(coluna) ?? new Set<string>();
+        porColuna.set(coluna, vistos);
+        if (vistos.size < 10) vistos.add(s);
+      }
+    }
+
+    return {
+      mapa: aprenderTipoChavePix(registros),
+      campoConfigurado: cfg.pixCampoTipoChave,
+      codigosConfigurados: parseCodigosTipoChavePix(cfg.pixCodigosTipoChave),
+      colunasPix: [...porColuna].map(([coluna, valores]) => ({
+        coluna,
+        valores: [...valores],
+      })),
+    };
   }
 
   /**

@@ -4,14 +4,19 @@ import { ConfigFinanceiraService } from '../financeiro/config-financeira.service
 import { DadosBancariosService } from '../ixc/dados-bancarios.service';
 import { IxcClient } from '../ixc/ixc.client';
 import {
-  distribuicaoIcms,
-  filtrarFuncionariosIsentos,
+  distribuicaoDoCampo,
+  filtrarFornecedores,
+  montarUpdateDiaristaDoFornecedor,
   montarUpdateDoFornecedor,
-  parseValoresIsento,
+  parseValores,
+  REGRA_ESTRANGEIRO,
+  REGRA_ICMS_ISENTO,
   somenteDigitos,
-  type FuncionarioDoFornecedor,
+  type DiaristaLocal,
   type FuncionarioLocal,
-  type OcorrenciaIcms,
+  type OcorrenciaCampo,
+  type PessoaDoFornecedor,
+  type VinculoLocal,
 } from '../ixc/ixc.fornecedor';
 import { mapAdiantamento, mapFuncionario } from '../ixc/ixc.mappers';
 import type {
@@ -38,8 +43,35 @@ export interface PreviewFornecedores {
   tabelaBanco: string | null;
   totalFornecedoresAtivos: number;
   /** Todos os valores do campo de ICMS na base, para conferência. */
-  distribuicao: OcorrenciaIcms[];
-  funcionarios: Array<FuncionarioDoFornecedor & { jaCadastrado: boolean }>;
+  distribuicao: OcorrenciaCampo[];
+  funcionarios: Array<PessoaDoFornecedor & { jaCadastrado: boolean }>;
+}
+
+/** Prévia do filtro de diaristas no cadastro de fornecedor. */
+export interface PreviewDiaristas {
+  /** Coluna de "Tipo de pessoa" usada (null = não encontrada). */
+  campoTipoPessoa: string | null;
+  /** Valores considerados "Estrangeiro" (configuráveis). */
+  valoresEstrangeiro: string[];
+  tabelaBanco: string | null;
+  totalFornecedoresAtivos: number;
+  /** Todos os valores do campo na base — é o que confirma o código correto. */
+  distribuicao: OcorrenciaCampo[];
+  /**
+   * Colunas do primeiro fornecedor lido. Serve para achar o nome certo quando
+   * a detecção automática erra e o filtro vem vazio.
+   */
+  camposDisponiveis: string[];
+  diaristas: Array<
+    PessoaDoFornecedor & { jaCadastrado: boolean; jaEhFuncionario: boolean }
+  >;
+}
+
+/** Resultado da importação de diaristas, com quem ficou de fora e por quê. */
+export interface SyncDiaristasResult extends SyncResult {
+  campoTipoPessoa: string | null;
+  /** Quem não entrou porque já está cadastrado como funcionário. */
+  ignoradosPorSerFuncionario: string[];
 }
 
 /**
@@ -342,7 +374,7 @@ export class SyncService {
       valoresIsento,
       tabelaBanco: tabelaBanco ?? null,
       totalFornecedoresAtivos: registros.length,
-      distribuicao: distribuicaoIcms(registros, campoIcms),
+      distribuicao: distribuicaoDoCampo(registros, campoIcms),
       funcionarios: funcionarios.map((f) => ({
         ...f,
         jaCadastrado:
@@ -352,41 +384,252 @@ export class SyncService {
     };
   }
 
+  /**
+   * Importa os diaristas a partir do cadastro de `fornecedor` do IXC:
+   * fornecedor **ativo** com "Tipo de pessoa" = **Estrangeiro** é diarista.
+   * Traz junto os dados de pagamento (banco/agência/conta/PIX) da aba "Dados
+   * bancários" e já vincula o `id_fornecedor` usado nas contas a pagar.
+   *
+   * Três diferenças deliberadas em relação ao sync de funcionários:
+   *
+   * - **Funcionário vence**: quem já está cadastrado como funcionário não entra
+   *   como diarista. As duas regras leem colunas diferentes do mesmo cadastro,
+   *   então a mesma pessoa pode casar nas duas — e aí receberia pela folha e por
+   *   diária, contra o mesmo fornecedor, sem ninguém perceber.
+   * - **Nunca desativa nem apaga**: diarista também nasce à mão, então sair do
+   *   filtro não pode sumir com o cadastro (o de funcionário desmarca `isentoIcms`).
+   * - **O que está escrito aqui vence**: o update só completa campo vazio.
+   */
+  async syncDiaristasDoFornecedor(): Promise<SyncDiaristasResult> {
+    const log = await this.prisma.syncLog.create({
+      data: { recurso: 'diaristas', status: SyncStatus.EM_ANDAMENTO },
+    });
+
+    try {
+      const { campoTipoPessoa, diaristas, totalAtivos } =
+        await this.lerDiaristasDoFornecedor();
+
+      if (!campoTipoPessoa) {
+        this.logger.warn(
+          'Campo "Tipo de pessoa" não encontrado no fornecedor — nenhum ' +
+            'diarista importado. Veja a prévia (GET /sync/diaristas/preview).',
+        );
+      } else if (diaristas.length === 0) {
+        this.logger.warn(
+          `Nenhum fornecedor ativo é "Estrangeiro" em "${campoTipoPessoa}" ` +
+            `(${totalAtivos} lidos). Confira os valores na prévia e ajuste em Configurações.`,
+        );
+      }
+
+      const funcionarios = await this.indiceFuncionarios();
+      const indice = await this.indiceDiaristas();
+      /** Cadastros locais já usados nesta rodada, para dois fornecedores
+       * distintos não colapsarem no mesmo diarista. */
+      const consumidos = new Set<string>();
+      const ignoradosPorSerFuncionario: string[] = [];
+      let novos = 0;
+      let atualizados = 0;
+
+      for (const dados of diaristas) {
+        const doc = somenteDigitos(dados.cpfCnpj);
+
+        if (
+          funcionarios.porFornecedor.has(dados.idFornecedor) ||
+          (doc && funcionarios.porDoc.has(doc))
+        ) {
+          ignoradosPorSerFuncionario.push(dados.nome);
+          continue;
+        }
+
+        const local =
+          indice.porFornecedor.get(dados.idFornecedor) ??
+          (doc ? indice.porDoc.get(doc) : undefined);
+
+        if (local && !consumidos.has(local.id)) {
+          consumidos.add(local.id);
+          await this.prisma.diarista.update({
+            where: { id: local.id },
+            data: montarUpdateDiaristaDoFornecedor(local, dados),
+          });
+          atualizados++;
+          continue;
+        }
+
+        if (local) {
+          this.logger.warn(
+            `Fornecedor #${dados.idFornecedor} (${dados.nome}) casa com um ` +
+              'diarista já usado nesta rodada — provável CPF duplicado no IXC. Pulado.',
+          );
+          continue;
+        }
+
+        const criado = await this.prisma.diarista.create({
+          data: {
+            nome: dados.nome,
+            nomeFantasia: dados.nomeFantasia,
+            cpfCnpj: dados.cpfCnpj,
+            telefone: dados.telefone,
+            banco: dados.banco,
+            agencia: dados.agencia,
+            conta: dados.conta,
+            chavePix: dados.chavePix,
+            tipoChavePix: dados.tipoChavePix,
+            cidadeIxc: dados.cidadeIxc,
+            idFornecedorIxc: dados.idFornecedor,
+            importadoDoIxc: true,
+          },
+        });
+        this.indexar(indice, criado);
+        consumidos.add(criado.id);
+        novos++;
+      }
+
+      await this.prisma.syncLog.update({
+        where: { id: log.id },
+        data: {
+          status: SyncStatus.SUCESSO,
+          totalLidos: diaristas.length,
+          totalNovos: novos,
+          totalAtual: atualizados,
+          concluidoEm: new Date(),
+        },
+      });
+
+      this.logger.log(
+        `Diaristas do fornecedor (Estrangeiro): ${diaristas.length} de ` +
+          `${totalAtivos} fornecedores ativos (novos ${novos}, atualizados ${atualizados}` +
+          `, já funcionários ${ignoradosPorSerFuncionario.length})`,
+      );
+      return {
+        recurso: 'diaristas',
+        totalLidos: diaristas.length,
+        totalNovos: novos,
+        totalAtualizados: atualizados,
+        campoTipoPessoa,
+        ignoradosPorSerFuncionario,
+      };
+    } catch (err) {
+      await this.marcarErro(log.id, err);
+      throw err;
+    }
+  }
+
+  /**
+   * Roda o filtro de diaristas sem gravar nada. A distribuição e as colunas
+   * disponíveis existem porque o código que o IXC guarda para "Estrangeiro" não
+   * é documentado: é aqui que se confirma qual é, antes de importar.
+   */
+  async previewDiaristasDoFornecedor(): Promise<PreviewDiaristas> {
+    const {
+      campoTipoPessoa,
+      diaristas,
+      registros,
+      valoresEstrangeiro,
+      tabelaBanco,
+    } = await this.lerDiaristasDoFornecedor();
+
+    const funcionarios = await this.indiceFuncionarios();
+    const indice = await this.indiceDiaristas();
+
+    return {
+      campoTipoPessoa,
+      valoresEstrangeiro,
+      tabelaBanco: tabelaBanco ?? null,
+      totalFornecedoresAtivos: registros.length,
+      distribuicao: distribuicaoDoCampo(registros, campoTipoPessoa),
+      camposDisponiveis: registros[0] ? Object.keys(registros[0]).sort() : [],
+      diaristas: diaristas.map((d) => {
+        const doc = somenteDigitos(d.cpfCnpj);
+        return {
+          ...d,
+          jaCadastrado:
+            indice.porFornecedor.has(d.idFornecedor) ||
+            (!!doc && indice.porDoc.has(doc)),
+          jaEhFuncionario:
+            funcionarios.porFornecedor.has(d.idFornecedor) ||
+            (!!doc && funcionarios.porDoc.has(doc)),
+        };
+      }),
+    };
+  }
+
+  /** Lê os fornecedores ativos do IXC e aplica o filtro de diarista. */
+  private async lerDiaristasDoFornecedor(): Promise<{
+    registros: IxcFornecedor[];
+    campoTipoPessoa: string | null;
+    valoresEstrangeiro: string[];
+    diaristas: PessoaDoFornecedor[];
+    totalAtivos: number;
+    tabelaBanco: string | null | undefined;
+  }> {
+    const cfg = await this.config.obter();
+    const valoresEstrangeiro = parseValores(
+      cfg.fornecedorTipoEstrangeiro,
+      REGRA_ESTRANGEIRO,
+    );
+
+    const registros = await this.lerFornecedoresAtivos();
+
+    const { campo, pessoas } = filtrarFornecedores(registros, REGRA_ESTRANGEIRO, {
+      campo: cfg.fornecedorCampoTipoPessoa,
+      valores: valoresEstrangeiro,
+    });
+
+    await this.completarDadosBancarios(pessoas, cfg.fornecedorTabelaBanco);
+
+    return {
+      registros,
+      campoTipoPessoa: campo,
+      valoresEstrangeiro,
+      diaristas: pessoas,
+      totalAtivos: registros.length,
+      tabelaBanco: this.dadosBancarios.tabelaEmUso,
+    };
+  }
+
   /** Lê os fornecedores ativos do IXC e aplica o filtro de funcionário. */
   private async lerFuncionariosDoFornecedor(): Promise<{
     registros: IxcFornecedor[];
     campoIcms: string | null;
     valoresIsento: string[];
-    funcionarios: FuncionarioDoFornecedor[];
+    funcionarios: PessoaDoFornecedor[];
     totalAtivos: number;
     tabelaBanco: string | null | undefined;
   }> {
     const cfg = await this.config.obter();
-    const valoresIsento = parseValoresIsento(cfg.fornecedorIcmsIsento);
+    const valoresIsento = parseValores(
+      cfg.fornecedorIcmsIsento,
+      REGRA_ICMS_ISENTO,
+    );
 
-    const registros = await this.ixc.listAll<IxcFornecedor>('fornecedor', {
+    const registros = await this.lerFornecedoresAtivos();
+
+    const { campo, pessoas } = filtrarFornecedores(registros, REGRA_ICMS_ISENTO, {
+      campo: cfg.fornecedorCampoIcms,
+      valores: valoresIsento,
+    });
+
+    await this.completarDadosBancarios(pessoas, cfg.fornecedorTabelaBanco);
+
+    return {
+      registros,
+      campoIcms: campo,
+      valoresIsento,
+      funcionarios: pessoas,
+      totalAtivos: registros.length,
+      tabelaBanco: this.dadosBancarios.tabelaEmUso,
+    };
+  }
+
+  /** Todos os fornecedores ativos do IXC — base dos dois filtros. */
+  private lerFornecedoresAtivos(): Promise<IxcFornecedor[]> {
+    return this.ixc.listAll<IxcFornecedor>('fornecedor', {
       qtype: 'fornecedor.ativo',
       query: 'S',
       oper: '=',
       sortname: 'fornecedor.id',
       sortorder: 'asc',
     });
-
-    const { campoIcms, funcionarios } = filtrarFuncionariosIsentos(registros, {
-      campoIcms: cfg.fornecedorCampoIcms,
-      valoresIsento,
-    });
-
-    await this.completarDadosBancarios(funcionarios, cfg.fornecedorTabelaBanco);
-
-    return {
-      registros,
-      campoIcms,
-      valoresIsento,
-      funcionarios,
-      totalAtivos: registros.length,
-      tabelaBanco: this.dadosBancarios.tabelaEmUso,
-    };
   }
 
   /**
@@ -396,11 +639,11 @@ export class SyncService {
    * costuma vir sem esses campos.
    */
   private async completarDadosBancarios(
-    funcionarios: FuncionarioDoFornecedor[],
+    pessoas: PessoaDoFornecedor[],
     tabelaConfigurada: string,
   ): Promise<void> {
     let comPix = 0;
-    for (const f of funcionarios) {
+    for (const f of pessoas) {
       const grid = await this.dadosBancarios.doFornecedor(
         f.idFornecedor,
         tabelaConfigurada,
@@ -415,15 +658,15 @@ export class SyncService {
       }
       if (f.chavePix) comPix++;
     }
-    if (funcionarios.length > 0) {
+    if (pessoas.length > 0) {
       this.logger.log(
-        `Dados bancários lidos: ${comPix} de ${funcionarios.length} funcionário(s) com chave PIX`,
+        `Dados bancários lidos: ${comPix} de ${pessoas.length} pessoa(s) com chave PIX`,
       );
     }
   }
 
   /** Índice dos funcionários locais por id de fornecedor e por CPF/CNPJ. */
-  private async indiceFuncionarios(): Promise<IndiceFuncionarios> {
+  private async indiceFuncionarios(): Promise<Indice<FuncionarioLocal>> {
     const locais = await this.prisma.funcionario.findMany({
       select: {
         id: true,
@@ -436,22 +679,46 @@ export class SyncService {
         idFornecedorIxc: true,
       },
     });
+    return this.montarIndice(locais);
+  }
 
-    const indice: IndiceFuncionarios = {
-      porFornecedor: new Map(),
-      porDoc: new Map(),
-    };
+  /**
+   * Índice dos diaristas locais. Inclui os inativos de propósito: quem foi
+   * desativado à mão não pode voltar como cadastro novo na próxima importação.
+   */
+  private async indiceDiaristas(): Promise<Indice<DiaristaLocal>> {
+    const locais = await this.prisma.diarista.findMany({
+      select: {
+        id: true,
+        nome: true,
+        nomeFantasia: true,
+        cpfCnpj: true,
+        telefone: true,
+        banco: true,
+        agencia: true,
+        conta: true,
+        chavePix: true,
+        cidadeIxc: true,
+        idFornecedorIxc: true,
+      },
+    });
+    return this.montarIndice(locais);
+  }
+
+  private montarIndice<T extends VinculoLocal>(locais: T[]): Indice<T> {
+    const indice: Indice<T> = { porFornecedor: new Map(), porDoc: new Map() };
     for (const local of locais) this.indexar(indice, local);
     return indice;
   }
 
-  private indexar(indice: IndiceFuncionarios, local: FuncionarioLocal): void {
+  private indexar<T extends VinculoLocal>(indice: Indice<T>, local: T): void {
     if (local.idFornecedorIxc) {
       indice.porFornecedor.set(local.idFornecedorIxc, local);
     }
     const doc = somenteDigitos(local.cpfCnpj);
     // Primeiro cadastro com o documento vence: evita trocar o vínculo quando há
-    // duplicidade de CPF no IXC.
+    // duplicidade de CPF no IXC. Documento vazio nunca indexa — senão todo mundo
+    // sem CPF viraria a mesma pessoa.
     if (doc && !indice.porDoc.has(doc)) indice.porDoc.set(doc, local);
   }
 
@@ -473,8 +740,8 @@ export class SyncService {
   }
 }
 
-/** Funcionários locais indexados para casar com os fornecedores lidos. */
-interface IndiceFuncionarios {
-  porFornecedor: Map<number, FuncionarioLocal>;
-  porDoc: Map<string, FuncionarioLocal>;
+/** Cadastros locais indexados para casar com os fornecedores lidos. */
+interface Indice<T extends VinculoLocal> {
+  porFornecedor: Map<number, T>;
+  porDoc: Map<string, T>;
 }

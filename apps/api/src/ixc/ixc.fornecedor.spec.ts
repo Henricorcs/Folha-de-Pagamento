@@ -1,17 +1,20 @@
 import {
+  casaValor,
   consolidarDadosBancarios,
+  detectarCampo,
   detectarCampoFornecedor,
-  detectarCampoIcms,
   detectarCampoTipoPix,
-  distribuicaoIcms,
-  ehIcmsIsento,
+  distribuicaoDoCampo,
   escolherPix,
-  filtrarFuncionariosIsentos,
+  filtrarFornecedores,
   lerTipoPixPreferencial,
-  mapFornecedorParaFuncionario,
+  mapFornecedorParaPessoa,
   mapLinhaDadosBancarios,
+  montarUpdateDiaristaDoFornecedor,
   montarUpdateDoFornecedor,
-  parseValoresIsento,
+  parseValores,
+  REGRA_ESTRANGEIRO,
+  REGRA_ICMS_ISENTO,
   somenteDigitos,
 } from './ixc.fornecedor';
 import type { IxcFornecedor } from './ixc.types';
@@ -40,56 +43,112 @@ const ACME: IxcFornecedor = {
   contribuinte_icms: 'S',
 };
 
-describe('detectarCampoIcms', () => {
+/** O diarista do exemplo real: razão social formal, fantasia é como o chamam. */
+const DEDA: IxcFornecedor = {
+  id: '3103',
+  ativo: 'S',
+  tipo_pessoa: 'E',
+  razao: 'Antonio Clebes Alves da Silva',
+  fantasia: 'Deda pedreiro',
+  cnpj_cpf: '038.957.603-40',
+  contribuinte_icms: 'N',
+};
+
+describe('detectarCampo (ICMS)', () => {
   it('prefere o campo que fala de contribuinte', () => {
     expect(
-      detectarCampoIcms([{ aliquota_icms: '18', contribuinte_icms: 'I' }]),
+      detectarCampo(
+        [{ aliquota_icms: '18', contribuinte_icms: 'I' }],
+        REGRA_ICMS_ISENTO,
+      ),
     ).toBe('contribuinte_icms');
   });
 
   it('aceita variações de nome', () => {
-    expect(detectarCampoIcms([{ icms: 'I' }])).toBe('icms');
-    expect(detectarCampoIcms([{ icms_contribuinte: 'I' }])).toBe(
-      'icms_contribuinte',
-    );
+    expect(detectarCampo([{ icms: 'I' }], REGRA_ICMS_ISENTO)).toBe('icms');
+    expect(
+      detectarCampo([{ icms_contribuinte: 'I' }], REGRA_ICMS_ISENTO),
+    ).toBe('icms_contribuinte');
   });
 
   it('retorna null quando nenhum campo menciona ICMS', () => {
-    expect(detectarCampoIcms([{ razao: 'ACME' }])).toBeNull();
+    expect(detectarCampo([{ razao: 'ACME' }], REGRA_ICMS_ISENTO)).toBeNull();
   });
 });
 
-describe('ehIcmsIsento', () => {
+describe('detectarCampo (tipo de pessoa)', () => {
+  it('acha a coluna padrão do tipo de pessoa', () => {
+    expect(detectarCampo([DEDA], REGRA_ESTRANGEIRO)).toBe('tipo_pessoa');
+  });
+
+  it('acha uma coluna própria de estrangeiro, se a base usar isso', () => {
+    expect(
+      detectarCampo([{ id: '1', pessoa_estrangeira: 'S' }], REGRA_ESTRANGEIRO),
+    ).toBe('pessoa_estrangeira');
+  });
+
+  it('tipo_pessoa vence outra coluna que também fale de pessoa', () => {
+    expect(
+      detectarCampo(
+        [{ id: '1', id_pessoa_contato: '9', tipo_pessoa: 'E' }],
+        REGRA_ESTRANGEIRO,
+      ),
+    ).toBe('tipo_pessoa');
+  });
+
+  it('retorna null quando a base não tem nada parecido', () => {
+    expect(detectarCampo([{ id: '1', razao: 'A' }], REGRA_ESTRANGEIRO)).toBeNull();
+  });
+});
+
+describe('casaValor', () => {
   it('reconhece texto com "isent" independente da configuração', () => {
-    expect(ehIcmsIsento('Isento', [])).toBe(true);
-    expect(ehIcmsIsento('ISENTO DE ICMS', ['I'])).toBe(true);
+    expect(casaValor('Isento', [], REGRA_ICMS_ISENTO)).toBe(true);
+    expect(casaValor('ISENTO DE ICMS', ['I'], REGRA_ICMS_ISENTO)).toBe(true);
+  });
+
+  it('reconhece "estrangeiro" por extenso', () => {
+    expect(casaValor('Estrangeiro', [], REGRA_ESTRANGEIRO)).toBe(true);
   });
 
   it('usa os valores configurados para códigos', () => {
-    expect(ehIcmsIsento('I', ['I', 'ISENTO'])).toBe(true);
-    expect(ehIcmsIsento('2', ['I', 'ISENTO'])).toBe(false);
-    expect(ehIcmsIsento('2', ['2'])).toBe(true);
+    expect(casaValor('I', ['I', 'ISENTO'], REGRA_ICMS_ISENTO)).toBe(true);
+    expect(casaValor('2', ['I', 'ISENTO'], REGRA_ICMS_ISENTO)).toBe(false);
+    expect(casaValor('2', ['2'], REGRA_ICMS_ISENTO)).toBe(true);
   });
 
-  it('vazio nunca é isento', () => {
-    expect(ehIcmsIsento('', ['I'])).toBe(false);
+  it('nunca confunde física e jurídica com estrangeiro', () => {
+    const valores = REGRA_ESTRANGEIRO.padrao;
+    expect(casaValor('F', valores, REGRA_ESTRANGEIRO)).toBe(false);
+    expect(casaValor('J', valores, REGRA_ESTRANGEIRO)).toBe(false);
+    expect(casaValor('E', valores, REGRA_ESTRANGEIRO)).toBe(true);
+  });
+
+  it('vazio nunca casa', () => {
+    expect(casaValor('', ['I'], REGRA_ICMS_ISENTO)).toBe(false);
+    expect(casaValor('', ['E'], REGRA_ESTRANGEIRO)).toBe(false);
   });
 });
 
-describe('parseValoresIsento', () => {
+describe('parseValores', () => {
   it('separa por vírgula, ponto e vírgula ou espaço', () => {
-    expect(parseValoresIsento('i; 2 , isento')).toEqual(['I', '2', 'ISENTO']);
+    expect(parseValores('i; 2 , isento', REGRA_ICMS_ISENTO)).toEqual([
+      'I',
+      '2',
+      'ISENTO',
+    ]);
   });
 
-  it('cai no padrão textual quando vazio', () => {
-    expect(parseValoresIsento('')).toEqual(['I', 'ISENTO']);
-    expect(parseValoresIsento(null)).toEqual(['I', 'ISENTO']);
+  it('cai no padrão da regra quando vazio', () => {
+    expect(parseValores('', REGRA_ICMS_ISENTO)).toEqual(['I', 'ISENTO']);
+    expect(parseValores(null, REGRA_ICMS_ISENTO)).toEqual(['I', 'ISENTO']);
+    expect(parseValores('', REGRA_ESTRANGEIRO)).toEqual(['E', 'ESTRANGEIRO']);
   });
 });
 
-describe('mapFornecedorParaFuncionario', () => {
+describe('mapFornecedorParaPessoa', () => {
   it('traz cadastro e dados de pagamento', () => {
-    const f = mapFornecedorParaFuncionario(HENRICO, 'I')!;
+    const f = mapFornecedorParaPessoa(HENRICO, 'I')!;
     expect(f.idFornecedor).toBe(2672);
     expect(f.nome).toBe('Henrico Santos Sousa');
     expect(f.cpfCnpj).toBe('082.935.753-01');
@@ -101,8 +160,14 @@ describe('mapFornecedorParaFuncionario', () => {
     expect(f.chavePix).toBe('henrico@pix');
   });
 
+  it('guarda a fantasia separada da razão social', () => {
+    const d = mapFornecedorParaPessoa(DEDA, 'E')!;
+    expect(d.nome).toBe('Antonio Clebes Alves da Silva');
+    expect(d.nomeFantasia).toBe('Deda pedreiro');
+  });
+
   it('aceita cpf_cnpj e cai na fantasia quando não há razão', () => {
-    const f = mapFornecedorParaFuncionario({
+    const f = mapFornecedorParaPessoa({
       id: '10',
       fantasia: 'Zé da Silva',
       cpf_cnpj: '11122233344',
@@ -112,18 +177,27 @@ describe('mapFornecedorParaFuncionario', () => {
   });
 
   it('ignora registro sem id válido', () => {
-    expect(mapFornecedorParaFuncionario({ id: '0', razao: 'X' })).toBeNull();
+    expect(mapFornecedorParaPessoa({ id: '0', razao: 'X' })).toBeNull();
   });
 });
 
-describe('filtrarFuncionariosIsentos', () => {
+describe('filtrarFornecedores', () => {
   it('seleciona só os fornecedores com ICMS isento', () => {
-    const { campoIcms, funcionarios } = filtrarFuncionariosIsentos([
-      HENRICO,
-      ACME,
-    ]);
-    expect(campoIcms).toBe('contribuinte_icms');
-    expect(funcionarios.map((f) => f.idFornecedor)).toEqual([2672]);
+    const { campo, pessoas } = filtrarFornecedores(
+      [HENRICO, ACME],
+      REGRA_ICMS_ISENTO,
+    );
+    expect(campo).toBe('contribuinte_icms');
+    expect(pessoas.map((f) => f.idFornecedor)).toEqual([2672]);
+  });
+
+  it('seleciona só os estrangeiros, deixando física e jurídica de fora', () => {
+    const { campo, pessoas } = filtrarFornecedores(
+      [HENRICO, ACME, DEDA],
+      REGRA_ESTRANGEIRO,
+    );
+    expect(campo).toBe('tipo_pessoa');
+    expect(pessoas.map((p) => p.idFornecedor)).toEqual([3103]);
   });
 
   it('respeita o campo e os valores informados', () => {
@@ -131,25 +205,36 @@ describe('filtrarFuncionariosIsentos', () => {
       { id: '1', razao: 'A', icms_situacao: '3' },
       { id: '2', razao: 'B', icms_situacao: '1' },
     ];
-    const { funcionarios } = filtrarFuncionariosIsentos(registros, {
-      campoIcms: 'icms_situacao',
-      valoresIsento: ['3'],
+    const { pessoas } = filtrarFornecedores(registros, REGRA_ICMS_ISENTO, {
+      campo: 'icms_situacao',
+      valores: ['3'],
     });
-    expect(funcionarios.map((f) => f.nome)).toEqual(['A']);
+    expect(pessoas.map((f) => f.nome)).toEqual(['A']);
   });
 
   it('não seleciona ninguém quando o campo não existe', () => {
-    const { campoIcms, funcionarios } = filtrarFuncionariosIsentos([
-      { id: '1', razao: 'A' },
-    ]);
-    expect(campoIcms).toBeNull();
-    expect(funcionarios).toEqual([]);
+    const { campo, pessoas } = filtrarFornecedores(
+      [{ id: '1', razao: 'A' }],
+      REGRA_ICMS_ISENTO,
+    );
+    expect(campo).toBeNull();
+    expect(pessoas).toEqual([]);
+  });
+
+  it('código de estrangeiro diferente do padrão: importa zero, não importa errado', () => {
+    // Base que usa "3" para estrangeiro e ninguém configurou: melhor vazio do
+    // que trazer a base inteira como diarista.
+    const { pessoas } = filtrarFornecedores(
+      [{ id: '1', razao: 'A', tipo_pessoa: '3' }],
+      REGRA_ESTRANGEIRO,
+    );
+    expect(pessoas).toEqual([]);
   });
 });
 
-describe('distribuicaoIcms', () => {
+describe('distribuicaoDoCampo', () => {
   it('conta os valores encontrados, do mais comum ao menos', () => {
-    const dist = distribuicaoIcms(
+    const dist = distribuicaoDoCampo(
       [ACME, HENRICO, { id: '3', razao: 'C', contribuinte_icms: 'S' }],
       'contribuinte_icms',
     );
@@ -159,14 +244,72 @@ describe('distribuicaoIcms', () => {
     ]);
   });
 
-  it('agrupa vazios quando não há campo de ICMS', () => {
-    const dist = distribuicaoIcms([{ id: '1', razao: 'A' }], null);
+  it('agrupa vazios quando não há campo', () => {
+    const dist = distribuicaoDoCampo([{ id: '1', razao: 'A' }], null);
     expect(dist[0]).toMatchObject({ valor: '(vazio)', quantidade: 1 });
   });
 });
 
+describe('montarUpdateDiaristaDoFornecedor', () => {
+  const dados = mapFornecedorParaPessoa(DEDA, 'E')!;
+  const VAZIO = {
+    id: 'd1',
+    nome: '',
+    nomeFantasia: null,
+    cpfCnpj: null,
+    telefone: null,
+    banco: null,
+    agencia: null,
+    conta: null,
+    chavePix: null,
+    cidadeIxc: null,
+    idFornecedorIxc: null,
+  };
+
+  it('preenche o cadastro vazio e vincula o fornecedor', () => {
+    const update = montarUpdateDiaristaDoFornecedor(VAZIO, dados);
+    expect(update.idFornecedorIxc).toBe(3103);
+    expect(update.nome).toBe('Antonio Clebes Alves da Silva');
+    expect(update.nomeFantasia).toBe('Deda pedreiro');
+    expect(update.cpfCnpj).toBe('038.957.603-40');
+  });
+
+  it('não desfaz o que já está escrito aqui', () => {
+    const update = montarUpdateDiaristaDoFornecedor(
+      {
+        ...VAZIO,
+        nome: 'Deda',
+        nomeFantasia: 'Deda pedreiro',
+        cpfCnpj: '038.957.603-40',
+        chavePix: 'corrigido@pix',
+        idFornecedorIxc: 3103,
+      },
+      { ...dados, chavePix: 'antigo@pix', tipoChavePix: 'E-mail' },
+    );
+    expect(update).toEqual({});
+  });
+
+  it('nunca troca um vínculo de fornecedor já existente', () => {
+    const update = montarUpdateDiaristaDoFornecedor(
+      { ...VAZIO, idFornecedorIxc: 999 },
+      dados,
+    );
+    expect('idFornecedorIxc' in update).toBe(false);
+  });
+
+  it('a chave PIX leva junto o tipo dela', () => {
+    const update = montarUpdateDiaristaDoFornecedor(VAZIO, {
+      ...dados,
+      chavePix: '(99) 98107-4450',
+      tipoChavePix: 'Celular',
+    });
+    expect(update.chavePix).toBe('(99) 98107-4450');
+    expect(update.tipoChavePix).toBe('Celular');
+  });
+});
+
 describe('montarUpdateDoFornecedor', () => {
-  const dados = mapFornecedorParaFuncionario(HENRICO, 'I')!;
+  const dados = mapFornecedorParaPessoa(HENRICO, 'I')!;
 
   it('vincula o fornecedor e atualiza os dados de pagamento', () => {
     const update = montarUpdateDoFornecedor(
@@ -222,7 +365,7 @@ describe('montarUpdateDoFornecedor', () => {
         cidadeIxc: 1,
         idFornecedorIxc: 30,
       },
-      mapFornecedorParaFuncionario({ id: '30', razao: 'Maria' })!,
+      mapFornecedorParaPessoa({ id: '30', razao: 'Maria' })!,
     );
     expect(update).toEqual({});
   });
@@ -345,7 +488,7 @@ describe('tipo de PIX preferencial', () => {
   });
 
   it('leva o tipo junto da chave para o cadastro local', () => {
-    const dados = mapFornecedorParaFuncionario(HENRICO, 'I')!;
+    const dados = mapFornecedorParaPessoa(HENRICO, 'I')!;
     dados.chavePix = '(99) 98107-4450';
     dados.tipoChavePix = 'Celular';
     const update = montarUpdateDoFornecedor(

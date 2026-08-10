@@ -1,4 +1,5 @@
 import {
+  aprenderTipoChavePix,
   buildAuditoriaPayload,
   buildContaPagarPayload,
   buildFornecedorPayload,
@@ -8,6 +9,7 @@ import {
   lerSituacaoContaPagar,
   lerStatusAuditoria,
   normalizarTipoChavePix,
+  parseCodigosTipoChavePix,
 } from './ixc.financeiro';
 
 describe('formatDataIxc / formatValorIxc', () => {
@@ -123,6 +125,93 @@ describe('tipo da chave PIX vindo do cadastro', () => {
   it('sem tipo no cadastro, continua deduzindo pelo formato', () => {
     const body = buildContaPagarPayload({ ...base, chavePix: 'ana@pix.com' });
     expect(body).toMatchObject({ tipo_chave_pix: 'E-mail' });
+  });
+
+  it('usa a coluna e o código aprendidos desta base do IXC', () => {
+    const body = buildContaPagarPayload({
+      ...base,
+      chavePix: 'ana@pix.com',
+      mapaTipoChave: {
+        campo: 'pix_tipo',
+        codigos: { 'E-mail': 'E', Celular: 'C' },
+      },
+    });
+    expect(body).toMatchObject({ pix_tipo: 'E' });
+    // A coluna do palpite antigo não vai junto: quem manda é a aprendida.
+    expect('tipo_chave_pix' in body).toBe(false);
+  });
+
+  it('tipo sem código aprendido cai no rótulo, na coluna certa', () => {
+    const body = buildContaPagarPayload({
+      ...base,
+      chavePix: 'ana@pix.com',
+      mapaTipoChave: { campo: 'pix_tipo', codigos: { Celular: 'C' } },
+    });
+    expect(body).toMatchObject({ pix_tipo: 'E-mail' });
+  });
+});
+
+/**
+ * O rádio "Tipo da chave Pix" em branco trava o pagamento — o banco recusa PIX
+ * sem o tipo. Como o nome da coluna e o código variam por base do IXC, isto é
+ * aprendido das contas que já existem lá, feitas na tela.
+ */
+describe('aprenderTipoChavePix', () => {
+  it('aprende a coluna e o código de cada tipo pelas contas existentes', () => {
+    const mapa = aprenderTipoChavePix([
+      { id: '1', chave_pix: '+5599984631517', tipo_chave_pix_apagar: 'C' },
+      { id: '2', chave_pix: 'ana@pix.com', tipo_chave_pix_apagar: 'E' },
+      { id: '3', chave_pix: '', tipo_chave_pix_apagar: '' },
+    ]);
+    expect(mapa).toEqual({
+      campo: 'tipo_chave_pix_apagar',
+      codigos: { Celular: 'C', 'E-mail': 'E' },
+    });
+  });
+
+  it('descarta coluna que se contradiz: não é a coluna do tipo', () => {
+    // `pix_tipo_qualquer` dá dois códigos para celular — não serve.
+    const mapa = aprenderTipoChavePix([
+      { id: '1', chave_pix: '+5599984631517', pix_tipo_qualquer: 'X' },
+      { id: '2', chave_pix: '+5575981074450', pix_tipo_qualquer: 'Y' },
+    ]);
+    expect(mapa).toBeNull();
+  });
+
+  it('nunca confunde a coluna da chave com a do tipo', () => {
+    const mapa = aprenderTipoChavePix([
+      { id: '1', chave_pix: 'ana@pix.com', tipo_chave_pix: 'E-mail' },
+    ]);
+    expect(mapa?.campo).toBe('tipo_chave_pix');
+  });
+
+  it('sem conta antiga com PIX, não inventa nada', () => {
+    expect(aprenderTipoChavePix([{ id: '1', chave_pix: '' }])).toBeNull();
+    expect(aprenderTipoChavePix([])).toBeNull();
+  });
+
+  it('prefere a coluna que explica mais tipos', () => {
+    const mapa = aprenderTipoChavePix([
+      { id: '1', chave_pix: '+5599984631517', pix_tipo: 'C', tipo_pix_2: '1' },
+      { id: '2', chave_pix: 'ana@pix.com', pix_tipo: 'E' },
+    ]);
+    expect(mapa?.campo).toBe('pix_tipo');
+  });
+});
+
+describe('parseCodigosTipoChavePix', () => {
+  it('lê o mapeamento informado à mão', () => {
+    expect(parseCodigosTipoChavePix('Celular=C, E-mail=E,CPF/CNPJ=D')).toEqual({
+      Celular: 'C',
+      'E-mail': 'E',
+      'CPF/CNPJ': 'D',
+    });
+  });
+
+  it('ignora lixo e entradas sem código', () => {
+    expect(parseCodigosTipoChavePix('Celular=,=X,,xyz')).toEqual({});
+    expect(parseCodigosTipoChavePix('')).toEqual({});
+    expect(parseCodigosTipoChavePix(null)).toEqual({});
   });
 });
 

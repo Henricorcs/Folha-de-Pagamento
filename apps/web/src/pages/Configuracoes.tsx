@@ -99,6 +99,37 @@ export function Configuracoes() {
           </div>
         </Bloco>
 
+        <Bloco titulo="Tipo da chave Pix" className="surgir surgir-2">
+          <p className="mb-4 text-xs leading-relaxed text-tinta-500">
+            Na conta a pagar do IXC, o rádio “Tipo da chave Pix” precisa vir
+            marcado — sem ele o banco recusa o PIX. Como o nome dessa coluna
+            muda de um IXC para outro, o app <strong>aprende sozinho</strong>{' '}
+            olhando as contas que já existem por lá. Só preencha abaixo se o
+            rádio continuar em branco; veja o que ele encontrou em{' '}
+            <span className="num">/api/contas-pagar/diagnostico-pix</span>.
+          </p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="rotulo">Coluna do tipo da chave</label>
+              <input
+                value={form.pixCampoTipoChave}
+                onChange={(e) => txt('pixCampoTipoChave', e.target.value)}
+                className="campo"
+                placeholder="vazio = aprender sozinho"
+              />
+            </div>
+            <div>
+              <label className="rotulo">Código de cada tipo</label>
+              <input
+                value={form.pixCodigosTipoChave}
+                onChange={(e) => txt('pixCodigosTipoChave', e.target.value)}
+                className="campo"
+                placeholder="Ex.: Celular=C,E-mail=E,CPF/CNPJ=D"
+              />
+            </div>
+          </div>
+        </Bloco>
+
         <Bloco titulo="Contas contábeis" className="surgir surgir-2">
           <p className="mb-4 text-xs text-tinta-500">
             É o <span className="num">id_conta</span> do planejamento analítico
@@ -165,6 +196,42 @@ export function Configuracoes() {
                 onChange={(e) => txt('fornecedorTabelaBanco', e.target.value)}
                 className="campo"
                 placeholder="vazio = descobrir"
+              />
+            </div>
+          </div>
+        </Bloco>
+
+        <Bloco titulo="Quem conta como diarista" className="surgir surgir-3">
+          <p className="mb-4 text-xs leading-relaxed text-tinta-500">
+            Fornecedor ativo com “Tipo de pessoa” = Estrangeiro é diarista. Quem
+            já é funcionário fica de fora — é um ou outro, nunca os dois. O
+            código que o seu IXC usa para “Estrangeiro” não é documentado:
+            confira na prévia (<span className="num">/api/sync/diaristas/preview</span>)
+            antes de importar.
+          </p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="rotulo">Campo do tipo de pessoa</label>
+              <input
+                value={form.fornecedorCampoTipoPessoa}
+                onChange={(e) =>
+                  txt('fornecedorCampoTipoPessoa', e.target.value)
+                }
+                className="campo"
+                placeholder="vazio = detectar"
+              />
+            </div>
+            <div>
+              <label className="rotulo">
+                Valores que significam Estrangeiro
+              </label>
+              <input
+                value={form.fornecedorTipoEstrangeiro}
+                onChange={(e) =>
+                  txt('fornecedorTipoEstrangeiro', e.target.value)
+                }
+                className="campo"
+                placeholder="Ex.: E,ESTRANGEIRO"
               />
             </div>
           </div>

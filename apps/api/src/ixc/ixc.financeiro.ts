@@ -58,6 +58,11 @@ export interface ContaPagarInput {
    * fornecedor). Vazio = deduz pelo formato da chave.
    */
   tipoChavePix?: TipoChavePix | null;
+  /**
+   * Como esta base guarda o rádio "Tipo da chave Pix". Vazio = manda o rótulo
+   * da tela na coluna `tipo_chave_pix`.
+   */
+  mapaTipoChave?: MapaTipoChavePix | null;
 }
 
 /** Tipos da chave PIX, como aparecem na tela de contas a pagar do IXC. */
@@ -127,6 +132,105 @@ export function normalizarChavePix(
   return `+${comPais}`;
 }
 
+/**
+ * Como esta base do IXC guarda o rádio "Tipo da chave Pix" do fn_apagar.
+ *
+ * O nome da coluna e o código de cada tipo não estão documentados e variam por
+ * instalação — e mandar errado deixa o rádio em branco, o que **trava o
+ * pagamento**: o banco recusa PIX sem o tipo da chave. Por isso isto é
+ * aprendido das contas que já existem no IXC, não chutado.
+ */
+export interface MapaTipoChavePix {
+  /** Coluna do fn_apagar que guarda o tipo. */
+  campo: string;
+  /** Rótulo da tela → código cru usado nesta base. */
+  codigos: Partial<Record<TipoChavePix, string>>;
+}
+
+/** Coluna candidata a guardar o tipo: fala de PIX **e** de tipo. */
+function ehColunaTipoPix(coluna: string): boolean {
+  return /pix/i.test(coluna) && /tipo/i.test(coluna);
+}
+
+/**
+ * Descobre, a partir de contas a pagar já existentes no IXC, qual coluna guarda
+ * o tipo da chave PIX e que código ela usa para cada tipo.
+ *
+ * A ideia: numa conta feita na tela do IXC, a chave e o tipo estão coerentes.
+ * Então o formato da própria chave (`+55…` = celular, `@` = e-mail) diz qual
+ * tipo aquele código representa. Uma coluna que se contradiz — o mesmo tipo com
+ * dois códigos diferentes — é descartada, porque não é a coluna do tipo.
+ */
+export function aprenderTipoChavePix(
+  registros: Array<Record<string, unknown>>,
+): MapaTipoChavePix | null {
+  const porColuna = new Map<string, Map<TipoChavePix, Set<string>>>();
+
+  for (const raw of registros) {
+    const tipo = inferirTipoChavePix(String(raw.chave_pix ?? ''));
+    if (!tipo) continue;
+
+    for (const [coluna, valor] of Object.entries(raw)) {
+      if (!ehColunaTipoPix(coluna)) continue;
+      const codigo = String(valor ?? '').trim();
+      if (!codigo) continue;
+
+      const porTipo = porColuna.get(coluna) ?? new Map();
+      porColuna.set(coluna, porTipo);
+      const codigos = porTipo.get(tipo) ?? new Set<string>();
+      porTipo.set(tipo, codigos);
+      codigos.add(codigo);
+    }
+  }
+
+  let melhor: MapaTipoChavePix | null = null;
+  for (const [campo, porTipo] of porColuna) {
+    // Um tipo com dois códigos distintos: esta coluna não é a do tipo.
+    if ([...porTipo.values()].some((c) => c.size !== 1)) continue;
+
+    const codigos: Partial<Record<TipoChavePix, string>> = {};
+    for (const [tipo, valores] of porTipo) codigos[tipo] = [...valores][0];
+
+    const quantidade = Object.keys(codigos).length;
+    if (!melhor || quantidade > Object.keys(melhor.codigos).length) {
+      melhor = { campo, codigos };
+    }
+  }
+  return melhor;
+}
+
+/**
+ * Lê o mapeamento informado à mão em Configurações
+ * ("Celular=C, E-mail=E"), para quando não há conta antiga com PIX no IXC
+ * de onde aprender.
+ */
+export function parseCodigosTipoChavePix(
+  config?: string | null,
+): Partial<Record<TipoChavePix, string>> {
+  const codigos: Partial<Record<TipoChavePix, string>> = {};
+  for (const par of String(config ?? '').split(/[,;]+/)) {
+    const [rotulo, codigo] = par.split('=');
+    if (!codigo?.trim()) continue;
+    const tipo = normalizarTipoChavePix(rotulo);
+    if (tipo) codigos[tipo] = codigo.trim();
+  }
+  return codigos;
+}
+
+/**
+ * Coluna e valor do rádio "Tipo da chave Pix". Sem mapa aprendido nem
+ * configurado, manda o rótulo da tela na coluna mais provável — que é o
+ * comportamento antigo.
+ */
+export function codificarTipoChavePix(
+  tipo: TipoChavePix | null,
+  mapa?: MapaTipoChavePix | null,
+): { campo: string; valor: string } {
+  const campo = mapa?.campo || 'tipo_chave_pix';
+  if (!tipo) return { campo, valor: '' };
+  return { campo, valor: mapa?.codigos[tipo] ?? tipo };
+}
+
 /** Monta o corpo do POST /fn_apagar (conta a pagar). */
 export function buildContaPagarPayload(
   input: ContaPagarInput,
@@ -136,6 +240,7 @@ export function buildContaPagarPayload(
   // "Dados bancários" do fornecedor, e a conta a pagar tem que repetir. Só
   // quando o cadastro não diz é que se deduz pelo formato da chave.
   const tipoChave = input.tipoChavePix ?? inferirTipoChavePix(chave);
+  const radio = codificarTipoChavePix(tipoChave, input.mapaTipoChave);
 
   return {
     id_fornecedor: String(input.idFornecedor),
@@ -148,7 +253,7 @@ export function buildContaPagarPayload(
     filial_id: String(input.filialId),
     chave_pix: chave ? normalizarChavePix(chave, tipoChave) : '',
     // Rádio "Tipo da chave Pix" da tela de contas a pagar.
-    tipo_chave_pix: tipoChave ?? '',
+    [radio.campo]: radio.valor,
     previsao: 'N',
     liberado: 'S',
     obs: input.observacao,

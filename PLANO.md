@@ -42,6 +42,17 @@ Evolução planejada por fases. Cada fase entrega valor de forma incremental.
 - [x] **Ações em massa** em Contas a Pagar: aprovar, reprovar e excluir várias
       de uma vez, com relatório de quem ficou de fora e por quê
 - [x] Reuso de fornecedor existente no IXC por CPF/CNPJ
+- [x] **Diaristas importados do fornecedor**: fornecedor ativo com "Tipo de
+      pessoa" = **Estrangeiro** é diarista (assim como ICMS Isento é
+      funcionário). Traz nome fantasia — que também entra na busca — e os dados
+      de pagamento da aba "Dados bancários". Quem já é funcionário fica de fora:
+      é um ou outro, nunca os dois. O que está escrito aqui vence o IXC, para
+      correção feita na tela não ser desfeita na sincronização seguinte
+- [x] **Tipo da chave Pix descoberto sozinho**: o rádio em branco no fn_apagar
+      trava o pagamento, e o nome da coluna/código varia por base. O app aprende
+      das contas feitas na tela do IXC (ignorando as que ele mesmo criou, para
+      não confirmar o próprio erro), com override em Configurações e diagnóstico
+      em `GET /contas-pagar/diagnostico-pix`
 
 ### Pendências desta fase (dependem de você)
 - [ ] Automatizar o clique "pagar com ModoBank" — só se o IXC expuser esse
@@ -53,6 +64,14 @@ Evolução planejada por fases. Cada fase entrega valor de forma incremental.
 - [ ] Confirmar a **conta contábil das diárias** (hoje nasce igual à do salário)
 - [ ] Confirmar `cidade` padrão para criação de fornecedores no seu IXC
 - [ ] Conferir o rótulo exato do tipo de pagamento PIX no seu IXC (Configurações)
+- [ ] **Código de "Estrangeiro"** no `tipo_pessoa` do fornecedor: o padrão
+      (`E,ESTRANGEIRO`) é uma aposta e o filtro é fail-closed — na dúvida importa
+      zero. Confirme em `GET /sync/diaristas/preview`, que mostra a distribuição
+      real dos valores da base, antes da primeira importação
+- [ ] **Ensinar o tipo da chave Pix**: se nenhuma conta a pagar tiver sido feita
+      na tela do IXC com PIX e o tipo marcado, não há de quem aprender. Marque o
+      tipo à mão numa conta lá (destrava aquele pagamento) e a próxima conta
+      gerada aqui já sai com o formato certo
 
 ## 🚧 Fase 2b — Réplica completa da planilha (proventos/descontos detalhados)
 

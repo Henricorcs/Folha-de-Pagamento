@@ -286,6 +286,10 @@ export interface ConfigFinanceira {
   /** % do salário base no adiantamento do dia 25 (padrão 40) */
   percentualAdiantamento: number;
   tipoPagamentoPadrao: string;
+  /** Coluna do fn_apagar com o "Tipo da chave Pix" ("" = aprender do IXC) */
+  pixCampoTipoChave: string;
+  /** Códigos por tipo, ex.: "Celular=C,E-mail=E" ("" = usar o rótulo) */
+  pixCodigosTipoChave: string;
   obsSalarioTemplate: string;
   obsAdiantamentoTemplate: string;
   obsBonusTemplate: string;
@@ -295,6 +299,10 @@ export interface ConfigFinanceira {
   fornecedorIcmsIsento: string;
   /** Tabela da aba "Dados bancários" do fornecedor ("" = descobrir sozinho) */
   fornecedorTabelaBanco: string;
+  /** Campo do "Tipo de pessoa" no fornecedor ("" = detectar automaticamente) */
+  fornecedorCampoTipoPessoa: string;
+  /** Valores desse campo que significam "Estrangeiro", separados por vírgula */
+  fornecedorTipoEstrangeiro: string;
   /** Caixa de onde sai o dinheiro pago em mãos (0 = procurar pelo nome) */
   caixaEmMaosId: number;
   caixaEmMaosNome: string;
@@ -315,9 +323,15 @@ export type FormaPagamentoDiaria = 'IXC' | 'EM_MAOS';
 
 export interface Diarista {
   id: string;
+  /** Razão social — é o nome que vai para a conta a pagar no IXC */
   nome: string;
+  /** Como a pessoa é conhecida ("Deda pedreiro"); também é buscável */
+  nomeFantasia: string | null;
   cpfCnpj: string | null;
   telefone: string | null;
+  banco: string | null;
+  agencia: string | null;
+  conta: string | null;
   chavePix: string | null;
   tipoChavePix: string | null;
   valorDiaria: string | null;
@@ -325,6 +339,8 @@ export interface Diarista {
   observacoes: string | null;
   ativo: boolean;
   idFornecedorIxc: number | null;
+  /** Veio da importação de fornecedores "Estrangeiro", não do cadastro à mão */
+  importadoDoIxc: boolean;
 }
 
 export interface DiaristaComResumo {
@@ -446,10 +462,11 @@ export interface SyncResult {
   totalAtualizados: number;
 }
 
-/** Funcionário identificado no cadastro de fornecedor do IXC. */
-export interface FuncionarioDoFornecedor {
+/** Pessoa identificada no cadastro de fornecedor do IXC. */
+export interface PessoaDoFornecedor {
   idFornecedor: number;
   nome: string;
+  nomeFantasia: string | null;
   cpfCnpj: string | null;
   email: string | null;
   telefone: string | null;
@@ -458,11 +475,12 @@ export interface FuncionarioDoFornecedor {
   conta: string | null;
   chavePix: string | null;
   tipoChavePix: string | null;
-  icms: string;
+  /** Valor cru do campo que fez o registro entrar no filtro */
+  valorFiltro: string;
   jaCadastrado: boolean;
 }
 
-export interface OcorrenciaIcms {
+export interface OcorrenciaCampo {
   valor: string;
   quantidade: number;
   exemplos: string[];
@@ -473,6 +491,23 @@ export interface PreviewFornecedores {
   valoresIsento: string[];
   tabelaBanco: string | null;
   totalFornecedoresAtivos: number;
-  distribuicao: OcorrenciaIcms[];
-  funcionarios: FuncionarioDoFornecedor[];
+  distribuicao: OcorrenciaCampo[];
+  funcionarios: PessoaDoFornecedor[];
+}
+
+/** Resultado da importação de diaristas do cadastro de fornecedor. */
+export interface SyncDiaristasResult extends SyncResult {
+  campoTipoPessoa: string | null;
+  /** Quem não entrou porque já está cadastrado como funcionário */
+  ignoradosPorSerFuncionario: string[];
+}
+
+export interface PreviewDiaristas {
+  campoTipoPessoa: string | null;
+  valoresEstrangeiro: string[];
+  tabelaBanco: string | null;
+  totalFornecedoresAtivos: number;
+  distribuicao: OcorrenciaCampo[];
+  camposDisponiveis: string[];
+  diaristas: Array<PessoaDoFornecedor & { jaEhFuncionario: boolean }>;
 }

@@ -227,10 +227,26 @@ model ConfiguracaoFinanceira {
   // Vazio = descobre sozinho testando os nomes conhecidos.
   fornecedorTabelaBanco String @default("") @map("fornecedor_tabela_banco")
 
+  // --- Filtro que identifica diaristas no cadastro de `fornecedor` ---
+  // Regra: fornecedor ativo com "Tipo de pessoa" = Estrangeiro é diarista.
+  // Campo do tipo de pessoa; vazio = detecta automaticamente.
+  fornecedorCampoTipoPessoa String @default("") @map("fornecedor_campo_tipo_pessoa")
+  // Valores que significam "Estrangeiro", separados por vírgula. O código real
+  // varia por base — confira na prévia antes de importar.
+  fornecedorTipoEstrangeiro String @default("E,ESTRANGEIRO") @map("fornecedor_tipo_estrangeiro")
+
   // Tipo de pagamento enviado ao fn_apagar (rótulo exato usado pelo seu IXC,
   // ex.: "Pix", "Dinheiro"). A chave PIX do beneficiário vai junto no payload,
   // com o tipo da chave deduzido do formato.
   tipoPagamentoPadrao String @default("Pix") @map("tipo_pagamento_padrao")
+
+  // --- Rádio "Tipo da chave Pix" do fn_apagar ---
+  // Sem ele marcado o banco recusa o PIX. A coluna e o código de cada tipo
+  // variam por base do IXC: vazio = aprender das contas que já existem lá.
+  pixCampoTipoChave String @default("") @map("pix_campo_tipo_chave")
+  // Códigos por tipo, quando não há conta antiga de onde aprender.
+  // Formato: "Celular=C,E-mail=E,CPF/CNPJ=D,Aleatória=A"
+  pixCodigosTipoChave String @default("") @map("pix_codigos_tipo_chave")
 
   // Templates de observação ({competencia} é substituído por "MM/AAAA")
   obsSalarioTemplate      String @default("saldo salarial referente ao mês {competencia}") @map("obs_salario_template")
@@ -423,9 +439,17 @@ enum FormaPagamentoDiaria {
 model Diarista {
   id String @id @default(uuid())
 
-  nome     String
-  cpfCnpj  String? @map("cpf_cnpj")
-  telefone String?
+  /// Razão social — é o nome que vai para a conta a pagar no IXC
+  nome String
+  /// Como a pessoa é conhecida no dia a dia ("Deda pedreiro"); também é buscável
+  nomeFantasia String? @map("nome_fantasia")
+  cpfCnpj      String? @map("cpf_cnpj")
+  telefone     String?
+
+  /// Dados de pagamento, vindos da aba "Dados bancários" do fornecedor no IXC
+  banco    String?
+  agencia  String?
+  conta    String?
   chavePix String? @map("chave_pix")
   /// Tipo da chave acima; vazio = deduzir pelo formato (igual ao funcionário)
   tipoChavePix String? @map("tipo_chave_pix")
@@ -441,6 +465,8 @@ model Diarista {
   /// Fornecedor no IXC, criado na primeira diária paga pelo IXC
   idFornecedorIxc Int? @map("id_fornecedor_ixc")
   cidadeIxc       Int? @map("cidade_ixc")
+  /// Veio da importação de fornecedores "Estrangeiro", não do cadastro à mão
+  importadoDoIxc Boolean @default(false) @map("importado_do_ixc")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -450,6 +476,7 @@ model Diarista {
 
   @@index([ativo])
   @@index([nome])
+  @@index([nomeFantasia])
   @@map("diaristas")
 }
 

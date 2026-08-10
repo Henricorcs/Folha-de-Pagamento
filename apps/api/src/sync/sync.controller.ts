@@ -38,6 +38,19 @@ export class SyncController {
     return this.sync.previewFuncionariosDoFornecedor();
   }
 
+  /** Importa diaristas do cadastro de fornecedor (ativo + tipo Estrangeiro). */
+  @Post('diaristas')
+  @HttpCode(200)
+  async sincronizarDiaristas() {
+    return { ok: true, resultado: await this.sync.syncDiaristasDoFornecedor() };
+  }
+
+  /** Roda o filtro de diaristas sem gravar — confirme o código de Estrangeiro. */
+  @Get('diaristas/preview')
+  async previewDiaristas() {
+    return this.sync.previewDiaristasDoFornecedor();
+  }
+
   @Get('historico')
   async historico(@Query('limite') limite?: string) {
     return this.sync.historico(limite ? Number(limite) : 20);
