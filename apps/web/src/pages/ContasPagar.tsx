@@ -219,6 +219,7 @@ export function ContasPagar() {
       mudandoDeIdeia
         ? `Voltar atrás e reprovar a conta de ${c.beneficiarioNome}. Motivo:`
         : 'Motivo da reprovação:',
+      'Reprovado',
     );
     if (motivo) acao.mutate({ id: c.id, op: 'reprovar', motivo });
   }
@@ -255,6 +256,7 @@ export function ContasPagar() {
     if (alvos.length === 0) return;
     const motivo = prompt(
       `Reprovar ${alvos.length} conta(s), ${formatBRL(soma(alvos))} no total. Motivo:`,
+      'Reprovado',
     );
     if (!motivo) return;
     lote.mutate({
