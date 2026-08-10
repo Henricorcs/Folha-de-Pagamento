@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
 import {
   IsEnum,
+  IsIn,
   IsISO8601,
   IsNumber,
   IsOptional,
@@ -9,6 +10,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { FormaPagamentoDiaria } from '@prisma/client';
+import { TIPOS_CHAVE_PIX } from '../../ixc/ixc.financeiro';
 
 /** Um pagamento de diária: quantos dias, por quanto e por onde sai. */
 export class PagarDiariaDto {
@@ -40,6 +42,18 @@ export class PagarDiariaDto {
 
   /** Vazio = a forma habitual do cadastro do diarista. */
   @IsOptional() @IsEnum(FormaPagamentoDiaria) forma?: FormaPagamentoDiaria;
+
+  /**
+   * Chave PIX a usar neste pagamento. Vazio = a do cadastro. O que vier aqui
+   * fica gravado no cadastro, para não ter de digitar de novo.
+   */
+  @IsOptional() @IsString() chavePix?: string;
+
+  /** Tipo da chave; também fica gravado no cadastro. */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value == null ? undefined : value))
+  @IsIn([...TIPOS_CHAVE_PIX])
+  tipoChavePix?: string;
 }
 
 export class QueryDiariasDto {

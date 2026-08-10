@@ -118,21 +118,6 @@ export function inferirTipoChavePix(chave?: string | null): TipoChavePix | null 
 }
 
 /**
- * Normaliza a chave PIX para o formato que o banco aceita. Celular vira
- * +55DDDNNNNNNNNN (o IXC guarda com máscara, ex.: "(99) 98107-4450"); as
- * demais seguem como estão.
- */
-export function normalizarChavePix(
-  chave: string,
-  tipo: TipoChavePix | null,
-): string {
-  if (tipo !== 'Celular') return chave.trim();
-  const digitos = chave.replace(/\D/g, '');
-  const comPais = digitos.startsWith('55') ? digitos : `55${digitos}`;
-  return `+${comPais}`;
-}
-
-/**
  * Como esta base do IXC guarda o rádio "Tipo da chave Pix" do fn_apagar.
  *
  * O nome da coluna e o código de cada tipo não estão documentados e variam por
@@ -263,7 +248,10 @@ export function buildContaPagarPayload(
     tipo_pagamento: input.tipoPagamento ?? 'Pix',
     id_conta: String(input.contaContabilId), // conta contábil (2420/2662/13916)
     filial_id: String(input.filialId),
-    chave_pix: chave ? normalizarChavePix(chave, tipoChave) : '',
+    // A chave vai exata como está no cadastro: o fn_apagar recusa ("Chave Pix
+    // inválida!") o celular reescrito em +55DDD9XXXXXXXX, mesmo o IXC guardando
+    // a chave com máscara na aba de dados bancários do fornecedor.
+    chave_pix: chave,
     // Rádio "Tipo da chave Pix" da tela de contas a pagar.
     [radio.campo]: radio.valor,
     previsao: 'N',

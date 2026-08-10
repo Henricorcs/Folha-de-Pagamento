@@ -48,6 +48,12 @@ function montarServico(
     diarista: {
       findUnique: jest.fn().mockResolvedValue(DIARISTA),
       findMany: jest.fn().mockResolvedValue([]),
+      update: jest.fn(
+        async ({ data }: { data: Record<string, unknown> }) => ({
+          ...DIARISTA,
+          ...data,
+        }),
+      ),
     },
     diaria: {
       create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -147,6 +153,32 @@ describe('pagar pelo IXC', () => {
       descricao: 'Mudança',
     });
     expect(contasPagar.criar.mock.calls[0][0].itens[0].valor).toBe(300);
+  });
+
+  /**
+   * A chave recusada pelo IXC se acerta na hora de pagar. Como é o cadastro que
+   * alimenta a conta a pagar, o acerto tem de ficar gravado — senão o próximo
+   * pagamento repete o mesmo erro.
+   */
+  it('grava no cadastro a chave PIX corrigida na hora', async () => {
+    const { service, prisma } = montarServico();
+
+    await service.pagar('d1', {
+      descricao: 'Capina',
+      chavePix: '(99) 99230-0993',
+      tipoChavePix: 'Celular',
+    });
+
+    expect(prisma.diarista.update).toHaveBeenCalledWith({
+      where: { id: 'd1' },
+      data: { chavePix: '(99) 99230-0993', tipoChavePix: 'Celular' },
+    });
+  });
+
+  it('chave igual à do cadastro não mexe no cadastro', async () => {
+    const { service, prisma } = montarServico();
+    await service.pagar('d1', { descricao: 'Capina', chavePix: 'joao@pix' });
+    expect(prisma.diarista.update).not.toHaveBeenCalled();
   });
 });
 

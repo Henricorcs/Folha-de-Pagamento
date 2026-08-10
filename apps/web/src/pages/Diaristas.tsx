@@ -840,6 +840,8 @@ function FormularioDiaria({
   const [forma, setForma] = useState<FormaPagamentoDiaria>(
     diarista.formaPagamento,
   );
+  const [chavePix, setChavePix] = useState(diarista.chavePix ?? '');
+  const [tipoChavePix, setTipoChavePix] = useState(diarista.tipoChavePix ?? '');
 
   const calculado = (Number(quantidade) || 0) * (Number(valorDiaria) || 0);
   const totalEfetivo = Number(total) > 0 ? Number(total) : calculado;
@@ -894,11 +896,37 @@ function FormularioDiaria({
             placeholder="Ex.: pintura do galpão"
           />
         </Campo>
+        {forma === 'IXC' && (
+          <>
+            <Campo label="Chave PIX — vai exata para o IXC">
+              <input
+                value={chavePix}
+                onChange={(e) => setChavePix(e.target.value)}
+                className="campo"
+                placeholder="Ex.: (99) 99230-0993"
+              />
+            </Campo>
+            <Campo label="Tipo da chave">
+              <select
+                value={tipoChavePix}
+                onChange={(e) => setTipoChavePix(e.target.value)}
+                className="campo"
+              >
+                <option value="">Pelo formato da chave</option>
+                {TIPOS_CHAVE_PIX.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+          </>
+        )}
       </div>
 
       <p className="mt-4 text-xs leading-relaxed text-tinta-500">
         {forma === 'IXC'
-          ? 'Vai virar conta a pagar no IXC: o diarista é cadastrado como fornecedor, e o pagamento passa pela auditoria como o da folha.'
+          ? 'Vai virar conta a pagar no IXC: o diarista é cadastrado como fornecedor, e o pagamento passa pela auditoria como o da folha. A chave e o tipo ficam gravados no cadastro para o próximo pagamento.'
           : 'O dinheiro já saiu da sua mão: a diária é registrada como paga e a saída é lançada no caixa configurado em Configurações.'}
       </p>
 
@@ -912,6 +940,7 @@ function FormularioDiaria({
               valor: total || undefined,
               descricao,
               forma,
+              ...(forma === 'IXC' ? { chavePix, tipoChavePix } : {}),
             })
           }
           disabled={!valido || ocupado}

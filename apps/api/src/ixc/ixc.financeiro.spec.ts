@@ -77,7 +77,9 @@ describe('buildContaPagarPayload', () => {
     });
   });
 
-  it('normaliza chave PIX de celular para +55DDD9XXXXXXXX', () => {
+  // O fn_apagar recusa a chave reescrita em +55: o celular vai com a máscara
+  // do cadastro, que é o que a tela do IXC aceita.
+  it('manda o celular exatamente como está no cadastro', () => {
     const hoje = new Date(Date.UTC(2026, 6, 21));
     const body = buildContaPagarPayload({
       idFornecedor: 55,
@@ -92,7 +94,7 @@ describe('buildContaPagarPayload', () => {
     });
     expect(body).toMatchObject({
       tipo_chave_pix: 'Celular',
-      chave_pix: '+5599981074450',
+      chave_pix: '(99) 98107-4450',
     });
   });
 });
@@ -119,7 +121,7 @@ describe('tipo da chave PIX vindo do cadastro', () => {
     });
     expect(body).toMatchObject({
       tipo_chave_pix: 'Celular',
-      chave_pix: '+5575981074450',
+      chave_pix: '75981074450',
     });
   });
 

@@ -209,7 +209,10 @@ export class DiaristasService {
     dto: PagarDiariaDto,
     usuarioId?: string,
   ): Promise<Diaria> {
-    const diarista = await this.buscar(diaristaId);
+    const diarista = await this.decorarPix(
+      await this.buscar(diaristaId),
+      dto,
+    );
     const forma = dto.forma ?? diarista.formaPagamento;
 
     const quantidade = dto.quantidade ?? 1;
@@ -239,6 +242,32 @@ export class DiaristasService {
     return forma === FormaPagamentoDiaria.IXC
       ? this.pagarPeloIxc(diarista, base, { quantidade, valorDiaria, valor }, usuarioId)
       : this.pagarEmMaos(diarista, base, { quantidade, valorDiaria, valor });
+  }
+
+  /**
+   * A chave PIX corrigida na hora de pagar fica no cadastro. Quem paga vê o
+   * erro do IXC na tela e acerta ali mesmo; da próxima vez já vem certo, sem
+   * depender de arrumar o fornecedor no IXC e sincronizar de novo.
+   */
+  private async decorarPix(
+    diarista: Diarista,
+    dto: PagarDiariaDto,
+  ): Promise<Diarista> {
+    const chavePix = dto.chavePix?.trim();
+    const tipoChavePix = dto.tipoChavePix ?? null;
+    const mudou =
+      (chavePix !== undefined && chavePix !== (diarista.chavePix ?? '')) ||
+      (dto.tipoChavePix !== undefined &&
+        tipoChavePix !== diarista.tipoChavePix);
+    if (!mudou) return diarista;
+
+    return this.prisma.diarista.update({
+      where: { id: diarista.id },
+      data: {
+        ...(chavePix === undefined ? {} : { chavePix: chavePix || null }),
+        ...(dto.tipoChavePix === undefined ? {} : { tipoChavePix }),
+      },
+    });
   }
 
   /** Conta a pagar no IXC (o caminho já usado pela folha e pelos avulsos). */
