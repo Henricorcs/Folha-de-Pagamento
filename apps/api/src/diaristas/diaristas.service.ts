@@ -249,6 +249,11 @@ export class DiaristasService {
 
     return this.prisma.diaria.create({
       data: { ...base, contaPagarId: conta.id },
+      include: {
+        contaPagar: {
+          select: { id: true, status: true, erro: true, idFnApagarIxc: true },
+        },
+      },
     });
   }
 

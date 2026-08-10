@@ -182,7 +182,7 @@ export function Diaristas() {
     onSuccess: (d) => {
       setPagando(null);
       setAberto(d.diaristaId);
-      avisar(resumoDoPagamento(d), !!d.erroIxc);
+      avisar(resumoDoPagamento(d), !!d.erroIxc || d.contaPagar?.status === 'ERRO');
       invalidar();
     },
     onError: (err) => avisar(mensagemErro(err), true),
@@ -788,6 +788,9 @@ function SituacaoDiaria({ diaria }: { diaria: Diaria }) {
 /** O que dizer depois de pagar (ou de tentar lançar no caixa de novo). */
 function resumoDoPagamento(d: Diaria): string {
   if (d.forma === 'IXC') {
+    if (d.contaPagar?.status === 'ERRO') {
+      return `O IXC recusou: ${d.contaPagar.erro ?? 'erro desconhecido'} — corrija e reenvie em Contas a Pagar.`;
+    }
     return 'Diária lançada como conta a pagar no IXC — aprove em Contas a Pagar.';
   }
   if (d.erroIxc) return d.erroIxc;
