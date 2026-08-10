@@ -9,6 +9,7 @@ import {
   Diarista,
   FormaPagamentoDiaria,
   Prisma,
+  StatusContaPagar,
   TipoLancamento,
 } from '@prisma/client';
 import { ConfigFinanceiraService } from '../financeiro/config-financeira.service';
@@ -26,9 +27,17 @@ import { CriarDiaristaDto, UpdateDiaristaDto } from './dto/diarista.dto';
 /** Diarista com o que a listagem precisa mostrar sem abrir o cadastro. */
 export interface DiaristaComResumo {
   diarista: Diarista;
-  /** Quantas diárias já foram pagas a essa pessoa. */
+  /** Quantas diárias existem no histórico dessa pessoa (pagas ou não). */
   quantidadeDiarias: number;
+  /** Só o dinheiro que de fato saiu: em mãos, ou conta a pagar já PAGA. */
   totalPago: number;
+  /** Quantas dessas diárias entraram no total pago. */
+  quantidadePagas: number;
+  /** Lançado no IXC e ainda a caminho do banco (aprovação, pagamento). */
+  totalAguardando: number;
+  quantidadeAguardando: number;
+  /** Contas a pagar que o IXC recusou — não saíram e precisam de correção. */
+  quantidadeComErro: number;
   ultimaDiaria: Date | null;
   /** Diárias em mãos que ainda não viraram lançamento no caixa do IXC. */
   pendentesNoCaixa: number;
@@ -72,21 +81,33 @@ export class DiaristasService {
             forma: true,
             idLancamentoIxc: true,
             lancadoManual: true,
+            contaPagar: { select: { status: true } },
           },
         },
       },
     });
 
-    return diaristas.map(({ diarias, ...diarista }) => ({
-      diarista,
-      quantidadeDiarias: diarias.length,
-      totalPago: diarias.reduce((s, d) => s + Number(d.valor), 0),
-      ultimaDiaria: diarias.reduce<Date | null>(
-        (maior, d) => (!maior || d.data > maior ? d.data : maior),
-        null,
-      ),
-      pendentesNoCaixa: diarias.filter((d) => pendenteNoCaixa(d)).length,
-    }));
+    return diaristas.map(({ diarias, ...diarista }) => {
+      const pagas = diarias.filter((d) => diariaPaga(d));
+      const aguardando = diarias.filter((d) => diariaAguardando(d));
+
+      return {
+        diarista,
+        quantidadeDiarias: diarias.length,
+        totalPago: somar(pagas),
+        quantidadePagas: pagas.length,
+        totalAguardando: somar(aguardando),
+        quantidadeAguardando: aguardando.length,
+        quantidadeComErro: diarias.filter(
+          (d) => d.contaPagar?.status === StatusContaPagar.ERRO,
+        ).length,
+        ultimaDiaria: diarias.reduce<Date | null>(
+          (maior, d) => (!maior || d.data > maior ? d.data : maior),
+          null,
+        ),
+        pendentesNoCaixa: diarias.filter((d) => pendenteNoCaixa(d)).length,
+      };
+    });
   }
 
   async buscar(id: string): Promise<Diarista> {
@@ -393,6 +414,44 @@ export class DiaristasService {
   private marcarErro(id: string, erro: string): Promise<Diaria> {
     return this.prisma.diaria.update({ where: { id }, data: { erroIxc: erro } });
   }
+}
+
+/** Como cada diária aparece nas contas do resumo. */
+interface DiariaResumida {
+  valor: Prisma.Decimal;
+  forma: FormaPagamentoDiaria;
+  contaPagar: { status: StatusContaPagar } | null;
+}
+
+/**
+ * Dinheiro que de fato saiu.
+ *
+ * Em mãos já saiu no ato — o lançamento no caixa do IXC é escrituração, não
+ * pagamento. Pelo IXC, só quando o banco confirmou: enquanto a conta espera
+ * aprovação (ou foi recusada) o diarista ainda não recebeu nada, e mostrar
+ * isso como pago faria a tela mentir.
+ */
+function diariaPaga(d: DiariaResumida): boolean {
+  return d.forma === FormaPagamentoDiaria.EM_MAOS
+    ? true
+    : d.contaPagar?.status === StatusContaPagar.PAGO;
+}
+
+/** Lançada no IXC e ainda a caminho: nem paga, nem recusada. */
+function diariaAguardando(d: DiariaResumida): boolean {
+  if (d.forma === FormaPagamentoDiaria.EM_MAOS) return false;
+  const status = d.contaPagar?.status;
+  return (
+    status !== undefined &&
+    status !== StatusContaPagar.PAGO &&
+    status !== StatusContaPagar.ERRO &&
+    status !== StatusContaPagar.REPROVADO &&
+    status !== StatusContaPagar.CANCELADO
+  );
+}
+
+function somar(diarias: Array<{ valor: Prisma.Decimal }>): number {
+  return diarias.reduce((s, d) => s + Number(d.valor), 0);
 }
 
 /** Diária em mãos que ainda não virou lançamento no caixa do IXC. */

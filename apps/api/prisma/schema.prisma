@@ -248,6 +248,13 @@ model ConfiguracaoFinanceira {
   // Formato: "Celular=C,E-mail=E,CPF/CNPJ=D,Aleatória=A"
   pixCodigosTipoChave String @default("") @map("pix_codigos_tipo_chave")
 
+  // O que o app já descobriu sozinho, guardado para não reaprender a cada
+  // reinício nem depender das contas antigas continuarem à vista no IXC. Os
+  // códigos vão se acumulando: cada tipo é aprendido uma vez e fica sabido.
+  // Preenchido pelo app; o que está acima (informado à mão) vence.
+  pixCampoTipoChaveAprendido String @default("") @map("pix_campo_tipo_chave_aprendido")
+  pixCodigosTipoChaveAprendidos String @default("") @map("pix_codigos_tipo_chave_aprendidos")
+
   // Templates de observação ({competencia} é substituído por "MM/AAAA")
   obsSalarioTemplate      String @default("saldo salarial referente ao mês {competencia}") @map("obs_salario_template")
   obsAdiantamentoTemplate String @default("adiantamento") @map("obs_adiantamento_template")

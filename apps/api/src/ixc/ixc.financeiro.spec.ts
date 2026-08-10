@@ -10,6 +10,7 @@ import {
   lerStatusAuditoria,
   normalizarTipoChavePix,
   parseCodigosTipoChavePix,
+  serializarCodigosTipoChavePix,
 } from './ixc.financeiro';
 
 describe('formatDataIxc / formatValorIxc', () => {
@@ -351,5 +352,23 @@ describe('lerStatusAuditoria', () => {
   it('não confunde o status da conta com o da auditoria', () => {
     // fn_apagar.status = A significa "aberto".
     expect(lerStatusAuditoria({ status: 'A' })).toBeNull();
+  });
+});
+
+describe('serializarCodigosTipoChavePix', () => {
+  it('escreve no mesmo formato que o parse lê (ida e volta)', () => {
+    const codigos = {
+      Celular: 'C',
+      'E-mail': 'E',
+      'CPF/CNPJ': 'D',
+      Aleatória: 'A',
+    } as const;
+    const texto = serializarCodigosTipoChavePix(codigos);
+    expect(texto).toBe('CPF/CNPJ=D,Celular=C,E-mail=E,Aleatória=A');
+    expect(parseCodigosTipoChavePix(texto)).toEqual(codigos);
+  });
+
+  it('nada aprendido vira texto vazio', () => {
+    expect(serializarCodigosTipoChavePix({})).toBe('');
   });
 });

@@ -53,6 +53,19 @@ Evolução planejada por fases. Cada fase entrega valor de forma incremental.
       das contas feitas na tela do IXC (ignorando as que ele mesmo criou, para
       não confirmar o próprio erro), com override em Configurações e diagnóstico
       em `GET /contas-pagar/diagnostico-pix`
+- [x] **E não esquece mais**: o que foi aprendido fica guardado no banco, um
+      código por tipo de chave (CPF/CNPJ, celular, e-mail, aleatória) — cada um
+      descoberto de um exemplo diferente, acumulando. Sobrevive ao reinício da
+      API e a a conta-exemplo sair das 200 mais recentes do IXC; só se volta lá
+      quando falta justamente o código do tipo que vai ser enviado. O que está
+      em Configurações continua vencendo, e o decorado aparece na tela
+- [x] **Erro do IXC aparece na hora** ao pagar uma diária, em vez da mensagem
+      fixa de sucesso — a conta a pagar sempre ficou salva, mas só a tela de
+      Contas a Pagar mostrava o motivo
+- [x] **"Já pago" só conta o que saiu**: em mãos conta na hora; pelo IXC, só
+      quando o banco confirma. O que está a caminho e o que o IXC recusou
+      aparecem separados, para a tela não dizer que alguém recebeu o que não
+      recebeu
 
 ### Pendências desta fase (dependem de você)
 - [ ] Automatizar o clique "pagar com ModoBank" — só se o IXC expuser esse
@@ -68,10 +81,13 @@ Evolução planejada por fases. Cada fase entrega valor de forma incremental.
       (`E,ESTRANGEIRO`) é uma aposta e o filtro é fail-closed — na dúvida importa
       zero. Confirme em `GET /sync/diaristas/preview`, que mostra a distribuição
       real dos valores da base, antes da primeira importação
-- [ ] **Ensinar o tipo da chave Pix**: se nenhuma conta a pagar tiver sido feita
-      na tela do IXC com PIX e o tipo marcado, não há de quem aprender. Marque o
-      tipo à mão numa conta lá (destrava aquele pagamento) e a próxima conta
-      gerada aqui já sai com o formato certo
+- [ ] **Ensinar o tipo da chave Pix, uma vez por tipo**: se nenhuma conta a
+      pagar tiver sido feita na tela do IXC com PIX e o tipo marcado, não há de
+      quem aprender. Marque o tipo à mão numa conta lá (destrava aquele
+      pagamento) e a próxima conta gerada aqui já sai com o formato certo — daí
+      em diante aquele tipo fica decorado. Cada tipo de chave (celular, CPF,
+      e-mail, aleatória) precisa de um exemplo, e só na primeira vez que
+      aparecer; o que já está decorado aparece em Configurações
 
 ## 🚧 Fase 2b — Réplica completa da planilha (proventos/descontos detalhados)
 

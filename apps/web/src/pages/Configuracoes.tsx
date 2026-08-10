@@ -104,10 +104,42 @@ export function Configuracoes() {
             Na conta a pagar do IXC, o rádio “Tipo da chave Pix” precisa vir
             marcado — sem ele o banco recusa o PIX. Como o nome dessa coluna
             muda de um IXC para outro, o app <strong>aprende sozinho</strong>{' '}
-            olhando as contas que já existem por lá. Só preencha abaixo se o
-            rádio continuar em branco; veja o que ele encontrou em{' '}
+            olhando as contas que já existem por lá, e{' '}
+            <strong>guarda o que aprendeu</strong> — um tipo de cada vez, à
+            medida que aparece exemplo de cada um. Só preencha abaixo se o rádio
+            continuar em branco; o detalhe do que ele viu está em{' '}
             <span className="num">/api/contas-pagar/diagnostico-pix</span>.
           </p>
+
+          <div className="mb-4 rounded-lg bg-tinta-50 px-3 py-2.5 text-xs leading-relaxed text-tinta-600">
+            <span className="rotulo">Já decorado</span>
+            {form.pixCampoTipoChaveAprendido ? (
+              <div className="mt-1">
+                Coluna{' '}
+                <span className="num text-tinta-800">
+                  {form.pixCampoTipoChaveAprendido}
+                </span>
+                {form.pixCodigosTipoChaveAprendidos ? (
+                  <>
+                    {' '}
+                    — códigos{' '}
+                    <span className="num text-tinta-800">
+                      {form.pixCodigosTipoChaveAprendidos}
+                    </span>
+                  </>
+                ) : (
+                  ' — nenhum código ainda'
+                )}
+              </div>
+            ) : (
+              <div className="mt-1">
+                Nada ainda. O app procura na primeira conta a pagar com PIX que
+                gerar; se não houver exemplo no IXC daquele tipo de chave, marque
+                o tipo à mão numa conta lá e reenvie — ele aprende e não pergunta
+                de novo.
+              </div>
+            )}
+          </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="rotulo">Coluna do tipo da chave</label>

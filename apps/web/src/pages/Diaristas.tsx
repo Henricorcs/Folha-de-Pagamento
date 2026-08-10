@@ -475,6 +475,15 @@ export function Diaristas() {
                           {resumo.pendentesNoCaixa} fora do caixa
                         </Selo>
                       )}
+                      {resumo.quantidadeComErro > 0 && (
+                        <Selo
+                          tom="erro"
+                          pequeno
+                          titulo="O IXC recusou a conta a pagar — corrija e reenvie em Contas a Pagar"
+                        >
+                          {resumo.quantidadeComErro} com erro
+                        </Selo>
+                      )}
                     </button>
                     {d.nomeFantasia && (
                       <div className="mt-0.5 text-xs text-tinta-500">
@@ -507,8 +516,16 @@ export function Diaristas() {
                   <td className="td text-right">
                     <span className="valor">{formatBRL(resumo.totalPago)}</span>
                     <div className="text-xs text-tinta-400 num">
-                      {resumo.quantidadeDiarias} diária(s)
+                      {resumo.quantidadePagas} diária(s)
                     </div>
+                    {resumo.totalAguardando > 0 && (
+                      <div
+                        className="mt-0.5 num text-xs text-amber-600"
+                        title="Lançado no IXC, ainda não pago pelo banco"
+                      >
+                        + {formatBRL(resumo.totalAguardando)} a caminho
+                      </div>
+                    )}
                   </td>
                   <td className="td num text-tinta-500">
                     {resumo.ultimaDiaria ? formatData(resumo.ultimaDiaria) : '—'}

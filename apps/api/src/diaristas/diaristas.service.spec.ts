@@ -1,4 +1,8 @@
-import { FormaPagamentoDiaria, TipoLancamento } from '@prisma/client';
+import {
+  FormaPagamentoDiaria,
+  StatusContaPagar,
+  TipoLancamento,
+} from '@prisma/client';
 import { DiaristasService } from './diaristas.service';
 
 /**
@@ -43,6 +47,7 @@ function montarServico(
   const prisma = {
     diarista: {
       findUnique: jest.fn().mockResolvedValue(DIARISTA),
+      findMany: jest.fn().mockResolvedValue([]),
     },
     diaria: {
       create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -279,5 +284,84 @@ describe('tentar de novo e fechar à mão', () => {
     await service.removerDiaria(diaria.id);
     expect(contasPagar.remover).toHaveBeenCalledWith('conta-1');
     expect(prisma.diaria.delete).toHaveBeenCalled();
+  });
+});
+
+/**
+ * "Já pago" é o que saiu do bolso, não o que foi tentado. Conta a pagar parada
+ * na auditoria — ou recusada pelo IXC — ainda não pagou ninguém, e somá-la ao
+ * total faria a tela dizer que o diarista recebeu o que não recebeu.
+ */
+describe('resumo da listagem', () => {
+  function comDiarias(diarias: Array<Record<string, unknown>>) {
+    const { service, prisma } = montarServico();
+    prisma.diarista.findMany.mockResolvedValue([
+      { ...DIARISTA, diarias },
+    ]);
+    return service.listar();
+  }
+
+  const emMaos = (valor: number) => ({
+    valor,
+    data: new Date(Date.UTC(2026, 7, 10)),
+    forma: FormaPagamentoDiaria.EM_MAOS,
+    idLancamentoIxc: 900,
+    lancadoManual: false,
+    contaPagar: null,
+  });
+
+  const peloIxc = (valor: number, status: StatusContaPagar) => ({
+    valor,
+    data: new Date(Date.UTC(2026, 7, 10)),
+    forma: FormaPagamentoDiaria.IXC,
+    idLancamentoIxc: null,
+    lancadoManual: false,
+    contaPagar: { status },
+  });
+
+  it('conta a pagar recusada pelo IXC não entra no total pago', async () => {
+    const [r] = await comDiarias([peloIxc(770, StatusContaPagar.ERRO)]);
+    expect(r.totalPago).toBe(0);
+    expect(r.quantidadePagas).toBe(0);
+    expect(r.quantidadeComErro).toBe(1);
+    // Mas continua no histórico: o registro existe e precisa de conserto.
+    expect(r.quantidadeDiarias).toBe(1);
+  });
+
+  it('lançada no IXC e ainda a caminho aparece separada do que já saiu', async () => {
+    const [r] = await comDiarias([
+      peloIxc(300, StatusContaPagar.AGUARDANDO_APROVACAO),
+      peloIxc(200, StatusContaPagar.AGUARDANDO_PAGAMENTO),
+    ]);
+    expect(r.totalPago).toBe(0);
+    expect(r.totalAguardando).toBe(500);
+    expect(r.quantidadeAguardando).toBe(2);
+  });
+
+  it('o banco confirmou: aí sim entra no total pago', async () => {
+    const [r] = await comDiarias([
+      peloIxc(140, StatusContaPagar.PAGO),
+      peloIxc(770, StatusContaPagar.ERRO),
+    ]);
+    expect(r.totalPago).toBe(140);
+    expect(r.quantidadePagas).toBe(1);
+    expect(r.totalAguardando).toBe(0);
+  });
+
+  it('em mãos conta como pago na hora — o dinheiro já saiu da gaveta', async () => {
+    const [r] = await comDiarias([emMaos(120), emMaos(80)]);
+    expect(r.totalPago).toBe(200);
+    expect(r.quantidadePagas).toBe(2);
+    expect(r.quantidadeAguardando).toBe(0);
+  });
+
+  it('reprovada e cancelada não ficam eternamente "a caminho"', async () => {
+    const [r] = await comDiarias([
+      peloIxc(100, StatusContaPagar.REPROVADO),
+      peloIxc(100, StatusContaPagar.CANCELADO),
+    ]);
+    expect(r.totalPago).toBe(0);
+    expect(r.totalAguardando).toBe(0);
+    expect(r.quantidadeAguardando).toBe(0);
   });
 });

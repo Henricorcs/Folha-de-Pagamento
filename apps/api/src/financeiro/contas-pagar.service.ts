@@ -15,10 +15,12 @@ import {
   aprenderTipoChavePix,
   buildAuditoriaPayload,
   buildContaPagarPayload,
+  inferirTipoChavePix,
   lerSituacaoContaPagar,
   lerStatusAuditoria,
   normalizarTipoChavePix,
   parseCodigosTipoChavePix,
+  serializarCodigosTipoChavePix,
   type MapaTipoChavePix,
   type StatusAuditoriaIxc,
   type TipoChavePix,
@@ -115,16 +117,23 @@ const DIAS_CONFERE_PAGA = 90;
 /** Quanto esperar antes de tentar de novo a tabela de auditoria do IXC. */
 const PAUSA_AUDITORIA_MS = 5 * 60_000;
 
+/**
+ * Espera entre duas buscas do formato do "Tipo da chave Pix" no IXC. Curto de
+ * propósito: quem acabou de marcar o tipo à mão numa conta lá quer reenviar e
+ * ver funcionar, não esperar.
+ */
+const ESPERA_APRENDER_PIX_MS = 60_000;
+
 @Injectable()
 export class ContasPagarService {
   private readonly logger = new Logger(ContasPagarService.name);
   /** Até quando parar de consultar a tabela de auditoria (ver `auditoriaNoIxc`). */
   private auditoriaIndisponivelAte = 0;
   /**
-   * Formato do "Tipo da chave Pix" nesta base do IXC.
-   * undefined = ainda não procurou; null = procurou e não achou exemplo.
+   * Quando foi a última ida ao IXC atrás do formato do "Tipo da chave Pix".
+   * O que se aprende fica no banco; isto só evita repetir a busca em rajada.
    */
-  private mapaPix: MapaTipoChavePix | null | undefined;
+  private ultimaTentativaPix = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -394,6 +403,8 @@ export class ContasPagarService {
       const tipoPagamento = conta.tipoPagamentoIxc ?? cfg.tipoPagamentoPadrao;
       // Chave PIX só faz sentido em pagamento por PIX.
       const ehPix = /pix/i.test(tipoPagamento);
+      // O tipo que vai ser marcado — é o código dele que precisa ser sabido.
+      const tipoChave = pix.tipo ?? inferirTipoChavePix(pix.chave);
 
       const payload = buildContaPagarPayload({
         idFornecedor,
@@ -407,7 +418,7 @@ export class ContasPagarService {
         tipoPagamento,
         chavePix: ehPix ? pix.chave : null,
         tipoChavePix: ehPix ? pix.tipo : null,
-        mapaTipoChave: ehPix ? await this.mapaTipoChavePix(cfg) : null,
+        mapaTipoChave: ehPix ? await this.mapaTipoChavePix(cfg, tipoChave) : null,
       });
 
       const { id: idFnApagar } = await this.ixc.create('fn_apagar', payload);
@@ -827,43 +838,97 @@ export class ContasPagarService {
    * Sem isso a conta nasce com a chave preenchida e o tipo em branco, e o
    * pagamento não sai. O nome da coluna e o código de cada tipo variam por
    * instalação, então são aprendidos das contas que já existem no IXC — feitas
-   * na tela, onde chave e tipo estão coerentes. Resolvido uma vez por processo.
+   * na tela, onde chave e tipo estão coerentes.
+   *
+   * O que se descobre fica guardado no banco, tipo a tipo: sabido o código do
+   * celular (ou do CPF, do e-mail, da chave aleatória), ele continua sabido
+   * depois de reiniciar a API e mesmo que a conta que serviu de exemplo saia
+   * das mais recentes do IXC. Só se volta lá quando falta justamente o código
+   * do tipo que está para ser enviado.
    */
-  private async mapaTipoChavePix(cfg: {
-    pixCampoTipoChave: string;
-    pixCodigosTipoChave: string;
-  }): Promise<MapaTipoChavePix | null> {
-    const campoConfig = cfg.pixCampoTipoChave.trim();
-    const codigosConfig = parseCodigosTipoChavePix(cfg.pixCodigosTipoChave);
+  private async mapaTipoChavePix(
+    cfg: {
+      pixCampoTipoChave: string;
+      pixCodigosTipoChave: string;
+      pixCampoTipoChaveAprendido: string;
+      pixCodigosTipoChaveAprendidos: string;
+    },
+    tipo: TipoChavePix | null,
+  ): Promise<MapaTipoChavePix | null> {
+    const campoManual = cfg.pixCampoTipoChave.trim();
+    const codigosManuais = parseCodigosTipoChavePix(cfg.pixCodigosTipoChave);
 
-    // O que foi informado à mão manda: é a saída quando não há conta antiga
-    // com PIX no IXC de onde aprender.
-    if (campoConfig) {
-      return { campo: campoConfig, codigos: codigosConfig };
-    }
-    if (this.mapaPix !== undefined) return this.mapaPix;
+    // O informado em Configurações manda; o aprendido preenche o resto. Código
+    // só vale dentro da coluna em que foi visto: se a coluna informada à mão
+    // não for a mesma de onde se aprendeu, o aprendido não serve.
+    const compor = (
+      campoAprendido: string,
+      codigosAprendidos: Partial<Record<TipoChavePix, string>>,
+    ): MapaTipoChavePix | null => {
+      const campo = campoManual || campoAprendido;
+      if (!campo) return null;
+      const herdados = campo === campoAprendido ? codigosAprendidos : {};
+      return { campo, codigos: { ...herdados, ...codigosManuais } };
+    };
 
-    this.mapaPix = await this.aprenderTipoChavePixDoIxc();
-    if (this.mapaPix) {
-      const { campo, codigos } = this.mapaPix;
-      this.logger.log(
-        `Tipo da chave PIX no fn_apagar: coluna "${campo}" — ${JSON.stringify(codigos)}`,
-      );
-    } else {
+    const campoGuardado = cfg.pixCampoTipoChaveAprendido.trim();
+    const codigosGuardados = parseCodigosTipoChavePix(
+      cfg.pixCodigosTipoChaveAprendidos,
+    );
+
+    const sabido = compor(campoGuardado, codigosGuardados);
+    if (sabido && (!tipo || sabido.codigos[tipo])) return sabido;
+
+    // Falta o código deste tipo: vale uma ida ao IXC para tentar descobrir.
+    const novo = await this.aprenderEGuardar(campoGuardado, codigosGuardados);
+    return novo ? compor(novo.campo, novo.codigos) : sabido;
+  }
+
+  /**
+   * Descobre o formato no IXC e guarda o que achou.
+   *
+   * Os códigos se acumulam enquanto a coluna for a mesma — cada tipo é
+   * aprendido de um exemplo diferente, e o que já se sabia não se perde. Se o
+   * IXC apontar outra coluna, o aprendizado recomeça por ela, porque código de
+   * uma coluna não significa nada em outra.
+   */
+  private async aprenderEGuardar(
+    campoGuardado: string,
+    codigosGuardados: Partial<Record<TipoChavePix, string>>,
+  ): Promise<MapaTipoChavePix | null> {
+    // Gerar a folha inteira sem o formato conhecido não vira uma consulta por
+    // funcionário: a tentativa se repete de tempos em tempos, não a cada conta.
+    const agora = Date.now();
+    if (agora - this.ultimaTentativaPix < ESPERA_APRENDER_PIX_MS) return null;
+    this.ultimaTentativaPix = agora;
+
+    const novo = await this.aprenderTipoChavePixDoIxc();
+    if (!novo) {
       this.logger.warn(
-        'Não achei conta a pagar antiga com PIX no IXC para aprender o "Tipo ' +
-          'da chave Pix". Vou mandar o rótulo em `tipo_chave_pix`; se o rádio ' +
-          'ficar em branco, marque o tipo à mão numa conta no IXC e envie outra, ' +
-          'ou informe a coluna em Configurações.',
+        'Não achei conta a pagar feita na tela do IXC com PIX e o tipo da ' +
+          'chave marcado — é dela que o formato é aprendido. Vou mandar o ' +
+          'rótulo em `tipo_chave_pix`; se o rádio ficar em branco, marque o ' +
+          'tipo à mão numa conta lá (isso destrava aquele pagamento) e a ' +
+          'próxima gerada aqui já sai certa, ou informe a coluna em ' +
+          'Configurações.',
       );
+      return null;
     }
-    // Sobrepõe com o que foi configurado à mão, quando houver.
-    return this.mapaPix && Object.keys(codigosConfig).length > 0
-      ? {
-          campo: this.mapaPix.campo,
-          codigos: { ...this.mapaPix.codigos, ...codigosConfig },
-        }
-      : this.mapaPix;
+
+    const codigos =
+      novo.campo === campoGuardado
+        ? { ...codigosGuardados, ...novo.codigos }
+        : novo.codigos;
+
+    await this.config.guardarAprendizadoPix(
+      novo.campo,
+      serializarCodigosTipoChavePix(codigos),
+    );
+    this.logger.log(
+      `Tipo da chave PIX no fn_apagar: coluna "${novo.campo}" — ` +
+        JSON.stringify(codigos),
+    );
+    return { campo: novo.campo, codigos };
   }
 
   /** Lê contas a pagar recentes do IXC e deduz o formato do tipo da chave. */
@@ -912,6 +977,8 @@ export class ContasPagarService {
    */
   async diagnosticoTipoChavePix(): Promise<{
     mapa: MapaTipoChavePix | null;
+    /** O que já está guardado no banco, de tudo que foi aprendido até aqui. */
+    aprendido: MapaTipoChavePix | null;
     campoConfigurado: string;
     codigosConfigurados: Partial<Record<TipoChavePix, string>>;
     /** Colunas do fn_apagar que mencionam PIX, com exemplos de valor. */
@@ -932,8 +999,17 @@ export class ContasPagarService {
       }
     }
 
+    const campoAprendido = cfg.pixCampoTipoChaveAprendido.trim();
     return {
       mapa: aprenderTipoChavePix(registros),
+      aprendido: campoAprendido
+        ? {
+            campo: campoAprendido,
+            codigos: parseCodigosTipoChavePix(
+              cfg.pixCodigosTipoChaveAprendidos,
+            ),
+          }
+        : null,
       campoConfigurado: cfg.pixCampoTipoChave,
       codigosConfigurados: parseCodigosTipoChavePix(cfg.pixCodigosTipoChave),
       colunasPix: [...porColuna].map(([coluna, valores]) => ({

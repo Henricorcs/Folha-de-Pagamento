@@ -218,6 +218,18 @@ export function parseCodigosTipoChavePix(
 }
 
 /**
+ * Escreve os códigos no mesmo formato que `parseCodigosTipoChavePix` lê, para
+ * guardar no banco o que foi aprendido do IXC.
+ */
+export function serializarCodigosTipoChavePix(
+  codigos: Partial<Record<TipoChavePix, string>>,
+): string {
+  return TIPOS_CHAVE_PIX.filter((tipo) => codigos[tipo])
+    .map((tipo) => `${tipo}=${codigos[tipo]}`)
+    .join(',');
+}
+
+/**
  * Coluna e valor do rádio "Tipo da chave Pix". Sem mapa aprendido nem
  * configurado, manda o rótulo da tela na coluna mais provável — que é o
  * comportamento antigo.

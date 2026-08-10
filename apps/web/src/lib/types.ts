@@ -290,6 +290,10 @@ export interface ConfigFinanceira {
   pixCampoTipoChave: string;
   /** Códigos por tipo, ex.: "Celular=C,E-mail=E" ("" = usar o rótulo) */
   pixCodigosTipoChave: string;
+  /** Coluna que o app aprendeu sozinho do IXC (só leitura) */
+  pixCampoTipoChaveAprendido: string;
+  /** Códigos que o app já decorou, um por tipo de chave (só leitura) */
+  pixCodigosTipoChaveAprendidos: string;
   obsSalarioTemplate: string;
   obsAdiantamentoTemplate: string;
   obsBonusTemplate: string;
@@ -345,8 +349,16 @@ export interface Diarista {
 
 export interface DiaristaComResumo {
   diarista: Diarista;
+  /** Diárias no histórico, pagas ou não */
   quantidadeDiarias: number;
+  /** Só o dinheiro que saiu: em mãos, ou conta a pagar já PAGA */
   totalPago: number;
+  quantidadePagas: number;
+  /** No IXC, ainda a caminho do banco */
+  totalAguardando: number;
+  quantidadeAguardando: number;
+  /** Contas a pagar recusadas pelo IXC */
+  quantidadeComErro: number;
   ultimaDiaria: string | null;
   /** Diárias em mãos que ainda não viraram lançamento no caixa do IXC */
   pendentesNoCaixa: number;

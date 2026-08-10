@@ -26,4 +26,25 @@ export class ConfigFinanceiraService {
       data: dto,
     });
   }
+
+  /**
+   * Guarda o que o app descobriu do rádio "Tipo da chave Pix" no IXC.
+   *
+   * Fica em campo próprio, separado do que se informa em Configurações: o que
+   * foi digitado à mão continua mandando, e o aprendizado sobrevive ao
+   * reinício da API sem precisar reler as contas antigas do IXC.
+   */
+  async guardarAprendizadoPix(
+    campo: string,
+    codigos: string,
+  ): Promise<ConfiguracaoFinanceira> {
+    await this.obter();
+    return this.prisma.configuracaoFinanceira.update({
+      where: { id: 1 },
+      data: {
+        pixCampoTipoChaveAprendido: campo,
+        pixCodigosTipoChaveAprendidos: codigos,
+      },
+    });
+  }
 }
