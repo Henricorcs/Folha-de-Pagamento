@@ -21,11 +21,34 @@ const importarEsm = new Function(
   'return import(caminho)',
 ) as (caminho: string) => Promise<ModuloPdfjs>;
 
+/**
+ * O pdfjs é uma biblioteca de navegador: assim que é importada ela já executa
+ * `new DOMMatrix()` no corpo do módulo de desenho — antes de qualquer PDF ser
+ * aberto. No Node esse nome não existe, e a saída que a biblioteca conhece é
+ * carregar o @napi-rs/canvas, 37 MB de binário nativo que ela puxa sozinha como
+ * dependência opcional. Esse `require` acontece lá dentro, fora do nosso
+ * try/catch, e é o único código nativo no caminho de ler uma guia — o mesmo
+ * pacote que já apareceu quando a API não subia no container.
+ *
+ * Aqui nada é rasterizado: só sai texto. Então basta que os nomes existam no
+ * ambiente. Definindo-os antes do import, o pdfjs se dá por satisfeito e nunca
+ * procura o canvas — mesma coisa no Windows do desenvolvimento e no container.
+ */
+function prepararAmbienteDeNavegador(): void {
+  const globais = globalThis as unknown as Record<string, unknown>;
+  globais.DOMMatrix ??= class DOMMatrix {};
+  globais.ImageData ??= class ImageData {};
+  globais.Path2D ??= class Path2D {};
+}
+
 let modulo: Promise<ModuloPdfjs> | null = null;
 
 /** Carrega o pdfjs uma vez só — são dezenas de MB de JavaScript. */
 function carregarPdfjs(): Promise<ModuloPdfjs> {
-  if (!modulo) modulo = importarEsm('pdfjs-dist/legacy/build/pdf.mjs');
+  if (!modulo) {
+    prepararAmbienteDeNavegador();
+    modulo = importarEsm('pdfjs-dist/legacy/build/pdf.mjs');
+  }
   return modulo;
 }
 

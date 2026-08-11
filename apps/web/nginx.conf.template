@@ -7,6 +7,9 @@ server {
 
     # Encaminha /api/* para o serviço da API (mantém o prefixo /api).
     location /api/ {
+        # O padrão do nginx é 1 MB, e a API aceita guia de até 5 MB: sem isto o
+        # PDF maior morre aqui, com 413, sem nunca chegar em quem sabe lê-lo.
+        client_max_body_size 5m;
         proxy_pass http://${API_UPSTREAM};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
