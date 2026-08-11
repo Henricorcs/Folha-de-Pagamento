@@ -6,10 +6,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ClasseTributo, Prisma, TipoGuia } from '@prisma/client';
-import { PDFParse } from 'pdf-parse';
 import { PrismaService } from '../prisma/prisma.service';
 import { GravarGuiaDto } from './dto/guia.dto';
 import { conferir, GuiaIlegivelError, GuiaLida, lerGuia } from './guias.parse';
+import { extrairTextoPdf } from './pdf';
 
 /** O que a tela mostra depois de ler o PDF, antes de alguém confirmar. */
 export interface LeituraDaGuia {
@@ -73,22 +73,19 @@ export class ImpostosService {
     if (!arquivo?.buffer?.length) {
       throw new BadRequestException('Nenhum arquivo recebido.');
     }
-    const parser = new PDFParse({ data: new Uint8Array(arquivo.buffer) });
     try {
-      const { text } = await parser.getText();
-      if (!text.trim()) {
+      const texto = await extrairTextoPdf(new Uint8Array(arquivo.buffer));
+      if (!texto.trim()) {
         throw new BadRequestException(
           'O PDF não tem texto — parece ser digitalizado. Peça à contabilidade o arquivo original.',
         );
       }
-      return text;
+      return texto;
     } catch (err) {
       if (err instanceof BadRequestException) throw err;
       const motivo = err instanceof Error ? err.message : String(err);
       this.logger.error(`Falha ao ler o PDF ${arquivo.originalname}: ${motivo}`);
       throw new BadRequestException(`Não consegui abrir este PDF: ${motivo}`);
-    } finally {
-      await parser.destroy();
     }
   }
 
