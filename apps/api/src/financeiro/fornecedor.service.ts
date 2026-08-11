@@ -1,18 +1,36 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { DadosBancariosService } from '../ixc/dados-bancarios.service';
 import { IxcClient } from '../ixc/ixc.client';
-import { buildFornecedorPayload } from '../ixc/ixc.financeiro';
+import {
+  buildFornecedorPayload,
+  inferirTipoChavePix,
+  normalizarTipoChavePix,
+} from '../ixc/ixc.financeiro';
 import { ConfigFinanceiraService } from './config-financeira.service';
 
-/** Um fornecedor que já existe no IXC, como a tela precisa vê-lo. */
+/**
+ * Um fornecedor que já existe no IXC, como a tela precisa vê-lo — inclusive a
+ * aba "Dados bancários", que é de onde sai a chave que de fato paga. Reusar um
+ * cadastro sem trazer o que ele já tem obrigaria a redigitar tudo, e o motivo
+ * de reusar é justamente não ter de fazer isso.
+ */
 export interface FornecedorNoIxc {
   idFornecedor: number;
   nome: string;
   nomeFantasia: string | null;
   cpfCnpj: string | null;
+  /** F | J | E, como o IXC guarda. */
+  tipoPessoa: string | null;
   email: string | null;
   telefone: string | null;
+  cidadeIxc: number | null;
   ativo: boolean;
+  banco: string | null;
+  agencia: string | null;
+  conta: string | null;
+  chavePix: string | null;
+  tipoChavePix: string | null;
 }
 
 /** Campo de texto do IXC: string não vazia, ou null. */
@@ -33,6 +51,7 @@ export class FornecedorService {
     private readonly prisma: PrismaService,
     private readonly ixc: IxcClient,
     private readonly config: ConfigFinanceiraService,
+    private readonly dadosBancarios: DadosBancariosService,
   ) {}
 
   /** Retorna (criando se preciso) o id_fornecedor do funcionário no IXC. */
@@ -138,15 +157,50 @@ export class FornecedorService {
 
     const id = Number(bruto.id);
     if (!Number.isInteger(id) || id <= 0) return null;
+
+    const cfg = await this.config.obter();
+    const banco = await this.dadosBancarios.doFornecedor(
+      id,
+      cfg.fornecedorTabelaBanco,
+    );
+
     return {
       idFornecedor: id,
       nome: texto(bruto.razao) ?? texto(bruto.fantasia) ?? `Fornecedor ${id}`,
       nomeFantasia: texto(bruto.fantasia),
-      cpfCnpj: texto(bruto.cpf_cnpj),
+      cpfCnpj: texto(bruto.cnpj_cpf) ?? texto(bruto.cpf_cnpj),
+      tipoPessoa: texto(bruto.tipo_pessoa),
       email: texto(bruto.email),
       telefone: texto(bruto.celular) ?? texto(bruto.telefone),
+      cidadeIxc: Number(bruto.cidade) || null,
       ativo: String(bruto.ativo ?? '').toUpperCase() !== 'N',
+      ...banco,
     };
+  }
+
+  /**
+   * Espelha a chave PIX na aba "Dados bancários" do fornecedor no IXC. É o que
+   * faz o próximo pagamento não precisar da chave digitada de novo — e o que
+   * deixa a tela de contas a pagar do IXC preencher sozinha quando alguém
+   * lançar por lá.
+   *
+   * Devolve o motivo quando não deu, em vez de lançar: o pagamento daqui não
+   * depende disto (a chave vai no payload do fn_apagar), então falhar aqui é
+   * uma comodidade perdida, não um pagamento perdido.
+   */
+  async espelharPixNoIxc(
+    idFornecedor: number,
+    chavePix: string,
+    tipoChavePix: string | null,
+  ): Promise<string | null> {
+    const cfg = await this.config.obter();
+    const r = await this.dadosBancarios.gravarPix(
+      idFornecedor,
+      chavePix,
+      normalizarTipoChavePix(tipoChavePix) ?? inferirTipoChavePix(chavePix),
+      cfg.fornecedorTabelaBanco,
+    );
+    return r.gravado ? null : (r.motivo ?? 'motivo desconhecido');
   }
 
   private async criarFornecedor(input: {

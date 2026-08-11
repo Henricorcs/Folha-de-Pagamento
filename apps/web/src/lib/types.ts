@@ -372,15 +372,33 @@ export interface PagamentoAvulso {
   } | null;
 }
 
-/** Um fornecedor que já existe no IXC com aquele CPF/CNPJ. */
+/** Cadastro salvo, mais o que não deu certo do lado do IXC (se algo). */
+export interface BeneficiarioSalvo {
+  beneficiario: BeneficiarioAvulso;
+  /** null = correu tudo bem */
+  avisoIxc: string | null;
+}
+
+/**
+ * Um fornecedor que já existe no IXC com aquele CPF/CNPJ, com o que ele traz da
+ * aba "Dados bancários" — é de lá que sai a chave que de fato paga.
+ */
 export interface FornecedorNoIxc {
   idFornecedor: number;
   nome: string;
   nomeFantasia: string | null;
   cpfCnpj: string | null;
+  /** F | J | E, como o IXC guarda */
+  tipoPessoa: string | null;
   email: string | null;
   telefone: string | null;
+  cidadeIxc: number | null;
   ativo: boolean;
+  banco: string | null;
+  agencia: string | null;
+  conta: string | null;
+  chavePix: string | null;
+  tipoChavePix: string | null;
 }
 
 /** O que já existe com aquele documento, aqui e no IXC. */

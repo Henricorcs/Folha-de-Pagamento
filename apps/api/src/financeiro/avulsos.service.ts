@@ -40,6 +40,13 @@ export interface BeneficiarioComResumo {
   pendentesNoCaixa: number;
 }
 
+/** Cadastro salvo, mais o que não deu certo do lado do IXC (se algo). */
+export interface BeneficiarioSalvo {
+  beneficiario: BeneficiarioAvulso;
+  /** null = correu tudo bem. */
+  avisoIxc: string | null;
+}
+
 /** O que a tela precisa saber antes de cadastrar alguém com aquele documento. */
 export interface ConsultaCpfCnpj {
   /** Já cadastrado aqui (a busca é local, e vence a do IXC). */
@@ -156,24 +163,49 @@ export class AvulsosService {
     return { beneficiario, fornecedor, ixcIndisponivel };
   }
 
-  criarBeneficiario(dto: CriarBeneficiarioDto): Promise<BeneficiarioAvulso> {
-    return this.prisma.beneficiarioAvulso.create({
+  async criarBeneficiario(
+    dto: CriarBeneficiarioDto,
+  ): Promise<BeneficiarioSalvo> {
+    const beneficiario = await this.prisma.beneficiarioAvulso.create({
       data: { ...this.dadosDoCadastro(dto), nome: dto.nome.trim() },
     });
+    return { beneficiario, avisoIxc: await this.espelharPix(beneficiario) };
   }
 
   async atualizarBeneficiario(
     id: string,
     dto: UpdateBeneficiarioDto,
-  ): Promise<BeneficiarioAvulso> {
+  ): Promise<BeneficiarioSalvo> {
     await this.buscar(id);
-    return this.prisma.beneficiarioAvulso.update({
+    const beneficiario = await this.prisma.beneficiarioAvulso.update({
       where: { id },
       data: {
         ...this.dadosDoCadastro(dto),
         ...(dto.ativo === undefined ? {} : { ativo: dto.ativo }),
       },
     });
+    return { beneficiario, avisoIxc: await this.espelharPix(beneficiario) };
+  }
+
+  /**
+   * Sobe a chave PIX para a aba "Dados bancários" do fornecedor no IXC, para o
+   * próximo pagamento já sair sem digitar de novo.
+   *
+   * Só faz sentido quando já se sabe qual é o fornecedor — quem ainda não tem
+   * um só ganha o cadastro no primeiro pagamento, e é lá que a chave sobe.
+   * Falhar aqui devolve o motivo em vez de estourar: a chave continua valendo
+   * daqui, que é de onde a conta a pagar a tira.
+   */
+  private async espelharPix(b: BeneficiarioAvulso): Promise<string | null> {
+    if (!b.idFornecedorIxc || !b.chavePix) return null;
+    const motivo = await this.fornecedores.espelharPixNoIxc(
+      b.idFornecedorIxc,
+      b.chavePix,
+      b.tipoChavePix,
+    );
+    return motivo
+      ? `A chave ficou salva aqui, mas não subiu para os dados bancários do fornecedor no IXC: ${motivo}.`
+      : null;
   }
 
   /**
@@ -320,7 +352,7 @@ export class AvulsosService {
       usuarioId,
     );
 
-    return this.prisma.pagamentoAvulso.create({
+    const pagamento = await this.prisma.pagamentoAvulso.create({
       data: { ...base, contaPagarId: conta.id },
       include: {
         contaPagar: {
@@ -328,6 +360,15 @@ export class AvulsosService {
         },
       },
     });
+
+    // Só agora o fornecedor existe (foi criado ao mandar a conta a pagar), e é
+    // agora que a chave digitada aqui pode subir para os dados bancários dele.
+    // Sem estourar: o pagamento já foi feito, e a chave foi junto no payload.
+    const salvo = await this.buscar(base.beneficiarioId);
+    const aviso = await this.espelharPix(salvo);
+    if (aviso) this.logger.warn(aviso);
+
+    return pagamento;
   }
 
   /**

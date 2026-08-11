@@ -17,6 +17,7 @@ import { TIPOS_CHAVE_PIX } from '../lib/types';
 import type {
   BeneficiarioAvulso,
   BeneficiarioComResumo,
+  BeneficiarioSalvo,
   ConsultaCpfCnpj,
   FormaPagamento,
   PagamentoAvulso,
@@ -40,7 +41,7 @@ type Cadastro = typeof CADASTRO_VAZIO;
 /** O que fazer com o fornecedor que já existe no IXC com aquele documento. */
 type EscolhaFornecedor =
   | { tipo: 'PERGUNTAR'; consulta: ConsultaCpfCnpj }
-  | { tipo: 'REUSAR'; idFornecedorIxc: number; nome: string }
+  | { tipo: 'REUSAR'; idFornecedorIxc: number; semPix: boolean }
   | { tipo: 'NOVO' };
 
 function hojeISO(): string {
@@ -159,20 +160,20 @@ export function Avulsos() {
       };
       return editando && editando !== 'novo'
         ? (
-            await api.patch<BeneficiarioAvulso>(
+            await api.patch<BeneficiarioSalvo>(
               `/avulsos/beneficiarios/${editando}`,
               body,
             )
           ).data
-        : (await api.post<BeneficiarioAvulso>('/avulsos/beneficiarios', body))
+        : (await api.post<BeneficiarioSalvo>('/avulsos/beneficiarios', body))
             .data;
     },
-    onSuccess: (b) => {
-      avisar(
+    onSuccess: ({ beneficiario: b, avisoIxc }) => {
+      const feito =
         editando && editando !== 'novo'
           ? `${b.nome} atualizado.`
-          : `${b.nome} cadastrado.`,
-      );
+          : `${b.nome} cadastrado.`;
+      avisar(avisoIxc ? `${feito} ${avisoIxc}` : feito, !!avisoIxc);
       fecharCadastro();
       invalidar();
     },
@@ -182,11 +183,11 @@ export function Avulsos() {
   const alternarAtivo = useMutation({
     mutationFn: async (b: BeneficiarioAvulso) =>
       (
-        await api.patch<BeneficiarioAvulso>(`/avulsos/beneficiarios/${b.id}`, {
+        await api.patch<BeneficiarioSalvo>(`/avulsos/beneficiarios/${b.id}`, {
           ativo: !b.ativo,
         })
       ).data,
-    onSuccess: (b) => {
+    onSuccess: ({ beneficiario: b }) => {
       avisar(`${b.nome} ${b.ativo ? 'reativado' : 'desativado'}.`);
       invalidar();
     },
@@ -252,6 +253,38 @@ export function Avulsos() {
     onError: (err) => avisar(mensagemErro(err), true),
   });
 
+  /**
+   * Reusar o cadastro do IXC traz o que ele já tem. O motivo de reusar é não
+   * redigitar — vir com os campos vazios seria o pior dos dois mundos.
+   *
+   * Só completa o que está em branco: o que a pessoa já escreveu foi escolha
+   * dela, e o IXC não tem por que desfazê-la.
+   */
+  function usarFornecedor(f: NonNullable<ConsultaCpfCnpj['fornecedor']>) {
+    setForm((atual) => ({
+      ...atual,
+      nome: atual.nome || f.nome,
+      // Tipo de pessoa não é preferência de quem digita, é um fato do cadastro
+      // — e o campo já nasce em "Física", então esperar que esteja vazio seria
+      // esperar para sempre. O IXC ainda tem "Estrangeiro", que aqui não existe.
+      tipoPessoa: f.tipoPessoa === 'J' ? 'J' : 'F',
+      telefone: atual.telefone || (f.telefone ?? ''),
+      email: atual.email || (f.email ?? ''),
+      chavePix: atual.chavePix || (f.chavePix ?? ''),
+      tipoChavePix: atual.tipoChavePix || (f.tipoChavePix ?? ''),
+    }));
+    setFornecedor({
+      tipo: 'REUSAR',
+      idFornecedorIxc: f.idFornecedor,
+      semPix: !f.chavePix,
+    });
+    avisar(
+      f.chavePix
+        ? `Peguei os dados de ${f.nome} no IXC, inclusive a chave PIX dos dados bancários.`
+        : `Peguei os dados de ${f.nome} no IXC. Ele não tem chave PIX cadastrada lá — preencha aqui que eu subo para o cadastro dele.`,
+    );
+  }
+
   function abrirNovo() {
     setForm(CADASTRO_VAZIO);
     setFornecedor({ tipo: 'NOVO' });
@@ -271,7 +304,11 @@ export function Avulsos() {
     });
     setFornecedor(
       b.idFornecedorIxc
-        ? { tipo: 'REUSAR', idFornecedorIxc: b.idFornecedorIxc, nome: b.nome }
+        ? {
+            tipo: 'REUSAR',
+            idFornecedorIxc: b.idFornecedorIxc,
+            semPix: !b.chavePix,
+          }
         : { tipo: 'NOVO' },
     );
     setEditando(b.id);
@@ -426,20 +463,14 @@ export function Avulsos() {
           {fornecedor.tipo === 'PERGUNTAR' && fornecedor.consulta.fornecedor && (
             <EscolhaDoFornecedor
               fornecedor={fornecedor.consulta.fornecedor}
-              onReusar={() =>
-                setFornecedor({
-                  tipo: 'REUSAR',
-                  idFornecedorIxc: fornecedor.consulta.fornecedor!.idFornecedor,
-                  nome: fornecedor.consulta.fornecedor!.nome,
-                })
-              }
+              onReusar={() => usarFornecedor(fornecedor.consulta.fornecedor!)}
               onNovo={() => setFornecedor({ tipo: 'NOVO' })}
             />
           )}
           {fornecedor.tipo === 'REUSAR' && (
             <Aviso tom="pago">
               Vai usar o fornecedor #{fornecedor.idFornecedorIxc} que já existe
-              no IXC — os dados bancários de lá valem no pagamento.
+              no IXC{fornecedor.semPix ? ' — ele ainda não tem chave PIX cadastrada lá. A que você preencher aqui sobe para os dados bancários dele ao salvar, e no próximo pagamento já vem pronta.' : '.'}
             </Aviso>
           )}
 

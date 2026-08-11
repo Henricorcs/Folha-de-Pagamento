@@ -394,6 +394,59 @@ export interface DadosBancariosFornecedor {
   tipoChavePix: TipoChavePix | null;
 }
 
+/** Onde escrever a chave PIX numa linha do grid de dados bancários. */
+export interface DestinoDaChavePix {
+  /** Coluna que recebe a chave. */
+  campoChave: string;
+  /** Coluna do tipo preferencial, quando a base tem uma. */
+  campoTipo: string | null;
+}
+
+/**
+ * Em qual coluna gravar a chave PIX, dado o tipo dela e as colunas que esta
+ * base tem de verdade (lidas de uma linha existente).
+ *
+ * O IXC guarda a chave em colunas separadas por tipo — `pix_celular`,
+ * `pix_email`, `pix_cpf_cnpj` — e é o par coluna/tipo que faz o banco aceitar
+ * o pagamento. Escrever um celular na coluna de e-mail seria pior do que não
+ * escrever: passaria a existir uma chave errada no cadastro, e o erro só
+ * apareceria na hora em que o pagamento fosse recusado.
+ *
+ * Por isso, quando não existe coluna para aquele tipo, isto devolve `null` e
+ * quem chamou desiste de gravar — a chave continua valendo aqui, que é de onde
+ * a conta a pagar a tira.
+ */
+export function destinoDaChavePix(
+  modelo: Record<string, unknown>,
+  tipo: TipoChavePix | null,
+): DestinoDaChavePix | null {
+  const existentes = new Map(
+    Object.keys(modelo).map((k) => [k.toLowerCase(), k] as const),
+  );
+  const primeiraQueExiste = (campos: string[]): string | null => {
+    for (const campo of campos) {
+      const original = existentes.get(campo);
+      if (original) return original;
+    }
+    return null;
+  };
+
+  // A coluna do tipo certo vem primeiro; a genérica ("chave_pix") serve para
+  // qualquer tipo e é a saída quando a base não separa por tipo.
+  const doTipo = tipo
+    ? COLUNAS_PIX.find((c) => c.tipo === tipo)?.campos
+    : undefined;
+  const generica = COLUNAS_PIX.filter((c) => c.tipo === null).flatMap(
+    (c) => c.campos,
+  );
+
+  const campoChave =
+    (doTipo ? primeiraQueExiste(doTipo) : null) ?? primeiraQueExiste(generica);
+  if (!campoChave) return null;
+
+  return { campoChave, campoTipo: detectarCampoTipoPix(modelo) };
+}
+
 /**
  * Consolida as linhas do grid de um fornecedor: prioriza a que tem PIX e
  * completa os campos que faltarem com as demais. Chave e tipo vêm sempre da

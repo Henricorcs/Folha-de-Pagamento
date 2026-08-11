@@ -1,6 +1,7 @@
 import {
   casaValor,
   consolidarDadosBancarios,
+  destinoDaChavePix,
   detectarCampo,
   detectarCampoFornecedor,
   detectarCampoTipoPix,
@@ -513,5 +514,54 @@ describe('somenteDigitos', () => {
   it('normaliza CPF/CNPJ formatado', () => {
     expect(somenteDigitos('082.935.753-01')).toBe('08293575301');
     expect(somenteDigitos(null)).toBe('');
+  });
+});
+
+/**
+ * Onde a chave PIX é gravada de volta no IXC. A coluna carrega o tipo da chave
+ * — `pix_celular` é celular, `pix_email` é e-mail —, e o banco recusa quando o
+ * par não bate. Escrever na coluna errada é pior do que não escrever: cria uma
+ * chave falsa no cadastro que só se descobre com o pagamento recusado.
+ */
+describe('destinoDaChavePix', () => {
+  const GRID = {
+    id: '1',
+    id_fornecedor: '14',
+    banco: null,
+    agencia: null,
+    conta: null,
+    pix_cpf_cnpj: null,
+    pix_email: null,
+    pix_celular: null,
+    tipo_pix_preferencial: null,
+  };
+
+  it('escreve na coluna do tipo da chave', () => {
+    expect(destinoDaChavePix(GRID, 'Celular')).toEqual({
+      campoChave: 'pix_celular',
+      campoTipo: 'tipo_pix_preferencial',
+    });
+    expect(destinoDaChavePix(GRID, 'E-mail')?.campoChave).toBe('pix_email');
+    expect(destinoDaChavePix(GRID, 'CPF/CNPJ')?.campoChave).toBe('pix_cpf_cnpj');
+  });
+
+  /** Base que guarda tudo numa coluna só: aí ela serve para qualquer tipo. */
+  it('cai na coluna genérica quando a base não separa por tipo', () => {
+    const simples = { id: '1', id_fornecedor: '14', chave_pix: null };
+    expect(destinoDaChavePix(simples, 'Celular')).toEqual({
+      campoChave: 'chave_pix',
+      campoTipo: null,
+    });
+  });
+
+  /** Sem coluna para aquele tipo, desiste — não improvisa outra. */
+  it('desiste quando não há coluna para o tipo', () => {
+    const soEmail = { id: '1', id_fornecedor: '14', pix_email: null };
+    expect(destinoDaChavePix(soEmail, 'Celular')).toBeNull();
+  });
+
+  it('sem tipo definido, usa a coluna genérica', () => {
+    const misto = { id: '1', chave_pix: null, pix_celular: null };
+    expect(destinoDaChavePix(misto, null)?.campoChave).toBe('chave_pix');
   });
 });

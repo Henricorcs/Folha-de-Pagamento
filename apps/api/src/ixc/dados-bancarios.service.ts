@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { TipoChavePix } from './ixc.financeiro';
 import { IxcClient } from './ixc.client';
 import {
   consolidarDadosBancarios,
+  destinoDaChavePix,
   detectarCampoFornecedor,
   TABELAS_DADOS_BANCARIOS,
   type DadosBancariosFornecedor,
@@ -76,6 +78,107 @@ export class DadosBancariosService {
       );
       return vazio;
     }
+  }
+
+  /**
+   * Grava a chave PIX na aba "Dados bancários" do fornecedor, para o próximo
+   * pagamento já sair sem ninguém digitar de novo — e para a tela de contas a
+   * pagar do IXC preencher sozinha quando alguém lançar por lá.
+   *
+   * Escrever em tabela descoberta por tentativa pede cuidado, então isto só
+   * grava com um registro existente na mão para copiar os nomes das colunas, e
+   * só quando existe a coluna do tipo daquela chave. Sem isso, desiste e diz
+   * por quê: a chave continua valendo aqui, que é de onde a conta a pagar a
+   * tira — não gravar lá atrasa uma digitação; gravar errado cria uma chave
+   * falsa no cadastro, e o erro só apareceria com o pagamento recusado.
+   */
+  async gravarPix(
+    idFornecedor: number,
+    chave: string,
+    tipo: TipoChavePix | null,
+    tabelaConfigurada?: string | null,
+  ): Promise<{ gravado: boolean; motivo?: string }> {
+    const tabela = await this.resolverTabela(tabelaConfigurada);
+    if (!tabela) {
+      return {
+        gravado: false,
+        motivo:
+          'não achei a tabela de dados bancários do fornecedor no seu IXC (informe o nome em Configurações)',
+      };
+    }
+    const campo = this.campoFornecedor ?? 'id_fornecedor';
+
+    try {
+      const doFornecedor = await this.ixc.list<Record<string, unknown>>(tabela, {
+        qtype: `${tabela}.${campo}`,
+        query: String(idFornecedor),
+        oper: '=',
+        rp: 50,
+        sortname: `${tabela}.id`,
+        sortorder: 'asc',
+      });
+
+      // Sem linha desta pessoa, qualquer outra serve de molde: o que se copia
+      // dela são os nomes das colunas, nunca os valores.
+      const modelo = doFornecedor.registros[0] ?? (await this.umaLinha(tabela));
+      if (!modelo) {
+        return {
+          gravado: false,
+          motivo:
+            `a tabela "${tabela}" está vazia, então não tenho de onde copiar o ` +
+            'formato. Cadastre a chave à mão numa pessoa no IXC e a partir daí eu consigo',
+        };
+      }
+
+      const destino = destinoDaChavePix(modelo, tipo);
+      if (!destino) {
+        return {
+          gravado: false,
+          motivo: `a tabela "${tabela}" não tem coluna para chave do tipo ${tipo ?? 'informado'}`,
+        };
+      }
+
+      const corpo: Record<string, unknown> = {
+        [campo]: String(idFornecedor),
+        [destino.campoChave]: chave,
+        ...(destino.campoTipo && tipo ? { [destino.campoTipo]: tipo } : {}),
+      };
+
+      const existente = doFornecedor.registros[0];
+      if (existente?.id) {
+        await this.ixc.update(tabela, String(existente.id), corpo);
+        this.logger.log(
+          `Chave PIX gravada no fornecedor #${idFornecedor} (${tabela} #${String(existente.id)}, coluna ${destino.campoChave})`,
+        );
+      } else {
+        const { id } = await this.ixc.create(tabela, corpo);
+        this.logger.log(
+          `Dados bancários criados para o fornecedor #${idFornecedor} (${tabela} #${id}, coluna ${destino.campoChave})`,
+        );
+      }
+      return { gravado: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Não gravei a chave PIX do fornecedor #${idFornecedor}: ${message}`,
+      );
+      return { gravado: false, motivo: message };
+    }
+  }
+
+  /** Uma linha qualquer da tabela, só para saber os nomes das colunas. */
+  private async umaLinha(
+    tabela: string,
+  ): Promise<Record<string, unknown> | null> {
+    const res = await this.ixc.list<Record<string, unknown>>(tabela, {
+      qtype: `${tabela}.id`,
+      query: '0',
+      oper: '>',
+      rp: 1,
+      sortname: `${tabela}.id`,
+      sortorder: 'desc',
+    });
+    return res.registros[0] ?? null;
   }
 
   /**

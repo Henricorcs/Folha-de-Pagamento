@@ -48,6 +48,8 @@ function montarServico(
     fornecedorNoIxc?: unknown;
     /** IXC fora do ar na hora de consultar o documento. */
     erroConsulta?: string;
+    /** Por que a chave não subiu para os dados bancários do fornecedor. */
+    motivoEspelho?: string;
   } = {},
 ) {
   const beneficiario = { ...BENEFICIARIO, ...opts.beneficiario };
@@ -59,10 +61,15 @@ function montarServico(
       findUnique: jest.fn().mockResolvedValue(beneficiario),
       findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        ...beneficiario,
+        ...data,
+      })),
       update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({
         ...beneficiario,
         ...data,
       })),
+      delete: jest.fn(),
     },
     pagamentoAvulso: {
       create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -107,6 +114,7 @@ function montarServico(
       if (opts.erroConsulta) throw new Error(opts.erroConsulta);
       return opts.fornecedorNoIxc ?? null;
     }),
+    espelharPixNoIxc: jest.fn(async () => opts.motivoEspelho ?? null),
   } as any;
 
   const caixa = {
@@ -123,6 +131,7 @@ function montarServico(
     service: new AvulsosService(prisma, config, contasPagar, fornecedores, caixa),
     prisma,
     contasPagar,
+    fornecedores,
     caixa,
   };
 }
@@ -292,6 +301,65 @@ describe('consulta do CPF/CNPJ', () => {
     const r = await service.consultarCpfCnpj('111.222.333-44');
     expect(r.fornecedor).toBeNull();
     expect(r.ixcIndisponivel).toBe('timeout');
+  });
+});
+
+describe('a chave PIX sobe para o fornecedor no IXC', () => {
+  /**
+   * É o que faz o próximo pagamento não pedir a chave de novo — e o que deixa
+   * a tela de contas a pagar do IXC preencher sozinha quando alguém lançar
+   * por lá.
+   */
+  it('grava nos dados bancários quando o fornecedor já é conhecido', async () => {
+    const { service, prisma, fornecedores } = montarServico();
+    prisma.beneficiarioAvulso.create.mockResolvedValue({
+      ...BENEFICIARIO,
+      idFornecedorIxc: 14,
+      chavePix: '(99) 99230-0993',
+      tipoChavePix: 'Celular',
+    });
+
+    const r = await service.criarBeneficiario({ nome: 'Deda Pedreiro' });
+
+    expect(fornecedores.espelharPixNoIxc).toHaveBeenCalledWith(
+      14,
+      '(99) 99230-0993',
+      'Celular',
+    );
+    expect(r.avisoIxc).toBeNull();
+  });
+
+  /** Quem ainda não tem fornecedor ganha um no primeiro pagamento. */
+  it('não tenta gravar em quem ainda não tem fornecedor no IXC', async () => {
+    const { service, prisma, fornecedores } = montarServico();
+    prisma.beneficiarioAvulso.create.mockResolvedValue({
+      ...BENEFICIARIO,
+      idFornecedorIxc: null,
+    });
+
+    await service.criarBeneficiario({ nome: 'Deda Pedreiro' });
+    expect(fornecedores.espelharPixNoIxc).not.toHaveBeenCalled();
+  });
+
+  /**
+   * O cadastro não pode se perder porque o IXC não aceitou a escrita: a chave
+   * vale daqui, que é de onde a conta a pagar a tira. Perde-se a comodidade,
+   * não o pagamento — e a tela diz o que aconteceu.
+   */
+  it('o cadastro é salvo mesmo quando a gravação no IXC falha', async () => {
+    const { service, prisma } = montarServico({
+      motivoEspelho: 'não achei a tabela de dados bancários',
+    });
+    prisma.beneficiarioAvulso.create.mockResolvedValue({
+      ...BENEFICIARIO,
+      idFornecedorIxc: 14,
+      chavePix: 'deda@pix',
+    });
+
+    const r = await service.criarBeneficiario({ nome: 'Deda Pedreiro' });
+
+    expect(r.beneficiario.chavePix).toBe('deda@pix');
+    expect(r.avisoIxc).toMatch(/não achei a tabela de dados bancários/);
   });
 });
 
