@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SyncStatus } from '@prisma/client';
+import { Prisma, SyncStatus } from '@prisma/client';
 import { ConfigFinanceiraService } from '../financeiro/config-financeira.service';
 import { DadosBancariosService } from '../ixc/dados-bancarios.service';
 import { IxcClient } from '../ixc/ixc.client';
@@ -423,7 +423,10 @@ export class SyncService {
         );
       }
 
-      const funcionarios = await this.indiceFuncionarios();
+      // Quem **é** funcionário pela regra da casa (fornecedor isento de ICMS),
+      // e não qualquer linha da tabela: estar cadastrado lá sem ser isento não
+      // pode impedir de virar diarista.
+      const funcionarios = await this.indiceFuncionarios({ isentoIcms: true });
       const indice = await this.indiceDiaristas();
       /** Cadastros locais já usados nesta rodada, para dois fornecedores
        * distintos não colapsarem no mesmo diarista. */
@@ -530,7 +533,8 @@ export class SyncService {
       tabelaBanco,
     } = await this.lerDiaristasDoFornecedor();
 
-    const funcionarios = await this.indiceFuncionarios();
+    // Mesma régua da importação: só barra quem é isento de ICMS de verdade.
+    const funcionarios = await this.indiceFuncionarios({ isentoIcms: true });
     const indice = await this.indiceDiaristas();
 
     return {
@@ -668,8 +672,24 @@ export class SyncService {
   }
 
   /** Índice dos funcionários locais por id de fornecedor e por CPF/CNPJ. */
-  private async indiceFuncionarios(): Promise<Indice<FuncionarioLocal>> {
+  /**
+   * Índice dos cadastros locais de funcionário.
+   *
+   * Sem filtro, traz **todas** as linhas da tabela — inclusive quem veio do
+   * cadastro de funcionários do IXC sem ser isento de ICMS. É o que a
+   * sincronização de funcionários precisa para achar o cadastro que já existe:
+   * filtrar aqui criaria um segundo para quem acabou de virar isento.
+   *
+   * Quem quer saber "esta pessoa **é** funcionário?" passa
+   * `{ isentoIcms: true }` — estar na tabela não é a mesma coisa que ser, e
+   * confundir os dois barrava de virar diarista quem está marcado
+   * "Estrangeiro" no fornecedor e "Contribuinte ICMS: Sim".
+   */
+  private async indiceFuncionarios(
+    where?: Prisma.FuncionarioWhereInput,
+  ): Promise<Indice<FuncionarioLocal>> {
     const locais = await this.prisma.funcionario.findMany({
+      where,
       select: {
         id: true,
         ixcId: true,

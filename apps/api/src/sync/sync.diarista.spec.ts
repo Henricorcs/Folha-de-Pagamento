@@ -74,7 +74,16 @@ function montarServico(opts: {
       update: jest.fn().mockResolvedValue({}),
     },
     funcionario: {
-      findMany: jest.fn().mockResolvedValue(opts.funcionarios ?? []),
+      // Respeita o filtro: "estar na tabela" e "ser funcionário" (isento de
+      // ICMS) são coisas diferentes, e é justamente isso que se testa aqui.
+      findMany: jest.fn(
+        async (args?: { where?: { isentoIcms?: boolean } }) => {
+          const todos = opts.funcionarios ?? [];
+          return args?.where?.isentoIcms
+            ? todos.filter((f) => f.isentoIcms === true)
+            : todos;
+        },
+      ),
     },
     diarista: {
       findMany: jest.fn().mockResolvedValue(opts.diaristas ?? []),
@@ -186,6 +195,7 @@ describe('SyncService.syncDiaristasDoFornecedor', () => {
           telefone: null,
           cidadeIxc: null,
           idFornecedorIxc: null,
+          isentoIcms: true,
         },
       ],
     });
@@ -198,6 +208,46 @@ describe('SyncService.syncDiaristasDoFornecedor', () => {
     expect(res.ignoradosPorSerFuncionario).toEqual([
       'Antonio Clebes Alves da Silva',
     ]);
+  });
+
+  /**
+   * A tabela `funcionarios` guarda também quem veio do cadastro de
+   * funcionários do IXC sem ser isento de ICMS — e isento é o que define ser
+   * funcionário nesta casa. Confundir "estar na tabela" com "ser" barrava de
+   * virar diarista quem está marcado "Estrangeiro" no fornecedor e
+   * "Contribuinte ICMS: Sim", que é exatamente quem deve entrar.
+   */
+  it('quem está na tabela de funcionários sem ser isento de ICMS vira diarista', async () => {
+    const { service, create } = montarServico({
+      fornecedores: [DEDA],
+      funcionarios: [
+        {
+          id: 'func-1',
+          ixcId: 77,
+          nome: 'Antonio Clebes Alves da Silva',
+          cpfCnpj: '03895760340',
+          email: null,
+          telefone: null,
+          cidadeIxc: null,
+          idFornecedorIxc: null,
+          isentoIcms: false,
+        },
+      ],
+    });
+
+    const res = await service.syncDiaristasDoFornecedor();
+
+    expect(res.ignoradosPorSerFuncionario).toEqual([]);
+    expect(res.totalNovos).toBe(1);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          nome: 'Antonio Clebes Alves da Silva',
+          idFornecedorIxc: 3103,
+          importadoDoIxc: true,
+        }),
+      }),
+    );
   });
 
   it('casa por CPF com diarista já cadastrado à mão, sem duplicar', async () => {

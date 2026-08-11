@@ -140,8 +140,10 @@ export function Diaristas() {
         `${r.totalLidos} estrangeiro(s) no IXC — ${r.totalNovos} novo(s), ${r.totalAtualizados} atualizado(s).`,
       ];
       if (r.ignoradosPorSerFuncionario.length > 0) {
+        // Dizer a régua junto: quando alguém aparecer aqui sem dever aparecer,
+        // é este o campo do fornecedor no IXC que está a explicar o porquê.
         partes.push(
-          `Fora por já serem funcionários: ${r.ignoradosPorSerFuncionario.join(', ')}.`,
+          `Fora por já serem funcionários (isentos de ICMS no fornecedor): ${r.ignoradosPorSerFuncionario.join(', ')}.`,
         );
       }
       if (r.totalLidos === 0) {
