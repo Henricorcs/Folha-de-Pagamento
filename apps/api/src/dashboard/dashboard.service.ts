@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
-  FormaPagamentoDiaria,
+  FormaPagamento,
   StatusContaPagar,
   TipoLancamento,
 } from '@prisma/client';
@@ -219,7 +219,7 @@ interface DiariaDaSerie {
   data: Date;
   valor: unknown;
   quantidade: unknown;
-  forma: FormaPagamentoDiaria;
+  forma: FormaPagamento;
   diaristaId: string;
   contaPagar: { status: StatusContaPagar } | null;
 }
@@ -233,7 +233,7 @@ type SituacaoDaDiaria = 'SAIU' | 'A_CAMINHO' | 'TRAVADA';
  * escrituração, não pagamento); pelo IXC, só quando o banco confirmou.
  */
 function situacaoDaDiaria(d: DiariaDaSerie): SituacaoDaDiaria {
-  if (d.forma === FormaPagamentoDiaria.EM_MAOS) return 'SAIU';
+  if (d.forma === FormaPagamento.EM_MAOS) return 'SAIU';
   const status = d.contaPagar?.status;
   if (status === StatusContaPagar.PAGO) return 'SAIU';
   if (status && EM_ABERTO.includes(status)) return 'A_CAMINHO';

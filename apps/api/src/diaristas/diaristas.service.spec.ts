@@ -1,5 +1,5 @@
 import {
-  FormaPagamentoDiaria,
+  FormaPagamento,
   StatusContaPagar,
   TipoLancamento,
 } from '@prisma/client';
@@ -18,7 +18,7 @@ const DIARISTA = {
   chavePix: 'joao@pix',
   tipoChavePix: null,
   valorDiaria: 120,
-  formaPagamento: FormaPagamentoDiaria.IXC,
+  formaPagamento: FormaPagamento.IXC,
   observacoes: null,
   ativo: true,
   idFornecedorIxc: null,
@@ -118,7 +118,7 @@ describe('pagar pelo IXC', () => {
       {
         quantidade: 2,
         descricao: 'Pintura do galpão',
-        forma: FormaPagamentoDiaria.IXC,
+        forma: FormaPagamento.IXC,
       },
       'user-1',
     );
@@ -188,7 +188,7 @@ describe('pagar em mãos', () => {
 
     const diaria = await service.pagar('d1', {
       descricao: 'Roçada',
-      forma: FormaPagamentoDiaria.EM_MAOS,
+      forma: FormaPagamento.EM_MAOS,
     });
 
     expect(lancarSaida).toHaveBeenCalledWith(
@@ -214,7 +214,7 @@ describe('pagar em mãos', () => {
 
     const diaria = await service.pagar('d1', {
       descricao: 'Roçada',
-      forma: FormaPagamentoDiaria.EM_MAOS,
+      forma: FormaPagamento.EM_MAOS,
     });
 
     expect(diaria.id).toBeTruthy();
@@ -227,7 +227,7 @@ describe('pagar em mãos', () => {
 
     const diaria = await service.pagar('d1', {
       descricao: 'Roçada',
-      forma: FormaPagamentoDiaria.EM_MAOS,
+      forma: FormaPagamento.EM_MAOS,
     });
 
     expect(lancarSaida).not.toHaveBeenCalled();
@@ -240,7 +240,7 @@ describe('pagar em mãos', () => {
     });
     const diaria = await service.pagar('d1', {
       descricao: 'Roçada',
-      forma: FormaPagamentoDiaria.EM_MAOS,
+      forma: FormaPagamento.EM_MAOS,
     });
     expect(diaria).toMatchObject({ idLancamentoIxc: 900 });
     expect(diaria.erroIxc).toMatch(/Confira|conferiu|valor gravado/i);
@@ -259,7 +259,7 @@ describe('tentar de novo e fechar à mão', () => {
     const { service } = montarServico();
     const diaria = await service.pagar('d1', {
       descricao: 'Roçada',
-      forma: FormaPagamentoDiaria.EM_MAOS,
+      forma: FormaPagamento.EM_MAOS,
     });
     await expect(service.lancarNoCaixa(diaria.id)).rejects.toThrow(/já saiu do caixa/i);
   });
@@ -270,7 +270,7 @@ describe('tentar de novo e fechar à mão', () => {
     });
     const diaria = await service.pagar('d1', {
       descricao: 'Roçada',
-      forma: FormaPagamentoDiaria.EM_MAOS,
+      forma: FormaPagamento.EM_MAOS,
     });
     expect(diaria.erroIxc).toBeTruthy();
 
@@ -288,7 +288,7 @@ describe('tentar de novo e fechar à mão', () => {
     const { service } = montarServico({ erroLancamento: 'sem tabela' });
     const diaria = await service.pagar('d1', {
       descricao: 'Roçada',
-      forma: FormaPagamentoDiaria.EM_MAOS,
+      forma: FormaPagamento.EM_MAOS,
     });
     const fechada = await service.marcarLancadoManual(diaria.id);
     expect(fechada).toMatchObject({ lancadoManual: true, erroIxc: null });
@@ -299,7 +299,7 @@ describe('tentar de novo e fechar à mão', () => {
     const { service, prisma } = montarServico();
     const diaria = await service.pagar('d1', {
       descricao: 'Roçada',
-      forma: FormaPagamentoDiaria.EM_MAOS,
+      forma: FormaPagamento.EM_MAOS,
     });
     await expect(service.removerDiaria(diaria.id)).rejects.toThrow(
       /Apague por lá primeiro/i,
@@ -311,7 +311,7 @@ describe('tentar de novo e fechar à mão', () => {
     const { service, contasPagar, prisma } = montarServico();
     const diaria = await service.pagar('d1', {
       descricao: 'Capina',
-      forma: FormaPagamentoDiaria.IXC,
+      forma: FormaPagamento.IXC,
     });
     await service.removerDiaria(diaria.id);
     expect(contasPagar.remover).toHaveBeenCalledWith('conta-1');
@@ -336,7 +336,7 @@ describe('resumo da listagem', () => {
   const emMaos = (valor: number) => ({
     valor,
     data: new Date(Date.UTC(2026, 7, 10)),
-    forma: FormaPagamentoDiaria.EM_MAOS,
+    forma: FormaPagamento.EM_MAOS,
     idLancamentoIxc: 900,
     lancadoManual: false,
     contaPagar: null,
@@ -345,7 +345,7 @@ describe('resumo da listagem', () => {
   const peloIxc = (valor: number, status: StatusContaPagar) => ({
     valor,
     data: new Date(Date.UTC(2026, 7, 10)),
-    forma: FormaPagamentoDiaria.IXC,
+    forma: FormaPagamento.IXC,
     idLancamentoIxc: null,
     lancadoManual: false,
     contaPagar: { status },

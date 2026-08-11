@@ -1052,9 +1052,12 @@ export class ContasPagarService {
     if (conta.beneficiarioAvulsoId) {
       const b = await this.prisma.beneficiarioAvulso.findUnique({
         where: { id: conta.beneficiarioAvulsoId },
-        select: { chavePix: true },
+        select: { chavePix: true, tipoChavePix: true },
       });
-      return { chave: b?.chavePix ?? null, tipo: null };
+      return {
+        chave: b?.chavePix ?? null,
+        tipo: normalizarTipoChavePix(b?.tipoChavePix),
+      };
     }
     return { chave: null, tipo: null };
   }
@@ -1203,6 +1206,7 @@ function contaContabilPorTipo(
     contaContabilAdiantamento: number;
     contaContabilBonus: number;
     contaContabilDiaria: number;
+    contaContabilAvulso: number;
   },
 ): number {
   switch (tipo) {
@@ -1212,6 +1216,8 @@ function contaContabilPorTipo(
       return cfg.contaContabilBonus;
     case TipoLancamento.DIARIA:
       return cfg.contaContabilDiaria;
+    case TipoLancamento.AVULSO:
+      return cfg.contaContabilAvulso;
     default:
       return cfg.contaContabilSalario;
   }

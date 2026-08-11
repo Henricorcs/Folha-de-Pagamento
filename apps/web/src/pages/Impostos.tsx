@@ -4,6 +4,7 @@ import {
   Aviso,
   Bloco,
   CabecalhoPagina,
+  CampoDinheiro,
   Carregando,
   Pagina,
   Selo,
@@ -95,6 +96,8 @@ export function Impostos() {
   const [itens, setItens] = useState<ItemGuia[]>([]);
   const [feedback, setFeedback] = useState('');
   const [erro, setErro] = useState(false);
+  /** Digitando a guia em vez de subir o PDF (o digitalizado não tem texto). */
+  const [aMao, setAMao] = useState(false);
   const inputArquivo = useRef<HTMLInputElement>(null);
 
   const guias = useQuery({
@@ -152,6 +155,24 @@ export function Impostos() {
     onError: (err) => avisar(mensagemErro(err), true),
   });
 
+  /**
+   * O mesmo POST do fluxo do PDF — só que a leitura veio dos olhos de quem
+   * está com o papel na mão. Vale para a guia digitalizada, que não tem texto.
+   */
+  const gravarAMao = useMutation({
+    mutationFn: async (guia: Record<string, unknown>) =>
+      (await api.post<Guia>('/impostos/guias', guia)).data,
+    onSuccess: (guia) => {
+      avisar(
+        `Guia de ${TIPO_GUIA_LABEL[guia.tipo]} de ${formatComp(guia.competencia)} lançada à mão.`,
+      );
+      setAMao(false);
+      qc.invalidateQueries({ queryKey: ['guias'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: (err) => avisar(mensagemErro(err), true),
+  });
+
   const excluir = useMutation({
     mutationFn: async (id: string) => api.delete(`/impostos/guias/${id}`),
     onSuccess: () => {
@@ -195,27 +216,51 @@ export function Impostos() {
 
       {feedback && <Aviso tom={erro ? 'erro' : 'marca'}>{feedback}</Aviso>}
 
-      <Bloco titulo="Lançar uma guia" className="surgir">
-        <div className="flex flex-wrap items-center gap-3">
-          <input
-            ref={inputArquivo}
-            type="file"
-            accept="application/pdf,.pdf"
-            onChange={(e) => {
-              const arquivo = e.target.files?.[0];
-              if (arquivo) ler.mutate(arquivo);
+      <Bloco
+        titulo="Lançar uma guia"
+        className="surgir"
+        acao={
+          <button
+            onClick={() => {
+              setAMao((v) => !v);
+              cancelar();
             }}
-            className="block w-full max-w-md text-sm text-tinta-500 file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-brand-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-brand-700"
+            className="text-xs font-semibold text-brand-700 hover:underline"
+          >
+            {aMao ? 'Voltar a subir o PDF' : 'Digitar à mão'}
+          </button>
+        }
+      >
+        {aMao ? (
+          <LancamentoAMao
+            ocupado={gravarAMao.isPending}
+            onGravar={(guia) => gravarAMao.mutate(guia)}
           />
-          {ler.isPending && (
-            <span className="text-sm text-tinta-400">Lendo o PDF…</span>
-          )}
-        </div>
-        <p className="mt-3 text-xs leading-relaxed text-tinta-500">
-          Entende DARF previdenciário, guia do FGTS Digital, DAS do Simples
-          Nacional e DARE do ICMS. O arquivo precisa ser o PDF original da
-          contabilidade — se for digitalizado, não tem texto para ler.
-        </p>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                ref={inputArquivo}
+                type="file"
+                accept="application/pdf,.pdf"
+                onChange={(e) => {
+                  const arquivo = e.target.files?.[0];
+                  if (arquivo) ler.mutate(arquivo);
+                }}
+                className="block w-full max-w-md text-sm text-tinta-500 file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-brand-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-brand-700"
+              />
+              {ler.isPending && (
+                <span className="text-sm text-tinta-400">Lendo o PDF…</span>
+              )}
+            </div>
+            <p className="mt-3 text-xs leading-relaxed text-tinta-500">
+              Entende DARF previdenciário, guia do FGTS Digital, DAS do Simples
+              Nacional e DARE do ICMS. Precisa ser o PDF original da
+              contabilidade: quando o arquivo é digitalizado (uma foto dentro do
+              PDF), não há texto para ler — aí use “Digitar à mão”.
+            </p>
+          </>
+        )}
       </Bloco>
 
       {leitura && (
@@ -446,6 +491,251 @@ export function Impostos() {
         )}
       </Bloco>
     </Pagina>
+  );
+}
+
+/** A composição que cada tipo de guia costuma ter, já classificada. */
+const COMPOSICAO_PADRAO: Record<TipoGuia, ItemGuia[]> = {
+  DARE_ICMS: [
+    { codigo: '101', denominacao: 'ICMS — DARE estadual', valor: 0, classe: 'FATURAMENTO' },
+  ],
+  DARF_INSS: [
+    { codigo: '1082', denominacao: 'CP descontada do segurado', valor: 0, classe: 'FOLHA_RETIDO' },
+  ],
+  FGTS: [
+    { codigo: null, denominacao: 'FGTS mensal', valor: 0, classe: 'FOLHA_PATRONAL' },
+    { codigo: null, denominacao: 'Consignado retido do trabalhador', valor: 0, classe: 'FOLHA_RETIDO' },
+  ],
+  DAS_SIMPLES: [
+    { codigo: '1006', denominacao: 'INSS — Simples Nacional', valor: 0, classe: 'FOLHA_PATRONAL' },
+    { codigo: null, denominacao: 'Demais tributos do DAS', valor: 0, classe: 'FATURAMENTO' },
+  ],
+  OUTRA: [{ codigo: null, denominacao: '', valor: 0, classe: 'FATURAMENTO' }],
+};
+
+/**
+ * Digitar a guia em vez de subir o PDF.
+ *
+ * Existe porque a contabilidade às vezes manda o documento digitalizado — uma
+ * foto dentro do PDF, sem texto nenhum para ler. Ler aquilo com OCR seria
+ * adivinhar dígito de imposto, e errar ali é pior do que digitar: quem tem o
+ * papel na mão lê melhor que qualquer palpite.
+ *
+ * A composição já vem classificada por tipo de guia, porque é ela — e não o
+ * total — que decide o que é custo com pessoal.
+ */
+function LancamentoAMao({
+  ocupado,
+  onGravar,
+}: {
+  ocupado: boolean;
+  onGravar: (guia: Record<string, unknown>) => void;
+}) {
+  const [tipo, setTipo] = useState<TipoGuia>('DARE_ICMS');
+  const [competencia, setCompetencia] = useState('');
+  const [vencimento, setVencimento] = useState('');
+  const [numeroDocumento, setNumeroDocumento] = useState('');
+  const [arquivoNome, setArquivoNome] = useState('');
+  const [itens, setItens] = useState<ItemGuia[]>(COMPOSICAO_PADRAO.DARE_ICMS);
+
+  function trocarTipo(novo: TipoGuia) {
+    setTipo(novo);
+    setItens(COMPOSICAO_PADRAO[novo].map((i) => ({ ...i })));
+  }
+
+  function alterarItem(i: number, mudanca: Partial<ItemGuia>) {
+    setItens(itens.map((item, j) => (j === i ? { ...item, ...mudanca } : item)));
+  }
+
+  const total = itens.reduce((s, i) => s + (Number(i.valor) || 0), 0);
+  const semDenominacao = itens.some((i) => i.denominacao.trim().length < 2);
+  const valido =
+    /^\d{4}-\d{2}$/.test(competencia) &&
+    !!vencimento &&
+    total >= 0.01 &&
+    !semDenominacao;
+
+  return (
+    <>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div>
+          <label className="rotulo">Guia</label>
+          <select
+            value={tipo}
+            onChange={(e) => trocarTipo(e.target.value as TipoGuia)}
+            className="campo"
+          >
+            {ORDEM_GUIA.map((t) => (
+              <option key={t} value={t}>
+                {TIPO_GUIA_LABEL[t]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="rotulo">Apuração — o mês do conjunto</label>
+          <input
+            type="month"
+            value={competencia}
+            onChange={(e) => setCompetencia(e.target.value)}
+            className="campo"
+          />
+        </div>
+        <div>
+          <label className="rotulo">Vencimento</label>
+          <input
+            type="date"
+            value={vencimento}
+            onChange={(e) => setVencimento(e.target.value)}
+            className="campo"
+          />
+        </div>
+        <div>
+          <label className="rotulo">Número do documento</label>
+          <input
+            value={numeroDocumento}
+            onChange={(e) => setNumeroDocumento(e.target.value)}
+            className="campo"
+            placeholder="Opcional"
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="rotulo">Nome do arquivo — para reencontrar depois</label>
+          <input
+            value={arquivoNome}
+            onChange={(e) => setArquivoNome(e.target.value)}
+            className="campo"
+            placeholder="Ex.: ICMS DIFAL - 05.2026.pdf"
+          />
+        </div>
+      </div>
+
+      <div className="mt-5 overflow-x-auto rolagem-fina">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-y border-tinta-100">
+              <th className="th">Código</th>
+              <th className="th">Denominação</th>
+              <th className="th">Valor</th>
+              <th className="th">Conta como</th>
+              <th className="th text-right">Ação</th>
+            </tr>
+          </thead>
+          <tbody>
+            {itens.map((item, i) => (
+              <tr key={i} className="linha">
+                <td className="td">
+                  <input
+                    value={item.codigo ?? ''}
+                    onChange={(e) =>
+                      alterarItem(i, { codigo: e.target.value || null })
+                    }
+                    className="campo w-24 py-1.5 text-xs"
+                  />
+                </td>
+                <td className="td">
+                  <input
+                    value={item.denominacao}
+                    onChange={(e) =>
+                      alterarItem(i, { denominacao: e.target.value })
+                    }
+                    className="campo py-1.5 text-xs"
+                    placeholder="O que esse valor é"
+                  />
+                </td>
+                <td className="td">
+                  <CampoDinheiro
+                    valor={item.valor ? String(item.valor) : ''}
+                    onChange={(v) => alterarItem(i, { valor: Number(v) || 0 })}
+                    className="campo w-32 py-1.5 text-xs"
+                  />
+                </td>
+                <td className="td">
+                  <select
+                    value={item.classe}
+                    onChange={(e) =>
+                      alterarItem(i, { classe: e.target.value as ClasseTributo })
+                    }
+                    className="campo py-1.5 text-xs"
+                  >
+                    {CLASSES.map((c) => (
+                      <option key={c} value={c}>
+                        {CLASSE_LABEL[c]}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td className="td text-right">
+                  {itens.length > 1 && (
+                    <button
+                      onClick={() =>
+                        setItens(itens.filter((_, j) => j !== i))
+                      }
+                      className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600"
+                    >
+                      Tirar
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <button
+        onClick={() =>
+          setItens([
+            ...itens,
+            { codigo: null, denominacao: '', valor: 0, classe: 'FATURAMENTO' },
+          ])
+        }
+        className="btn btn-neutro btn-p mt-3"
+      >
+        + Outra linha
+      </button>
+
+      <div className="mt-5 flex flex-wrap items-center gap-4 border-t border-tinta-100 pt-4">
+        <button
+          onClick={() =>
+            onGravar({
+              tipo,
+              competencia,
+              vencimento,
+              valorTotal: total,
+              numeroDocumento: numeroDocumento || undefined,
+              arquivoNome: arquivoNome.trim() || 'Lançada à mão',
+              itens: itens.map(({ codigo, denominacao, valor, classe }) => ({
+                codigo: codigo ?? undefined,
+                denominacao,
+                valor,
+                classe,
+              })),
+            })
+          }
+          disabled={!valido || ocupado}
+          className="btn btn-primario"
+        >
+          {ocupado ? 'Gravando…' : 'Gravar guia'}
+        </button>
+        <span className="text-sm text-tinta-500">
+          Total da guia{' '}
+          <strong className="valor text-[15px]">{formatBRL(total)}</strong>
+        </span>
+        {semDenominacao && (
+          <span className="text-sm text-rose-600">
+            Toda linha precisa dizer o que é.
+          </span>
+        )}
+      </div>
+
+      <p className="mt-3 text-xs leading-relaxed text-tinta-500">
+        A coluna “conta como” é o que faz o número significar alguma coisa: só o
+        patronal entra no custo com pessoal. O retido é dinheiro do trabalhador
+        passando pela conta da empresa, e o de faturamento não tem a ver com
+        gente.
+      </p>
+    </>
   );
 }
 

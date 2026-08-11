@@ -64,10 +64,10 @@ model Funcionario {
   isentoIcms Boolean @default(false) @map("isento_icms")
 
   // Dados bancários / pagamento
-  banco    String?
-  agencia  String?
-  conta    String?
-  chavePix String? @map("chave_pix")
+  banco        String?
+  agencia      String?
+  conta        String?
+  chavePix     String? @map("chave_pix")
   /// Tipo de PIX preferencial do cadastro do fornecedor ("Celular",
   /// "CPF/CNPJ", "E-mail"…). É o que a conta a pagar do IXC marca junto da
   /// chave; vazio = deduzir pelo formato.
@@ -79,27 +79,27 @@ model Funcionario {
   // --- Configuração financeira / folha ---
   // Contratado como CLT. É só informativo: enquanto a carteira não estiver
   // assinada, a folha trata a pessoa como qualquer outra.
-  clt Boolean @default(false) @map("clt")
+  clt                Boolean  @default(false) @map("clt")
   // Carteira assinada: aí sim o adiantamento já é descontado pela
   // contabilidade e NÃO é subtraído do saldo salarial aqui. Ver [[project]].
-  carteiraAssinada Boolean @default(false) @map("carteira_assinada")
+  carteiraAssinada   Boolean  @default(false) @map("carteira_assinada")
   // Só para quem tem carteira assinada: o salário oficial sai pela
   // contabilidade e a folha daqui paga este valor. Quando preenchido, é ele
   // (e não o salário base) que serve de base para o cálculo da folha.
   valorAReceberFolha Decimal? @map("valor_a_receber_folha") @db.Decimal(14, 2)
   // Opção de receber o adiantamento do dia 25
-  recebeAdiantamento Boolean @default(false) @map("recebe_adiantamento")
+  recebeAdiantamento Boolean  @default(false) @map("recebe_adiantamento")
   // Quanto essa pessoa recebe no dia 25. Vazio = percentual da configuração
   // (40% do salário base). O que sair aqui é abatido do saldo salarial.
-  valorAdiantamento Decimal? @map("valor_adiantamento") @db.Decimal(14, 2)
+  valorAdiantamento  Decimal? @map("valor_adiantamento") @db.Decimal(14, 2)
   // Quanto a pessoa ganha por venda (na prática R$ 5 ou R$ 50). A comissão do
   // mês = vendas do mês × este valor, e entra no saldo salarial.
-  valorPorVenda Decimal? @map("valor_por_venda") @db.Decimal(14, 2)
+  valorPorVenda      Decimal? @map("valor_por_venda") @db.Decimal(14, 2)
 
   // Fornecedor vinculado no IXC (necessário para gerar contas a pagar)
   idFornecedorIxc Int? @map("id_fornecedor_ixc")
   // Cidade usada ao criar o fornecedor (senão usa a padrão da config)
-  cidadeIxc Int? @map("cidade_ixc")
+  cidadeIxc       Int? @map("cidade_ixc")
 
   // Fidelidade total: payload cru do IXC para não perder nada
   ixcRaw       Json?     @map("ixc_raw")
@@ -165,15 +165,15 @@ enum SyncStatus {
 }
 
 model SyncLog {
-  id         String     @id @default(uuid())
-  recurso    String // ex.: "funcionarios", "adiantamentos"
-  status     SyncStatus @default(EM_ANDAMENTO)
-  totalLidos Int        @default(0) @map("total_lidos")
-  totalNovos Int        @default(0) @map("total_novos")
-  totalAtual Int        @default(0) @map("total_atualizados")
-  erro       String?
-  iniciadoEm DateTime   @default(now()) @map("iniciado_em")
-  concluidoEm DateTime? @map("concluido_em")
+  id          String     @id @default(uuid())
+  recurso     String // ex.: "funcionarios", "adiantamentos"
+  status      SyncStatus @default(EM_ANDAMENTO)
+  totalLidos  Int        @default(0) @map("total_lidos")
+  totalNovos  Int        @default(0) @map("total_novos")
+  totalAtual  Int        @default(0) @map("total_atualizados")
+  erro        String?
+  iniciadoEm  DateTime   @default(now()) @map("iniciado_em")
+  concluidoEm DateTime?  @map("concluido_em")
 
   @@index([recurso, iniciadoEm])
   @@map("sync_logs")
@@ -188,7 +188,7 @@ model ConfiguracaoFinanceira {
   // Conta de pagamento (fn_apagar.id_contas)
   contaPagamentoId Int @default(18) @map("conta_pagamento_id")
   // Filial (fn_apagar.filial_id)
-  filialId Int @default(1) @map("filial_id")
+  filialId         Int @default(1) @map("filial_id")
 
   // Contas contábeis / planejamento analítico (fn_apagar.id_conta)
   contaContabilSalario      Int @default(2420) @map("conta_contabil_salario")
@@ -196,15 +196,17 @@ model ConfiguracaoFinanceira {
   contaContabilBonus        Int @default(13916) @map("conta_contabil_bonus")
   /// Diárias. Nasce igual à de salário — confirme com a contabilidade.
   contaContabilDiaria       Int @default(2420) @map("conta_contabil_diaria")
+  /// Pagamentos avulsos (mão de obra, serviço pontual, patrocínio).
+  contaContabilAvulso       Int @default(324) @map("conta_contabil_avulso")
 
   // --- Caixa de onde sai o dinheiro pago em mãos (Financeiro > Movimentação >
   // Financeira, "CX - Werick"). ---
   /// Código do caixa no IXC. 0 = não configurado (o app procura pelo nome).
-  caixaEmMaosId Int @default(0) @map("caixa_em_maos_id")
+  caixaEmMaosId        Int    @default(0) @map("caixa_em_maos_id")
   /// Nome do caixa, usado para descobrir o código sozinho.
-  caixaEmMaosNome String @default("CX - Werick") @map("caixa_em_maos_nome")
+  caixaEmMaosNome      String @default("CX - Werick") @map("caixa_em_maos_nome")
   /// Tabela de contas/caixas do IXC ("" = descobre testando os nomes conhecidos).
-  caixaTabelaContas String @default("") @map("caixa_tabela_contas")
+  caixaTabelaContas    String @default("") @map("caixa_tabela_contas")
   /// Tabela dos lançamentos da movimentação financeira ("" = descobre sozinho).
   caixaTabelaMovimento String @default("") @map("caixa_tabela_movimento")
 
@@ -219,10 +221,10 @@ model ConfiguracaoFinanceira {
   // Regra: fornecedor ativo com "Contribuinte ICMS" = Isento é funcionário.
   // Campo do ICMS no fornecedor; vazio = detecta automaticamente (qualquer
   // coluna com "icms" no nome). Preencha se a base usar um nome inesperado.
-  fornecedorCampoIcms String @default("") @map("fornecedor_campo_icms")
+  fornecedorCampoIcms   String @default("") @map("fornecedor_campo_icms")
   // Valores que significam "Isento" nesse campo, separados por vírgula.
   // Texto contendo "isent" sempre conta; códigos numéricos variam por base.
-  fornecedorIcmsIsento String @default("I,ISENTO") @map("fornecedor_icms_isento")
+  fornecedorIcmsIsento  String @default("I,ISENTO") @map("fornecedor_icms_isento")
   // Tabela da aba "Dados bancários" do fornecedor (banco/agência/conta/PIX).
   // Vazio = descobre sozinho testando os nomes conhecidos.
   fornecedorTabelaBanco String @default("") @map("fornecedor_tabela_banco")
@@ -243,7 +245,7 @@ model ConfiguracaoFinanceira {
   // --- Rádio "Tipo da chave Pix" do fn_apagar ---
   // Sem ele marcado o banco recusa o PIX. A coluna e o código de cada tipo
   // variam por base do IXC: vazio = aprender das contas que já existem lá.
-  pixCampoTipoChave String @default("") @map("pix_campo_tipo_chave")
+  pixCampoTipoChave   String @default("") @map("pix_campo_tipo_chave")
   // Códigos por tipo, quando não há conta antiga de onde aprender.
   // Formato: "Celular=C,E-mail=E,CPF/CNPJ=D,Aleatória=A"
   pixCodigosTipoChave String @default("") @map("pix_codigos_tipo_chave")
@@ -252,7 +254,7 @@ model ConfiguracaoFinanceira {
   // reinício nem depender das contas antigas continuarem à vista no IXC. Os
   // códigos vão se acumulando: cada tipo é aprendido uma vez e fica sabido.
   // Preenchido pelo app; o que está acima (informado à mão) vence.
-  pixCampoTipoChaveAprendido String @default("") @map("pix_campo_tipo_chave_aprendido")
+  pixCampoTipoChaveAprendido    String @default("") @map("pix_campo_tipo_chave_aprendido")
   pixCodigosTipoChaveAprendidos String @default("") @map("pix_codigos_tipo_chave_aprendidos")
 
   // Templates de observação ({competencia} é substituído por "MM/AAAA")
@@ -315,7 +317,7 @@ model VariavelMes {
   competencia String
 
   /// Quantas vendas a pessoa fez no mês
-  vendas Int @default(0)
+  vendas        Int      @default(0)
   /// Valor por venda desta competência; vazio = o do cadastro do funcionário
   valorPorVenda Decimal? @map("valor_por_venda") @db.Decimal(14, 2)
 
@@ -354,16 +356,16 @@ model Vale {
   sentido   SentidoVale @default(DESCONTO)
   descricao String
   /// Data em que o vale foi concedido
-  data DateTime @default(now())
+  data      DateTime    @default(now())
 
   valorTotal         Decimal @map("valor_total") @db.Decimal(14, 2)
   quantidadeParcelas Int     @default(1) @map("quantidade_parcelas")
   valorParcela       Decimal @map("valor_parcela") @db.Decimal(14, 2)
 
   /// Desligado: fica só registrado, sem mexer na folha (acerto por fora).
-  descontarDaFolha Boolean @default(true) @map("descontar_da_folha")
+  descontarDaFolha  Boolean @default(true) @map("descontar_da_folha")
   /// "AAAA-MM" da primeira parcela
-  competenciaInicio String @map("competencia_inicio")
+  competenciaInicio String  @map("competencia_inicio")
 
   /// Cancelado: para de descontar e some dos saldos (histórico preservado).
   cancelado  Boolean @default(false)
@@ -410,7 +412,9 @@ model ValeParcela {
 }
 
 // ---------------------------------------------------------------------------
-// Beneficiário avulso: alguém sem cadastro de funcionário (ex.: patrocínio)
+// Beneficiário avulso: quem recebe sem estar na folha nem receber por diária —
+// mão de obra contratada, serviço pontual, patrocínio, ajuda de custo. Vira
+// fornecedor no IXC, e o pagamento sai pelo banco ou em mãos, como o diarista.
 // ---------------------------------------------------------------------------
 model BeneficiarioAvulso {
   id String @id @default(uuid())
@@ -418,17 +422,75 @@ model BeneficiarioAvulso {
   nome       String
   cpfCnpj    String? @map("cpf_cnpj")
   tipoPessoa String  @default("F") @map("tipo_pessoa") // F | J
-  chavePix   String? @map("chave_pix")
+  telefone   String?
+  email      String?
 
-  idFornecedorIxc Int? @map("id_fornecedor_ixc")
-  cidadeIxc       Int? @map("cidade_ixc")
+  chavePix     String? @map("chave_pix")
+  /// Tipo da chave acima; vazio = deduzir pelo formato (igual ao diarista).
+  /// Sem ele o rádio do fn_apagar fica em branco e o banco recusa o PIX.
+  tipoChavePix String? @map("tipo_chave_pix")
+
+  /// Forma habitual de pagar essa pessoa (dá para mudar em cada pagamento)
+  formaPagamento FormaPagamento @default(IXC) @map("forma_pagamento")
+
+  observacoes String?
+  ativo       Boolean @default(true)
+
+  idFornecedorIxc     Int?    @map("id_fornecedor_ixc")
+  cidadeIxc           Int?    @map("cidade_ixc")
+  /// Ligado quando a pessoa, avisada de que já existe fornecedor com aquele
+  /// CPF/CNPJ no IXC, escolheu criar um novo assim mesmo. Sem isto, o app
+  /// reaproveita o cadastro existente — que é o certo na maioria das vezes,
+  /// porque é lá que estão os dados bancários.
+  fornecedorNovoNoIxc Boolean @default(false) @map("fornecedor_novo_no_ixc")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   contasPagar ContaPagar[]
+  pagamentos  PagamentoAvulso[]
 
+  @@index([ativo])
+  @@index([nome])
   @@map("beneficiarios_avulsos")
+}
+
+/// Um pagamento avulso feito (ou a fazer): quanto, por quê e por onde saiu.
+/// Espelha `Diaria` de propósito — os dois caminhos do dinheiro são os mesmos.
+model PagamentoAvulso {
+  id String @id @default(uuid())
+
+  beneficiario   BeneficiarioAvulso @relation(fields: [beneficiarioId], references: [id], onDelete: Cascade)
+  beneficiarioId String             @map("beneficiario_id")
+
+  data          DateTime
+  valor         Decimal  @db.Decimal(14, 2)
+  /// O que foi feito — vira a observação da conta a pagar no IXC
+  descricao     String
+  /// fn_apagar.id_conta deste pagamento (padrão: o da configuração)
+  contaContabil Int      @map("conta_contabil")
+
+  forma FormaPagamento
+
+  /// Conta a pagar gerada no IXC (só na forma IXC)
+  contaPagar   ContaPagar? @relation(fields: [contaPagarId], references: [id], onDelete: SetNull)
+  contaPagarId String?     @unique @map("conta_pagar_id")
+
+  // --- Pagamento em mãos: a saída no caixa do IXC ---
+  caixaIxc        Int?      @map("caixa_ixc")
+  idLancamentoIxc Int?      @map("id_lancamento_ixc")
+  lancadoEm       DateTime? @map("lancado_em")
+  lancadoManual   Boolean   @default(false) @map("lancado_manual")
+  /// Por que o lançamento no caixa não saiu (null = sem pendência)
+  erroIxc         String?   @map("erro_ixc")
+
+  criadoPor String?  @map("criado_por")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([beneficiarioId])
+  @@index([data])
+  @@map("pagamentos_avulsos")
 }
 
 // ---------------------------------------------------------------------------
@@ -436,7 +498,9 @@ model BeneficiarioAvulso {
 // O pagamento sai pelo IXC (conta a pagar, como qualquer beneficiário) ou em
 // mãos — e aí o dinheiro sai do caixa configurado (ver `caixaEmMaosId`).
 // ---------------------------------------------------------------------------
-enum FormaPagamentoDiaria {
+/// Por onde o dinheiro sai. Vale para diária e para pagamento avulso — é a
+/// mesma escolha, e os dois caminhos são os mesmos.
+enum FormaPagamento {
   /// Conta a pagar no IXC: auditoria e pagamento pelo banco
   IXC
   /// Dinheiro entregue na hora, descontado do caixa
@@ -447,33 +511,33 @@ model Diarista {
   id String @id @default(uuid())
 
   /// Razão social — é o nome que vai para a conta a pagar no IXC
-  nome String
+  nome         String
   /// Como a pessoa é conhecida no dia a dia ("Deda pedreiro"); também é buscável
   nomeFantasia String? @map("nome_fantasia")
   cpfCnpj      String? @map("cpf_cnpj")
   telefone     String?
 
   /// Dados de pagamento, vindos da aba "Dados bancários" do fornecedor no IXC
-  banco    String?
-  agencia  String?
-  conta    String?
-  chavePix String? @map("chave_pix")
+  banco        String?
+  agencia      String?
+  conta        String?
+  chavePix     String? @map("chave_pix")
   /// Tipo da chave acima; vazio = deduzir pelo formato (igual ao funcionário)
   tipoChavePix String? @map("tipo_chave_pix")
 
   /// Quanto essa pessoa cobra por dia. Só sugere o valor no pagamento.
-  valorDiaria Decimal? @map("valor_diaria") @db.Decimal(14, 2)
+  valorDiaria    Decimal?       @map("valor_diaria") @db.Decimal(14, 2)
   /// Forma habitual de pagar essa pessoa (dá para mudar em cada diária)
-  formaPagamento FormaPagamentoDiaria @default(IXC) @map("forma_pagamento")
+  formaPagamento FormaPagamento @default(IXC) @map("forma_pagamento")
 
   observacoes String?
   ativo       Boolean @default(true)
 
   /// Fornecedor no IXC, criado na primeira diária paga pelo IXC
-  idFornecedorIxc Int? @map("id_fornecedor_ixc")
-  cidadeIxc       Int? @map("cidade_ixc")
+  idFornecedorIxc Int?    @map("id_fornecedor_ixc")
+  cidadeIxc       Int?    @map("cidade_ixc")
   /// Veio da importação de fornecedores "Estrangeiro", não do cadastro à mão
-  importadoDoIxc Boolean @default(false) @map("importado_do_ixc")
+  importadoDoIxc  Boolean @default(false) @map("importado_do_ixc")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -499,10 +563,10 @@ model Diaria {
   quantidade  Decimal  @default(1) @db.Decimal(8, 2)
   valorDiaria Decimal  @map("valor_diaria") @db.Decimal(14, 2)
   /// Total pago = quantidade × valor da diária, editável na tela
-  valor     Decimal @db.Decimal(14, 2)
-  descricao String
+  valor       Decimal  @db.Decimal(14, 2)
+  descricao   String
 
-  forma FormaPagamentoDiaria
+  forma FormaPagamento
 
   /// Conta a pagar gerada no IXC (só na forma IXC)
   contaPagar   ContaPagar? @relation(fields: [contaPagarId], references: [id], onDelete: SetNull)
@@ -510,14 +574,14 @@ model Diaria {
 
   // --- Pagamento em mãos: a saída no caixa do IXC ---
   /// Caixa de onde o dinheiro saiu
-  caixaIxc Int? @map("caixa_ixc")
+  caixaIxc        Int?      @map("caixa_ixc")
   /// Lançamento criado na movimentação financeira do IXC
   idLancamentoIxc Int?      @map("id_lancamento_ixc")
   lancadoEm       DateTime? @map("lancado_em")
   /// Lançado no IXC à mão por alguém (o app não conseguiu)
-  lancadoManual Boolean @default(false) @map("lancado_manual")
+  lancadoManual   Boolean   @default(false) @map("lancado_manual")
   /// Por que o lançamento no caixa não saiu (null = sem pendência)
-  erroIxc String? @map("erro_ixc")
+  erroIxc         String?   @map("erro_ixc")
 
   criadoPor String?  @map("criado_por")
   createdAt DateTime @default(now()) @map("created_at")
@@ -562,15 +626,15 @@ model ContaPagar {
   beneficiarioNome String @map("beneficiario_nome")
   idFornecedorIxc  Int?   @map("id_fornecedor_ixc")
 
-  valor         Decimal @db.Decimal(14, 2)
-  contaContabil Int     @map("conta_contabil") // fn_apagar.id_conta
-  contaPagamento Int    @map("conta_pagamento") // fn_apagar.id_contas
+  valor            Decimal  @db.Decimal(14, 2)
+  contaContabil    Int      @map("conta_contabil") // fn_apagar.id_conta
+  contaPagamento   Int      @map("conta_pagamento") // fn_apagar.id_contas
   /// fn_apagar.tipo_pagamento desta conta; null = o padrão da configuração
-  tipoPagamentoIxc String? @map("tipo_pagamento_ixc")
-  filialId      Int     @map("filial_id")
-  dataEmissao   DateTime @map("data_emissao")
-  dataVencimento DateTime @map("data_vencimento")
-  observacao    String
+  tipoPagamentoIxc String?  @map("tipo_pagamento_ixc")
+  filialId         Int      @map("filial_id")
+  dataEmissao      DateTime @map("data_emissao")
+  dataVencimento   DateTime @map("data_vencimento")
+  observacao       String
 
   status StatusContaPagar @default(RASCUNHO)
   erro   String?
@@ -592,9 +656,11 @@ model ContaPagar {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   /// Parcelas de vale abatidas (ou pagas) por esta conta
-  parcelasVale ValeParcela[]
+  parcelasVale    ValeParcela[]
   /// Diária que gerou esta conta, quando foi paga pelo IXC
-  diaria Diaria?
+  diaria          Diaria?
+  /// Pagamento avulso que gerou esta conta, quando foi pago pelo IXC
+  pagamentoAvulso PagamentoAvulso?
 
   @@index([status])
   @@index([competencia])
@@ -634,7 +700,7 @@ enum ClasseTributo {
 model Guia {
   id String @id @default(uuid())
 
-  tipo TipoGuia
+  tipo        TipoGuia
   /// Período de apuração ("AAAA-MM") — o mês a que o imposto se refere
   competencia String
   vencimento  DateTime
@@ -644,9 +710,9 @@ model Guia {
   cnpj            String?
   razaoSocial     String? @map("razao_social")
   /// Quantos trabalhadores a guia do FGTS declarou
-  trabalhadores Int?
+  trabalhadores   Int?
 
-  arquivoNome String @map("arquivo_nome")
+  arquivoNome   String  @map("arquivo_nome")
   /// Texto extraído do PDF, para reconferir a leitura sem o arquivo original
   textoOriginal String? @map("texto_original")
 

@@ -24,6 +24,6 @@ import { PagamentosPollerService } from './pagamentos-poller.service';
     AvulsosService,
     PagamentosPollerService,
   ],
-  exports: [ContasPagarService, ConfigFinanceiraService],
+  exports: [ContasPagarService, ConfigFinanceiraService, AvulsosService],
 })
 export class FinanceiroModule {}

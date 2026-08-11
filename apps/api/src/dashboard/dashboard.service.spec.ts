@@ -1,5 +1,5 @@
 import {
-  FormaPagamentoDiaria,
+  FormaPagamento,
   StatusContaPagar,
   TipoLancamento,
 } from '@prisma/client';
@@ -29,7 +29,7 @@ function montarServico(dados: {
     data: Date;
     valor: number;
     quantidade: number;
-    forma: FormaPagamentoDiaria;
+    forma: FormaPagamento;
     diaristaId: string;
     contaPagar: { status: StatusContaPagar } | null;
   }>;
@@ -161,7 +161,7 @@ describe('diaristas', () => {
   const diaria = (
     dia: string,
     valor: number,
-    forma: FormaPagamentoDiaria,
+    forma: FormaPagamento,
     status?: StatusContaPagar,
   ) => ({
     data: new Date(`${dia}T00:00:00.000Z`),
@@ -179,8 +179,8 @@ describe('diaristas', () => {
   it('entram pelo mês em que a diária foi trabalhada', async () => {
     const { service } = montarServico({
       diarias: [
-        diaria('2026-06-30', 100, FormaPagamentoDiaria.EM_MAOS),
-        diaria('2026-07-01', 200, FormaPagamentoDiaria.EM_MAOS),
+        diaria('2026-06-30', 100, FormaPagamento.EM_MAOS),
+        diaria('2026-07-01', 200, FormaPagamento.EM_MAOS),
       ],
     });
 
@@ -195,14 +195,14 @@ describe('diaristas', () => {
   it('separa o que já saiu do que ainda está a caminho', async () => {
     const { service } = montarServico({
       diarias: [
-        diaria('2026-07-05', 150, FormaPagamentoDiaria.EM_MAOS),
+        diaria('2026-07-05', 150, FormaPagamento.EM_MAOS),
         diaria(
           '2026-07-06',
           770,
-          FormaPagamentoDiaria.IXC,
+          FormaPagamento.IXC,
           StatusContaPagar.AGUARDANDO_PAGAMENTO,
         ),
-        diaria('2026-07-07', 300, FormaPagamentoDiaria.IXC, StatusContaPagar.PAGO),
+        diaria('2026-07-07', 300, FormaPagamento.IXC, StatusContaPagar.PAGO),
       ],
     });
 
@@ -225,10 +225,10 @@ describe('diaristas', () => {
   it('diária reprovada, cancelada ou com erro sai do gasto', async () => {
     const { service } = montarServico({
       diarias: [
-        diaria('2026-07-05', 100, FormaPagamentoDiaria.IXC, StatusContaPagar.PAGO),
-        diaria('2026-07-06', 200, FormaPagamentoDiaria.IXC, StatusContaPagar.REPROVADO),
-        diaria('2026-07-07', 300, FormaPagamentoDiaria.IXC, StatusContaPagar.CANCELADO),
-        diaria('2026-07-08', 400, FormaPagamentoDiaria.IXC, StatusContaPagar.ERRO),
+        diaria('2026-07-05', 100, FormaPagamento.IXC, StatusContaPagar.PAGO),
+        diaria('2026-07-06', 200, FormaPagamento.IXC, StatusContaPagar.REPROVADO),
+        diaria('2026-07-07', 300, FormaPagamento.IXC, StatusContaPagar.CANCELADO),
+        diaria('2026-07-08', 400, FormaPagamento.IXC, StatusContaPagar.ERRO),
       ],
     });
 
@@ -251,7 +251,7 @@ describe('diaristas', () => {
    */
   it('diária cuja conta a pagar sumiu do IXC não fica pendente para sempre', async () => {
     const { service } = montarServico({
-      diarias: [diaria('2026-07-05', 1590, FormaPagamentoDiaria.IXC)],
+      diarias: [diaria('2026-07-05', 1590, FormaPagamento.IXC)],
     });
 
     const r = await service.resumo(COMP, 1);
@@ -265,7 +265,7 @@ describe('diaristas', () => {
 
   it('aparecem na repartição do mês, que a conta a pagar não alcança', async () => {
     const { service } = montarServico({
-      diarias: [diaria('2026-07-05', 770, FormaPagamentoDiaria.EM_MAOS)],
+      diarias: [diaria('2026-07-05', 770, FormaPagamento.EM_MAOS)],
     });
 
     const r = await service.resumo(COMP, 1);
@@ -298,7 +298,7 @@ describe('custo com pessoal', () => {
           data: new Date('2026-07-10T00:00:00.000Z'),
           valor: 770,
           quantidade: 5.5,
-          forma: FormaPagamentoDiaria.EM_MAOS,
+          forma: FormaPagamento.EM_MAOS,
           diaristaId: 'd1',
           contaPagar: null,
         },

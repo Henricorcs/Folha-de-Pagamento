@@ -12,13 +12,14 @@ import {
 } from '../components/ui';
 import { api, mensagemErro } from '../lib/api';
 import { formatBRL, formatData } from '../lib/format';
-import { FORMA_DIARIA_LABEL, STATUS_LABEL, STATUS_TOM } from '../lib/status';
+import { FORMA_PAGAMENTO_LABEL, STATUS_LABEL, STATUS_TOM } from '../lib/status';
 import { TIPOS_CHAVE_PIX } from '../lib/types';
 import type {
   Diaria,
   Diarista,
   DiaristaComResumo,
-  FormaPagamentoDiaria,
+  FormaPagamento,
+  ResultadoLoteDiarias,
   SyncDiaristasResult,
 } from '../lib/types';
 
@@ -31,7 +32,7 @@ const CADASTRO_VAZIO = {
   chavePix: '',
   tipoChavePix: '',
   valorDiaria: '',
-  formaPagamento: 'IXC' as FormaPagamentoDiaria,
+  formaPagamento: 'IXC' as FormaPagamento,
   observacoes: '',
 };
 
@@ -83,12 +84,41 @@ export function Diaristas() {
     enabled: !!aberto,
   });
 
+  /** As que não vão sair sozinhas — ficam fora do gasto e precisam de decisão. */
+  const travadas = useQuery({
+    queryKey: ['diarias-travadas'],
+    queryFn: async () =>
+      (await api.get<Diaria[]>('/diaristas/diarias/travadas')).data,
+  });
+
   function invalidar() {
     qc.invalidateQueries({ queryKey: ['diaristas'] });
     qc.invalidateQueries({ queryKey: ['diarias'] });
+    qc.invalidateQueries({ queryKey: ['diarias-travadas'] });
     qc.invalidateQueries({ queryKey: ['contas-pagar'] });
     qc.invalidateQueries({ queryKey: ['dashboard'] });
   }
+
+  const limparTravadas = useMutation({
+    mutationFn: async (ids: string[]) =>
+      (
+        await api.post<ResultadoLoteDiarias>('/diaristas/diarias/excluir-lote', {
+          ids,
+        })
+      ).data,
+    onSuccess: (r) => {
+      avisar(
+        r.falhas.length === 0
+          ? `${r.sucesso} diária(s) apagada(s).`
+          : `${r.sucesso} apagada(s); ${r.falhas.length} ficaram: ${r.falhas
+              .map((f) => f.erro)
+              .join(' · ')}`,
+        r.falhas.length > 0,
+      );
+      invalidar();
+    },
+    onError: (err) => avisar(mensagemErro(err), true),
+  });
 
   function avisar(texto: string, ruim = false) {
     setErro(ruim);
@@ -277,6 +307,14 @@ export function Diaristas() {
         </Aviso>
       )}
 
+      {(travadas.data ?? []).length > 0 && (
+        <DiariasTravadas
+          diarias={travadas.data ?? []}
+          ocupado={limparTravadas.isPending}
+          onApagar={(ids) => limparTravadas.mutate(ids)}
+        />
+      )}
+
       {editando && (
         <Bloco
           titulo={editandoNovo ? 'Novo diarista' : 'Editar cadastro'}
@@ -328,7 +366,7 @@ export function Diaristas() {
                 onChange={(e) =>
                   setForm({
                     ...form,
-                    formaPagamento: e.target.value as FormaPagamentoDiaria,
+                    formaPagamento: e.target.value as FormaPagamento,
                   })
                 }
                 className="campo"
@@ -504,7 +542,7 @@ export function Diaristas() {
                     )}
                   </td>
                   <td className="td text-tinta-500">
-                    {FORMA_DIARIA_LABEL[d.formaPagamento]}
+                    {FORMA_PAGAMENTO_LABEL[d.formaPagamento]}
                   </td>
                   <td className="td text-right text-tinta-500">
                     {d.valorDiaria && Number(d.valorDiaria) > 0 ? (
@@ -702,6 +740,115 @@ export function Diaristas() {
 }
 
 /**
+ * As diárias que ficaram no meio do caminho: lançadas pelo IXC, mas com a
+ * conta a pagar reprovada, recusada — ou apagada de lá, que é o que deixa a
+ * diária sem conta nenhuma.
+ *
+ * Nenhuma vai sair sozinha, então já não contam no gasto do mês. Ficarem fora
+ * *e* invisíveis é que seria ruim: ou alguém refaz o pagamento, ou apaga o
+ * registro aqui — e é isto que este bloco serve para fazer.
+ */
+function DiariasTravadas({
+  diarias,
+  ocupado,
+  onApagar,
+}: {
+  diarias: Diaria[];
+  ocupado: boolean;
+  onApagar: (ids: string[]) => void;
+}) {
+  const total = diarias.reduce((s, d) => s + Number(d.valor), 0);
+
+  return (
+    <Bloco
+      titulo="Diárias paradas no meio do caminho"
+      className="surgir mb-6"
+      acao={
+        <button
+          onClick={() => {
+            if (
+              confirm(
+                `Apagar ${diarias.length} diária(s) travada(s), somando ${formatBRL(total)}?\n\n` +
+                  'Nenhuma delas tem conta a pagar viva no IXC. O registro some daqui e não volta.',
+              )
+            ) {
+              onApagar(diarias.map((d) => d.id));
+            }
+          }}
+          disabled={ocupado}
+          className="btn btn-p bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-40"
+        >
+          {ocupado ? 'Apagando…' : 'Apagar todas'}
+        </button>
+      }
+      semPadding
+    >
+      <p className="px-5 pb-3 text-xs leading-relaxed text-tinta-500 sm:px-6">
+        A conta a pagar destas foi reprovada, recusada ou apagada no IXC — elas
+        já não entram no gasto do mês. Apague as que foram teste; para as que
+        eram de verdade, pague de novo pela pessoa na lista abaixo.
+      </p>
+      <div className="overflow-x-auto rolagem-fina">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-t border-tinta-100">
+              <th className="th">Diarista</th>
+              <th className="th">Data</th>
+              <th className="th">Serviço</th>
+              <th className="th text-right">Valor</th>
+              <th className="th">Situação</th>
+              <th className="th text-right">Ação</th>
+            </tr>
+          </thead>
+          <tbody>
+            {diarias.map((d) => (
+              <tr key={d.id} className="linha">
+                <td className="td font-medium text-tinta-800">
+                  {d.diarista?.nome ?? '—'}
+                </td>
+                <td className="td num text-tinta-500">{formatData(d.data)}</td>
+                <td className="td text-tinta-500">{d.descricao}</td>
+                <td className="td text-right">
+                  <span className="valor">{formatBRL(d.valor)}</span>
+                </td>
+                <td className="td">
+                  {d.contaPagar ? (
+                    <Selo pequeno tom={STATUS_TOM[d.contaPagar.status]} ponto>
+                      {STATUS_LABEL[d.contaPagar.status]}
+                    </Selo>
+                  ) : (
+                    <Selo
+                      pequeno
+                      tom="neutro"
+                      titulo="O fn_apagar dela não existe mais no IXC"
+                    >
+                      conta apagada no IXC
+                    </Selo>
+                  )}
+                </td>
+                <td className="td text-right">
+                  <button
+                    onClick={() => {
+                      if (confirm(`Apagar a diária de ${formatBRL(d.valor)}?`)) {
+                        onApagar([d.id]);
+                      }
+                    }}
+                    disabled={ocupado}
+                    className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600"
+                  >
+                    Excluir
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Bloco>
+  );
+}
+
+/**
  * Como essa pessoa recebe. Vem da aba "Dados bancários" do fornecedor no IXC,
  * a mesma fonte usada para os funcionários. É a chave PIX que de fato paga.
  */
@@ -837,7 +984,7 @@ function FormularioDiaria({
   const [valorDiaria, setValorDiaria] = useState(diarista.valorDiaria ?? '');
   const [total, setTotal] = useState('');
   const [descricao, setDescricao] = useState('');
-  const [forma, setForma] = useState<FormaPagamentoDiaria>(
+  const [forma, setForma] = useState<FormaPagamento>(
     diarista.formaPagamento,
   );
   const [chavePix, setChavePix] = useState(diarista.chavePix ?? '');
@@ -881,7 +1028,7 @@ function FormularioDiaria({
         <Campo label="Como vai pagar">
           <select
             value={forma}
-            onChange={(e) => setForma(e.target.value as FormaPagamentoDiaria)}
+            onChange={(e) => setForma(e.target.value as FormaPagamento)}
             className="campo"
           >
             <option value="IXC">Pelo IXC (conta a pagar)</option>

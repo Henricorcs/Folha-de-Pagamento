@@ -1,30 +1,109 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
+  Param,
+  Patch,
   Post,
   Query,
   Req,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { AvulsosService } from './avulsos.service';
-import { CriarPagamentoAvulsoDto } from './dto/avulso.dto';
+import {
+  CriarBeneficiarioDto,
+  PagarAvulsoDto,
+  QueryFornecedorIxcDto,
+  QueryPagamentosAvulsosDto,
+  UpdateBeneficiarioDto,
+} from './dto/avulso.dto';
+
+function usuarioId(req: Request): string | undefined {
+  return (req.user as { id?: string } | undefined)?.id;
+}
 
 @Controller('avulsos')
 export class AvulsosController {
   constructor(private readonly service: AvulsosService) {}
 
+  // --- Cadastro ---
   @Get('beneficiarios')
-  listarBeneficiarios(@Query('busca') busca?: string) {
-    return this.service.listarBeneficiarios(busca);
+  listarBeneficiarios(
+    @Query('busca') busca?: string,
+    @Query('todos') todos?: string,
+  ) {
+    return this.service.listarBeneficiarios(busca, todos === 'true');
   }
 
-  /** Cria um pagamento avulso (beneficiário + conta a pagar no IXC). */
-  @Post()
+  /**
+   * O que já existe com aquele CPF/CNPJ, aqui e no IXC — para a tela poder
+   * perguntar se é para reaproveitar o fornecedor ou criar um novo.
+   */
+  @Get('consultar-documento')
+  consultarDocumento(@Query() q: QueryFornecedorIxcDto) {
+    return this.service.consultarCpfCnpj(q.cpfCnpj);
+  }
+
+  @Post('beneficiarios')
   @HttpCode(201)
-  criar(@Body() dto: CriarPagamentoAvulsoDto, @Req() req: Request) {
-    const uid = (req.user as { id?: string } | undefined)?.id;
-    return this.service.criarPagamento(dto, uid);
+  criarBeneficiario(@Body() dto: CriarBeneficiarioDto) {
+    return this.service.criarBeneficiario(dto);
+  }
+
+  @Get('beneficiarios/:id')
+  buscar(@Param('id') id: string) {
+    return this.service.buscar(id);
+  }
+
+  @Patch('beneficiarios/:id')
+  atualizar(@Param('id') id: string, @Body() dto: UpdateBeneficiarioDto) {
+    return this.service.atualizarBeneficiario(id, dto);
+  }
+
+  @Delete('beneficiarios/:id')
+  @HttpCode(200)
+  async remover(@Param('id') id: string) {
+    await this.service.removerBeneficiario(id);
+    return { ok: true };
+  }
+
+  // --- Pagamentos ---
+  @Get('pagamentos')
+  listarPagamentos(@Query() q: QueryPagamentosAvulsosDto) {
+    return this.service.listarPagamentos(q.beneficiarioId);
+  }
+
+  /** Paga alguém de fora da folha: conta a pagar no IXC ou saída do caixa. */
+  @Post('beneficiarios/:id/pagamentos')
+  @HttpCode(201)
+  pagar(
+    @Param('id') id: string,
+    @Body() dto: PagarAvulsoDto,
+    @Req() req: Request,
+  ) {
+    return this.service.pagar(id, dto, usuarioId(req));
+  }
+
+  /** Tenta de novo a saída no caixa do IXC. */
+  @Post('pagamentos/:id/lancar-caixa')
+  @HttpCode(200)
+  lancarCaixa(@Param('id') id: string) {
+    return this.service.lancarNoCaixa(id);
+  }
+
+  /** Alguém lançou no IXC à mão: fecha a pendência. */
+  @Post('pagamentos/:id/marcar-lancado')
+  @HttpCode(200)
+  marcarLancado(@Param('id') id: string) {
+    return this.service.marcarLancadoManual(id);
+  }
+
+  @Delete('pagamentos/:id')
+  @HttpCode(200)
+  async removerPagamento(@Param('id') id: string) {
+    await this.service.removerPagamento(id);
+    return { ok: true };
   }
 }

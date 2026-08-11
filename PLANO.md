@@ -122,7 +122,22 @@ Evolução planejada por fases. Cada fase entrega valor de forma incremental.
       recusada pelo IXC ou apagada de lá nunca virou dinheiro — a série da folha
       já as deixava de fora e a das diárias contava, prendendo a dashboard num
       "ainda não saiu" que não tinha pagamento pendente nenhum por trás. Continua
-      visível à parte, para alguém destravar
+      visível à parte, na tela de diaristas, com o que é preciso para apagar as
+      que foram teste ou refazer as que eram de verdade
+- [x] **Guia digitada à mão**: a contabilidade às vezes manda o documento
+      digitalizado — uma foto dentro do PDF, sem texto nenhum. Ler aquilo por OCR
+      seria adivinhar dígito de imposto; quem tem o papel na mão lê melhor. A
+      composição já vem classificada por tipo de guia, que é o que decide o que
+      é custo com pessoal
+- [x] **Pagamentos avulsos viram cadastro**, como o de diarista, em vez de um
+      formulário que digita tudo de novo a cada serviço: mão de obra contratada,
+      serviço pontual, patrocínio. Pagamento pelo IXC (com chave PIX e o tipo da
+      chave, sem o qual o banco recusa) ou em mãos, saindo do caixa. Conta
+      contábil 324, parametrizável
+- [x] **CPF/CNPJ que já é fornecedor no IXC é perguntado, não decidido**:
+      reaproveitar o cadastro é quase sempre o certo — é lá que estão os dados
+      bancários —, mas pode ser homônimo ou documento digitado errado. A tela
+      mostra quem achou e deixa escolher entre usar o que existe e criar outro
 - [ ] **Proventos** que faltam: bônus de metas, férias, 13º, salário família
 - [ ] **Descontos** que faltam: INSS, faltas (tabela de horas/periculosidade),
       celular, internet

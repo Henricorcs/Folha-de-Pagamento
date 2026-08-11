@@ -1,0 +1,351 @@
+import { FormaPagamento, StatusContaPagar, TipoLancamento } from '@prisma/client';
+import { AvulsosService } from './avulsos.service';
+
+/**
+ * Pagamento avulso é mão de obra contratada — quem recebe está esperando o
+ * dinheiro. O que este arquivo protege:
+ *
+ *  - o IXC não recusa o pagamento por falta de chave PIX (o erro que mais
+ *    trava, porque o rádio do fn_apagar fica em branco);
+ *  - a conta contábil dos avulsos sai da configuração, não de digitação;
+ *  - dinheiro entregue na mão nunca se perde, mesmo com o IXC fora do ar;
+ *  - "já pago" só conta o que de fato saiu.
+ */
+
+const BENEFICIARIO = {
+  id: 'b1',
+  nome: 'Deda Pedreiro',
+  cpfCnpj: '111.222.333-44',
+  tipoPessoa: 'F',
+  telefone: null,
+  email: null,
+  chavePix: 'deda@pix',
+  tipoChavePix: null,
+  formaPagamento: FormaPagamento.IXC,
+  observacoes: null,
+  ativo: true,
+  idFornecedorIxc: null,
+  cidadeIxc: null,
+  fornecedorNovoNoIxc: false,
+};
+
+const CFG = {
+  contaContabilAvulso: 324,
+  caixaEmMaosId: 0,
+  caixaEmMaosNome: 'CX - Werick',
+  caixaTabelaContas: '',
+  caixaTabelaMovimento: '',
+};
+
+function montarServico(
+  opts: {
+    /** O que muda no cadastro para este caso (ex.: ficar sem chave PIX). */
+    beneficiario?: Record<string, unknown>;
+    /** null = o app não achou o caixa no IXC. */
+    caixaId?: number | null;
+    erroLancamento?: string;
+    /** Fornecedor que o IXC devolve na consulta por CPF/CNPJ. */
+    fornecedorNoIxc?: unknown;
+    /** IXC fora do ar na hora de consultar o documento. */
+    erroConsulta?: string;
+  } = {},
+) {
+  const beneficiario = { ...BENEFICIARIO, ...opts.beneficiario };
+  const pagamentos = new Map<string, Record<string, unknown>>();
+  let seq = 0;
+
+  const prisma = {
+    beneficiarioAvulso: {
+      findUnique: jest.fn().mockResolvedValue(beneficiario),
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        ...beneficiario,
+        ...data,
+      })),
+    },
+    pagamentoAvulso: {
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        const id = `pa${++seq}`;
+        const registro = { id, ...data };
+        pagamentos.set(id, registro);
+        return registro;
+      }),
+      update: jest.fn(
+        async ({
+          where,
+          data,
+        }: {
+          where: { id: string };
+          data: Record<string, unknown>;
+        }) => {
+          const atual = { ...pagamentos.get(where.id), ...data };
+          pagamentos.set(where.id, atual);
+          return atual;
+        },
+      ),
+      findUnique: jest.fn(async ({ where }: { where: { id: string } }) =>
+        pagamentos.get(where.id),
+      ),
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+      delete: jest.fn(),
+    },
+  } as any;
+
+  const config = { obter: jest.fn().mockResolvedValue(CFG) } as any;
+
+  const contasPagar = {
+    criar: jest.fn().mockResolvedValue([
+      { id: 'cp1', status: StatusContaPagar.AGUARDANDO_APROVACAO },
+    ]),
+    remover: jest.fn(),
+  } as any;
+
+  const fornecedores = {
+    procurarNoIxcPorCpfCnpj: jest.fn(async () => {
+      if (opts.erroConsulta) throw new Error(opts.erroConsulta);
+      return opts.fornecedorNoIxc ?? null;
+    }),
+  } as any;
+
+  const caixa = {
+    resolverCaixa: jest
+      .fn()
+      .mockResolvedValue(opts.caixaId === undefined ? 7 : opts.caixaId),
+    lancarSaida: jest.fn(async () => {
+      if (opts.erroLancamento) throw new Error(opts.erroLancamento);
+      return { tabela: 'fn_caixa_mov', id: 555 };
+    }),
+  } as any;
+
+  return {
+    service: new AvulsosService(prisma, config, contasPagar, fornecedores, caixa),
+    prisma,
+    contasPagar,
+    caixa,
+  };
+}
+
+describe('pagamento pelo IXC', () => {
+  it('vira conta a pagar com a conta contábil dos avulsos', async () => {
+    const { service, contasPagar } = montarServico();
+
+    await service.pagar('b1', { valor: 500, descricao: 'pintura do galpão' });
+
+    expect(contasPagar.criar).toHaveBeenCalledWith(
+      {
+        itens: [
+          {
+            beneficiarioAvulsoId: 'b1',
+            tipo: TipoLancamento.AVULSO,
+            valor: 500,
+            contaContabil: 324,
+            observacao: 'pintura do galpão',
+          },
+        ],
+      },
+      undefined,
+    );
+  });
+
+  it('a conta contábil informada no pagamento vence a da configuração', async () => {
+    const { service, contasPagar } = montarServico();
+
+    await service.pagar('b1', {
+      valor: 500,
+      descricao: 'serviço',
+      contaContabil: 999,
+    });
+
+    expect(contasPagar.criar.mock.calls[0][0].itens[0].contaContabil).toBe(999);
+  });
+
+  /**
+   * Sem chave o banco não paga, e a conta a pagar já teria nascido no IXC —
+   * sobrando para alguém apagar lá. Barrar antes é mais barato.
+   */
+  it('recusa antes de criar a conta quando não há chave PIX', async () => {
+    const { service, contasPagar } = montarServico({
+      beneficiario: { chavePix: null },
+    });
+
+    await expect(
+      service.pagar('b1', { valor: 500, descricao: 'serviço' }),
+    ).rejects.toThrow(/chave PIX/i);
+    expect(contasPagar.criar).not.toHaveBeenCalled();
+  });
+
+  /** A chave digitada na hora de pagar fica no cadastro para a próxima vez. */
+  it('grava no cadastro a chave corrigida no pagamento', async () => {
+    const { service, prisma } = montarServico({
+      beneficiario: { chavePix: 'errada@pix' },
+    });
+
+    await service.pagar('b1', {
+      valor: 100,
+      descricao: 'serviço',
+      chavePix: 'certa@pix',
+      tipoChavePix: 'E-mail',
+    });
+
+    expect(prisma.beneficiarioAvulso.update).toHaveBeenCalledWith({
+      where: { id: 'b1' },
+      data: { chavePix: 'certa@pix', tipoChavePix: 'E-mail' },
+    });
+  });
+
+  /** Em mãos não passa pelo banco: a falta de chave não pode barrar. */
+  it('pagar em mãos não exige chave PIX', async () => {
+    const { service } = montarServico({ beneficiario: { chavePix: null } });
+
+    const pago = await service.pagar('b1', {
+      valor: 200,
+      descricao: 'serviço',
+      forma: FormaPagamento.EM_MAOS,
+    });
+
+    expect(pago).toMatchObject({ idLancamentoIxc: 555, erroIxc: null });
+  });
+});
+
+describe('pagamento em mãos', () => {
+  it('desconta do caixa configurado e guarda o lançamento', async () => {
+    const { service, caixa } = montarServico();
+
+    const pago = await service.pagar('b1', {
+      valor: 350,
+      descricao: 'carreto',
+      forma: FormaPagamento.EM_MAOS,
+    });
+
+    expect(caixa.lancarSaida).toHaveBeenCalledWith(
+      expect.objectContaining({
+        caixaId: 7,
+        valor: 350,
+        historico: 'Deda Pedreiro — carreto',
+      }),
+      CFG,
+    );
+    expect(pago).toMatchObject({ caixaIxc: 7, idLancamentoIxc: 555 });
+  });
+
+  /**
+   * O dinheiro saiu da gaveta antes de o IXC ser consultado. Perder o registro
+   * porque o lançamento falhou seria esconder dinheiro que já saiu.
+   */
+  it('o registro fica com o motivo quando o caixa não é encontrado', async () => {
+    const { service, caixa } = montarServico({ caixaId: null });
+
+    const pago = await service.pagar('b1', {
+      valor: 350,
+      descricao: 'carreto',
+      forma: FormaPagamento.EM_MAOS,
+    });
+
+    expect(caixa.lancarSaida).not.toHaveBeenCalled();
+    expect(String((pago as { erroIxc?: string }).erroIxc)).toMatch(
+      /CX - Werick/,
+    );
+  });
+
+  it('o registro fica com o motivo quando o IXC recusa o lançamento', async () => {
+    const { service } = montarServico({ erroLancamento: 'tabela sem modelo' });
+
+    const pago = await service.pagar('b1', {
+      valor: 350,
+      descricao: 'carreto',
+      forma: FormaPagamento.EM_MAOS,
+    });
+
+    expect(pago).toMatchObject({ erroIxc: 'tabela sem modelo' });
+  });
+});
+
+describe('consulta do CPF/CNPJ', () => {
+  /**
+   * Reaproveitar o fornecedor é quase sempre o certo — é lá que estão os dados
+   * bancários — mas "quase sempre" não é sempre. Quem decide é quem cadastra.
+   */
+  it('conta o que já existe no IXC para a tela poder perguntar', async () => {
+    const { service } = montarServico({
+      fornecedorNoIxc: {
+        idFornecedor: 42,
+        nome: 'DEDA SERVICOS',
+        nomeFantasia: null,
+        cpfCnpj: '111.222.333-44',
+        email: null,
+        telefone: null,
+        ativo: true,
+      },
+    });
+
+    const r = await service.consultarCpfCnpj('111.222.333-44');
+    expect(r.fornecedor).toMatchObject({ idFornecedor: 42, nome: 'DEDA SERVICOS' });
+    expect(r.ixcIndisponivel).toBeNull();
+  });
+
+  /** IXC fora do ar não pode travar um cadastro — só avisar. */
+  it('IXC fora do ar não impede o cadastro', async () => {
+    const { service } = montarServico({ erroConsulta: 'timeout' });
+
+    const r = await service.consultarCpfCnpj('111.222.333-44');
+    expect(r.fornecedor).toBeNull();
+    expect(r.ixcIndisponivel).toBe('timeout');
+  });
+});
+
+describe('resumo do beneficiário', () => {
+  /** Verde só quando o dinheiro saiu: em mãos na hora, pelo IXC no banco. */
+  it('separa o que saiu do que ainda está a caminho', async () => {
+    const { service, prisma } = montarServico();
+    prisma.beneficiarioAvulso.findMany.mockResolvedValue([
+      {
+        ...BENEFICIARIO,
+        pagamentos: [
+          {
+            valor: 100,
+            data: new Date('2026-08-01'),
+            forma: FormaPagamento.EM_MAOS,
+            idLancamentoIxc: 1,
+            lancadoManual: false,
+            contaPagar: null,
+          },
+          {
+            valor: 200,
+            data: new Date('2026-08-02'),
+            forma: FormaPagamento.IXC,
+            idLancamentoIxc: null,
+            lancadoManual: false,
+            contaPagar: { status: StatusContaPagar.PAGO },
+          },
+          {
+            valor: 400,
+            data: new Date('2026-08-03'),
+            forma: FormaPagamento.IXC,
+            idLancamentoIxc: null,
+            lancadoManual: false,
+            contaPagar: { status: StatusContaPagar.AGUARDANDO_APROVACAO },
+          },
+          {
+            valor: 800,
+            data: new Date('2026-08-04'),
+            forma: FormaPagamento.IXC,
+            idLancamentoIxc: null,
+            lancadoManual: false,
+            contaPagar: { status: StatusContaPagar.ERRO },
+          },
+        ],
+      },
+    ]);
+
+    const [resumo] = await service.listarBeneficiarios();
+    expect(resumo).toMatchObject({
+      totalPago: 300,
+      quantidadePagas: 2,
+      totalAguardando: 400,
+      quantidadeAguardando: 1,
+      quantidadeComErro: 1,
+    });
+  });
+});

@@ -10,7 +10,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import { FormaPagamentoDiaria } from '@prisma/client';
+import { FormaPagamento } from '@prisma/client';
 import { TIPOS_CHAVE_PIX } from '../../ixc/ixc.financeiro';
 
 export class CriarDiaristaDto {
@@ -39,7 +39,7 @@ export class CriarDiaristaDto {
   @Min(0)
   valorDiaria?: number | null;
 
-  @IsOptional() @IsEnum(FormaPagamentoDiaria) formaPagamento?: FormaPagamentoDiaria;
+  @IsOptional() @IsEnum(FormaPagamento) formaPagamento?: FormaPagamento;
 
   @IsOptional() @IsString() observacoes?: string;
 

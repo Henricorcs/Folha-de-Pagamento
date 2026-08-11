@@ -4,6 +4,23 @@ import { IxcClient } from '../ixc/ixc.client';
 import { buildFornecedorPayload } from '../ixc/ixc.financeiro';
 import { ConfigFinanceiraService } from './config-financeira.service';
 
+/** Um fornecedor que já existe no IXC, como a tela precisa vê-lo. */
+export interface FornecedorNoIxc {
+  idFornecedor: number;
+  nome: string;
+  nomeFantasia: string | null;
+  cpfCnpj: string | null;
+  email: string | null;
+  telefone: string | null;
+  ativo: boolean;
+}
+
+/** Campo de texto do IXC: string não vazia, ou null. */
+function texto(valor: unknown): string | null {
+  const s = String(valor ?? '').trim();
+  return s || null;
+}
+
 /**
  * Garante que cada beneficiário (funcionário ou avulso) tenha um fornecedor
  * correspondente no IXC — pré-requisito para gerar contas a pagar.
@@ -83,7 +100,12 @@ export class FornecedorService {
       cpfCnpj: ben.cpfCnpj,
       tipoPessoa: ben.tipoPessoa,
       cidadeId: ben.cidadeIxc ?? cfg.cidadePadraoId,
+      email: ben.email,
+      celular: ben.telefone,
       obs: 'Beneficiário avulso — pagamento',
+      // Quem cadastrou foi avisado de que já existia fornecedor com aquele
+      // documento e mesmo assim quis um novo: aqui a busca não roda.
+      semReuso: ben.fornecedorNovoNoIxc,
     });
 
     await this.prisma.beneficiarioAvulso.update({
@@ -91,6 +113,40 @@ export class FornecedorService {
       data: { idFornecedorIxc: idFornecedor },
     });
     return idFornecedor;
+  }
+
+  /**
+   * Procura no IXC um fornecedor com aquele CPF/CNPJ, para a tela poder
+   * perguntar antes de cadastrar em vez de decidir sozinha. Reaproveitar é
+   * quase sempre o certo — é no cadastro antigo que estão os dados bancários —
+   * mas "quase sempre" não é sempre, e quem sabe é quem está cadastrando.
+   */
+  async procurarNoIxcPorCpfCnpj(
+    cpfCnpj: string,
+  ): Promise<FornecedorNoIxc | null> {
+    const doc = cpfCnpj.trim();
+    if (!doc) return null;
+
+    const res = await this.ixc.list<Record<string, unknown>>('fornecedor', {
+      qtype: 'fornecedor.cpf_cnpj',
+      query: doc,
+      oper: '=',
+      rp: 1,
+    });
+    const bruto = res.registros[0];
+    if (!bruto) return null;
+
+    const id = Number(bruto.id);
+    if (!Number.isInteger(id) || id <= 0) return null;
+    return {
+      idFornecedor: id,
+      nome: texto(bruto.razao) ?? texto(bruto.fantasia) ?? `Fornecedor ${id}`,
+      nomeFantasia: texto(bruto.fantasia),
+      cpfCnpj: texto(bruto.cpf_cnpj),
+      email: texto(bruto.email),
+      telefone: texto(bruto.celular) ?? texto(bruto.telefone),
+      ativo: String(bruto.ativo ?? '').toUpperCase() !== 'N',
+    };
   }
 
   private async criarFornecedor(input: {
@@ -101,11 +157,15 @@ export class FornecedorService {
     email?: string | null;
     celular?: string | null;
     obs?: string;
+    /** Não reaproveitar cadastro existente: quem pediu já foi avisado. */
+    semReuso?: boolean;
   }): Promise<number> {
     // Reutiliza fornecedor existente no IXC (por CPF/CNPJ) antes de criar um
     // novo — fornecedores já cadastrados costumam ter dados bancários/PIX que
     // a tela de contas a pagar do IXC preenche automaticamente.
-    const existente = await this.buscarPorCpfCnpj(input.cpfCnpj);
+    const existente = input.semReuso
+      ? null
+      : await this.buscarPorCpfCnpj(input.cpfCnpj);
     if (existente) {
       this.logger.log(
         `Fornecedor existente vinculado: #${existente} (${input.nome})`,

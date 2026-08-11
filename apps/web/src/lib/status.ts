@@ -1,6 +1,6 @@
 import type { Tom } from '../components/ui';
 import type {
-  FormaPagamentoDiaria,
+  FormaPagamento,
   PerfilUsuario,
   SentidoVale,
   StatusContaPagar,
@@ -39,8 +39,8 @@ export const TIPO_LABEL: Record<TipoLancamento, string> = {
   DIARIA: 'Diária',
 };
 
-/** Por onde o dinheiro da diária sai. */
-export const FORMA_DIARIA_LABEL: Record<FormaPagamentoDiaria, string> = {
+/** Por onde o dinheiro sai — vale para diária e para pagamento avulso. */
+export const FORMA_PAGAMENTO_LABEL: Record<FormaPagamento, string> = {
   IXC: 'Pelo IXC',
   EM_MAOS: 'Em mãos',
 };

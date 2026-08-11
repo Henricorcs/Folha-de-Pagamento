@@ -12,7 +12,11 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { DiaristasService } from './diaristas.service';
-import { PagarDiariaDto, QueryDiariasDto } from './dto/diaria.dto';
+import {
+  LoteDiariasDto,
+  PagarDiariaDto,
+  QueryDiariasDto,
+} from './dto/diaria.dto';
 import { CriarDiaristaDto, UpdateDiaristaDto } from './dto/diarista.dto';
 
 function usuarioId(req: Request): string | undefined {
@@ -32,6 +36,18 @@ export class DiaristasController {
   @Get('diarias')
   listarDiarias(@Query() q: QueryDiariasDto) {
     return this.service.listarDiarias(q.diaristaId);
+  }
+
+  /** As que ficaram no meio do caminho e não vão sair sozinhas. */
+  @Get('diarias/travadas')
+  listarTravadas() {
+    return this.service.listarTravadas();
+  }
+
+  @Post('diarias/excluir-lote')
+  @HttpCode(200)
+  excluirLote(@Body() dto: LoteDiariasDto) {
+    return this.service.removerDiarias(dto.ids);
   }
 
   /** Tenta de novo a saída no caixa do IXC. */

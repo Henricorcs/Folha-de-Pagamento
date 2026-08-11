@@ -7,7 +7,7 @@ import {
 import {
   Diaria,
   Diarista,
-  FormaPagamentoDiaria,
+  FormaPagamento,
   Prisma,
   StatusContaPagar,
   TipoLancamento,
@@ -42,6 +42,23 @@ export interface DiaristaComResumo {
   /** Diárias em mãos que ainda não viraram lançamento no caixa do IXC. */
   pendentesNoCaixa: number;
 }
+
+/** O que aconteceu ao apagar várias diárias de uma vez. */
+export interface ResultadoLoteDiarias {
+  total: number;
+  sucesso: number;
+  falhas: Array<{ id: string; erro: string }>;
+}
+
+/**
+ * Status de conta a pagar que não vira dinheiro saindo. Junto com "sem conta
+ * nenhuma" (a que foi apagada no IXC), é o que define uma diária travada.
+ */
+const SEM_SAIDA: StatusContaPagar[] = [
+  StatusContaPagar.REPROVADO,
+  StatusContaPagar.CANCELADO,
+  StatusContaPagar.ERRO,
+];
 
 @Injectable()
 export class DiaristasService {
@@ -200,6 +217,57 @@ export class DiaristasService {
   }
 
   /**
+   * As diárias que ficaram no meio do caminho: pagas pelo IXC, mas com a conta
+   * a pagar reprovada, cancelada, recusada — ou apagada de lá, que é o que
+   * deixa a diária sem conta nenhuma.
+   *
+   * Nenhuma delas vai sair sozinha, então ficam fora do gasto do mês. Existe
+   * esta lista para não ficarem fora *e* invisíveis: ou alguém refaz o
+   * pagamento, ou apaga o registro.
+   */
+  listarTravadas() {
+    return this.prisma.diaria.findMany({
+      where: {
+        forma: FormaPagamento.IXC,
+        OR: [
+          { contaPagarId: null },
+          { contaPagar: { status: { in: SEM_SAIDA } } },
+        ],
+      },
+      orderBy: [{ data: 'desc' }, { createdAt: 'desc' }],
+      take: 500,
+      include: {
+        diarista: { select: { nome: true } },
+        contaPagar: {
+          select: { id: true, status: true, erro: true, idFnApagarIxc: true },
+        },
+      },
+    });
+  }
+
+  /**
+   * Apaga várias diárias de uma vez. Uma que falhe não derruba as outras — o
+   * relatório diz quais ficaram e por quê, como nas ações em massa das contas.
+   */
+  async removerDiarias(ids: string[]): Promise<ResultadoLoteDiarias> {
+    const unicos = [...new Set(ids)];
+    const falhas: Array<{ id: string; erro: string }> = [];
+    let sucesso = 0;
+
+    for (const id of unicos) {
+      try {
+        await this.removerDiaria(id);
+        sucesso++;
+      } catch (err) {
+        const erro = err instanceof Error ? err.message : String(err);
+        falhas.push({ id, erro });
+        this.logger.warn(`Diária ${id} não foi apagada: ${erro}`);
+      }
+    }
+    return { total: unicos.length, sucesso, falhas };
+  }
+
+  /**
    * Paga uma diária. Pelo IXC vira conta a pagar como qualquer beneficiário
    * (fornecedor, auditoria, banco). Em mãos, o dinheiro já saiu da gaveta: a
    * diária é registrada como paga e o app lança a saída no caixa configurado.
@@ -239,7 +307,7 @@ export class DiaristasService {
       criadoPor: usuarioId ?? null,
     };
 
-    return forma === FormaPagamentoDiaria.IXC
+    return forma === FormaPagamento.IXC
       ? this.pagarPeloIxc(diarista, base, { quantidade, valorDiaria, valor }, usuarioId)
       : this.pagarEmMaos(base);
   }
@@ -340,7 +408,7 @@ export class DiaristasService {
    */
   async lancarNoCaixa(diariaId: string): Promise<Diaria> {
     const diaria = await this.buscarDiaria(diariaId);
-    if (diaria.forma !== FormaPagamentoDiaria.EM_MAOS) {
+    if (diaria.forma !== FormaPagamento.EM_MAOS) {
       throw new BadRequestException(
         'Só diária paga em mãos sai do caixa — esta foi paga pelo IXC.',
       );
@@ -402,7 +470,7 @@ export class DiaristasService {
    */
   async marcarLancadoManual(diariaId: string): Promise<Diaria> {
     const diaria = await this.buscarDiaria(diariaId);
-    if (diaria.forma !== FormaPagamentoDiaria.EM_MAOS) {
+    if (diaria.forma !== FormaPagamento.EM_MAOS) {
       throw new BadRequestException('Só diária paga em mãos sai do caixa.');
     }
     return this.prisma.diaria.update({
@@ -446,7 +514,7 @@ export class DiaristasService {
 /** Como cada diária aparece nas contas do resumo. */
 interface DiariaResumida {
   valor: Prisma.Decimal;
-  forma: FormaPagamentoDiaria;
+  forma: FormaPagamento;
   contaPagar: { status: StatusContaPagar } | null;
 }
 
@@ -459,14 +527,14 @@ interface DiariaResumida {
  * isso como pago faria a tela mentir.
  */
 function diariaPaga(d: DiariaResumida): boolean {
-  return d.forma === FormaPagamentoDiaria.EM_MAOS
+  return d.forma === FormaPagamento.EM_MAOS
     ? true
     : d.contaPagar?.status === StatusContaPagar.PAGO;
 }
 
 /** Lançada no IXC e ainda a caminho: nem paga, nem recusada. */
 function diariaAguardando(d: DiariaResumida): boolean {
-  if (d.forma === FormaPagamentoDiaria.EM_MAOS) return false;
+  if (d.forma === FormaPagamento.EM_MAOS) return false;
   const status = d.contaPagar?.status;
   return (
     status !== undefined &&
@@ -483,12 +551,12 @@ function somar(diarias: Array<{ valor: Prisma.Decimal }>): number {
 
 /** Diária em mãos que ainda não virou lançamento no caixa do IXC. */
 function pendenteNoCaixa(d: {
-  forma: FormaPagamentoDiaria;
+  forma: FormaPagamento;
   idLancamentoIxc: number | null;
   lancadoManual: boolean;
 }): boolean {
   return (
-    d.forma === FormaPagamentoDiaria.EM_MAOS &&
+    d.forma === FormaPagamento.EM_MAOS &&
     d.idLancamentoIxc === null &&
     !d.lancadoManual
   );

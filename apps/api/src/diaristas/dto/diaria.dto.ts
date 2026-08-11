@@ -1,5 +1,6 @@
 import { Transform } from 'class-transformer';
 import {
+  IsArray,
   IsEnum,
   IsIn,
   IsISO8601,
@@ -9,7 +10,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import { FormaPagamentoDiaria } from '@prisma/client';
+import { FormaPagamento } from '@prisma/client';
 import { TIPOS_CHAVE_PIX } from '../../ixc/ixc.financeiro';
 
 /** Um pagamento de diária: quantos dias, por quanto e por onde sai. */
@@ -41,7 +42,7 @@ export class PagarDiariaDto {
   @IsString() @MinLength(3) descricao!: string;
 
   /** Vazio = a forma habitual do cadastro do diarista. */
-  @IsOptional() @IsEnum(FormaPagamentoDiaria) forma?: FormaPagamentoDiaria;
+  @IsOptional() @IsEnum(FormaPagamento) forma?: FormaPagamento;
 
   /**
    * Chave PIX a usar neste pagamento. Vazio = a do cadastro. O que vier aqui
@@ -58,4 +59,9 @@ export class PagarDiariaDto {
 
 export class QueryDiariasDto {
   @IsOptional() @IsString() diaristaId?: string;
+}
+
+/** Diárias a apagar de uma vez (a limpeza das que ficaram travadas). */
+export class LoteDiariasDto {
+  @IsArray() @IsString({ each: true }) ids!: string[];
 }

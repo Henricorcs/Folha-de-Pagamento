@@ -1,86 +1,327 @@
-import { useMutation } from '@tanstack/react-query';
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState, type ReactNode } from 'react';
 import {
   Aviso,
   Bloco,
   CabecalhoPagina,
   CampoDinheiro,
+  Carregando,
   Pagina,
+  Selo,
+  Vazio,
 } from '../components/ui';
 import { api, mensagemErro } from '../lib/api';
-import { formatBRL } from '../lib/format';
-import type { ContaPagar } from '../lib/types';
+import { formatBRL, formatData } from '../lib/format';
+import { FORMA_PAGAMENTO_LABEL, STATUS_LABEL, STATUS_TOM } from '../lib/status';
+import { TIPOS_CHAVE_PIX } from '../lib/types';
+import type {
+  BeneficiarioAvulso,
+  BeneficiarioComResumo,
+  ConsultaCpfCnpj,
+  FormaPagamento,
+  PagamentoAvulso,
+} from '../lib/types';
+
+/** Cadastro em branco: começa no IXC, que é a forma rastreável. */
+const CADASTRO_VAZIO = {
+  nome: '',
+  cpfCnpj: '',
+  tipoPessoa: 'F',
+  telefone: '',
+  email: '',
+  chavePix: '',
+  tipoChavePix: '',
+  formaPagamento: 'IXC' as FormaPagamento,
+  observacoes: '',
+};
+
+type Cadastro = typeof CADASTRO_VAZIO;
+
+/** O que fazer com o fornecedor que já existe no IXC com aquele documento. */
+type EscolhaFornecedor =
+  | { tipo: 'PERGUNTAR'; consulta: ConsultaCpfCnpj }
+  | { tipo: 'REUSAR'; idFornecedorIxc: number; nome: string }
+  | { tipo: 'NOVO' };
+
+function hojeISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** O pagamento em mãos ainda não virou lançamento no caixa do IXC. */
+function pendenteNoCaixa(p: PagamentoAvulso): boolean {
+  return p.forma === 'EM_MAOS' && !p.idLancamentoIxc && !p.lancadoManual;
+}
 
 export function Avulsos() {
-  const navigate = useNavigate();
-  const [form, setForm] = useState({
-    nome: '',
-    cpfCnpj: '',
-    tipoPessoa: 'F',
-    chavePix: '',
-    valor: '',
-    contaContabil: '',
-    observacao: '',
-  });
+  const qc = useQueryClient();
+  const [busca, setBusca] = useState('');
+  const [verInativos, setVerInativos] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [erro, setErro] = useState(false);
+  /** Cadastro aberto: null = fechado, "novo" = novo, id = editando. */
+  const [editando, setEditando] = useState<string | null>(null);
+  const [form, setForm] = useState<Cadastro>(CADASTRO_VAZIO);
+  /** O que decidir sobre o fornecedor do IXC (só no cadastro novo). */
+  const [fornecedor, setFornecedor] = useState<EscolhaFornecedor>({
+    tipo: 'NOVO',
+  });
+  const [aberto, setAberto] = useState<string | null>(null);
+  const [pagando, setPagando] = useState<BeneficiarioAvulso | null>(null);
 
-  const criar = useMutation({
+  const lista = useQuery({
+    queryKey: ['avulsos', busca, verInativos],
+    queryFn: async () => {
+      const params: Record<string, string> = {};
+      if (busca) params.busca = busca;
+      if (verInativos) params.todos = 'true';
+      return (
+        await api.get<BeneficiarioComResumo[]>('/avulsos/beneficiarios', {
+          params,
+        })
+      ).data;
+    },
+  });
+
+  const pagamentos = useQuery({
+    queryKey: ['pagamentos-avulsos', aberto],
+    queryFn: async () =>
+      (
+        await api.get<PagamentoAvulso[]>('/avulsos/pagamentos', {
+          params: { beneficiarioId: aberto },
+        })
+      ).data,
+    enabled: !!aberto,
+  });
+
+  function invalidar() {
+    qc.invalidateQueries({ queryKey: ['avulsos'] });
+    qc.invalidateQueries({ queryKey: ['pagamentos-avulsos'] });
+    qc.invalidateQueries({ queryKey: ['contas-pagar'] });
+    qc.invalidateQueries({ queryKey: ['dashboard'] });
+  }
+
+  function avisar(texto: string, ruim = false) {
+    setErro(ruim);
+    setFeedback(texto);
+  }
+
+  /**
+   * Antes de cadastrar, pergunta ao IXC se aquele documento já é fornecedor.
+   * Reaproveitar é quase sempre o certo — é no cadastro antigo que estão os
+   * dados bancários — mas quem sabe se é a mesma pessoa é quem está aqui.
+   */
+  const consultar = useMutation({
+    mutationFn: async (cpfCnpj: string) =>
+      (
+        await api.get<ConsultaCpfCnpj>('/avulsos/consultar-documento', {
+          params: { cpfCnpj },
+        })
+      ).data,
+    onSuccess: (consulta) => {
+      if (consulta.beneficiario) {
+        avisar(
+          `${consulta.beneficiario.nome} já está cadastrado aqui com esse documento — use o cadastro dele em vez de criar outro.`,
+          true,
+        );
+        return;
+      }
+      if (consulta.fornecedor) {
+        setFornecedor({ tipo: 'PERGUNTAR', consulta });
+        return;
+      }
+      setFornecedor({ tipo: 'NOVO' });
+      avisar(
+        consulta.ixcIndisponivel
+          ? `Não deu para consultar o IXC agora (${consulta.ixcIndisponivel}). Dá para cadastrar assim mesmo.`
+          : 'Nenhum fornecedor com esse documento no IXC — será criado um novo.',
+        !!consulta.ixcIndisponivel,
+      );
+    },
+    onError: (err) => avisar(mensagemErro(err), true),
+  });
+
+  const salvar = useMutation({
     mutationFn: async () => {
       const body = {
         nome: form.nome,
         cpfCnpj: form.cpfCnpj || undefined,
         tipoPessoa: form.tipoPessoa,
+        telefone: form.telefone || undefined,
+        email: form.email || undefined,
         chavePix: form.chavePix || undefined,
-        valor: Number(form.valor),
-        contaContabil: Number(form.contaContabil),
-        observacao: form.observacao,
+        tipoChavePix: form.tipoChavePix,
+        formaPagamento: form.formaPagamento,
+        observacoes: form.observacoes || undefined,
+        ...(fornecedor.tipo === 'REUSAR'
+          ? { idFornecedorIxc: fornecedor.idFornecedorIxc }
+          : {}),
+        ...(fornecedor.tipo === 'NOVO' ? { fornecedorNovoNoIxc: false } : {}),
       };
-      return (await api.post<ContaPagar>('/avulsos', body)).data;
+      return editando && editando !== 'novo'
+        ? (
+            await api.patch<BeneficiarioAvulso>(
+              `/avulsos/beneficiarios/${editando}`,
+              body,
+            )
+          ).data
+        : (await api.post<BeneficiarioAvulso>('/avulsos/beneficiarios', body))
+            .data;
     },
-    onSuccess: (conta) => {
-      setErro(conta.status === 'ERRO');
-      setFeedback(
-        conta.status === 'ERRO'
-          ? `Salvo aqui, mas o IXC recusou: ${conta.erro}`
-          : 'Pagamento criado no IXC. Abrindo Contas a Pagar…',
+    onSuccess: (b) => {
+      avisar(
+        editando && editando !== 'novo'
+          ? `${b.nome} atualizado.`
+          : `${b.nome} cadastrado.`,
       );
-      if (conta.status !== 'ERRO')
-        setTimeout(() => navigate('/contas-pagar'), 1200);
+      fecharCadastro();
+      invalidar();
     },
-    onError: (err) => {
-      setErro(true);
-      setFeedback(mensagemErro(err));
-    },
+    onError: (err) => avisar(mensagemErro(err), true),
   });
 
-  function set<K extends keyof typeof form>(k: K, v: string) {
-    setForm((f) => ({ ...f, [k]: v }));
+  const alternarAtivo = useMutation({
+    mutationFn: async (b: BeneficiarioAvulso) =>
+      (
+        await api.patch<BeneficiarioAvulso>(`/avulsos/beneficiarios/${b.id}`, {
+          ativo: !b.ativo,
+        })
+      ).data,
+    onSuccess: (b) => {
+      avisar(`${b.nome} ${b.ativo ? 'reativado' : 'desativado'}.`);
+      invalidar();
+    },
+    onError: (err) => avisar(mensagemErro(err), true),
+  });
+
+  const excluir = useMutation({
+    mutationFn: async (id: string) =>
+      (await api.delete(`/avulsos/beneficiarios/${id}`)).data,
+    onSuccess: () => {
+      avisar('Cadastro apagado.');
+      invalidar();
+    },
+    onError: (err) => avisar(mensagemErro(err), true),
+  });
+
+  const pagar = useMutation({
+    mutationFn: async (args: {
+      beneficiarioId: string;
+      body: Record<string, unknown>;
+    }) =>
+      (
+        await api.post<PagamentoAvulso>(
+          `/avulsos/beneficiarios/${args.beneficiarioId}/pagamentos`,
+          args.body,
+        )
+      ).data,
+    onSuccess: (p) => {
+      setPagando(null);
+      setAberto(p.beneficiarioId);
+      avisar(resumoDoPagamento(p), !!p.erroIxc || p.contaPagar?.status === 'ERRO');
+      invalidar();
+    },
+    onError: (err) => avisar(mensagemErro(err), true),
+  });
+
+  const acaoPagamento = useMutation({
+    mutationFn: async (args: {
+      id: string;
+      op: 'lancar-caixa' | 'marcar-lancado';
+    }) =>
+      (await api.post<PagamentoAvulso>(`/avulsos/pagamentos/${args.id}/${args.op}`))
+        .data,
+    onSuccess: (p, args) => {
+      avisar(
+        args.op === 'marcar-lancado'
+          ? 'Marcado como lançado no IXC à mão.'
+          : resumoDoPagamento(p),
+        !!p.erroIxc,
+      );
+      invalidar();
+    },
+    onError: (err) => avisar(mensagemErro(err), true),
+  });
+
+  const excluirPagamento = useMutation({
+    mutationFn: async (id: string) =>
+      (await api.delete(`/avulsos/pagamentos/${id}`)).data,
+    onSuccess: () => {
+      avisar('Pagamento apagado.');
+      invalidar();
+    },
+    onError: (err) => avisar(mensagemErro(err), true),
+  });
+
+  function abrirNovo() {
+    setForm(CADASTRO_VAZIO);
+    setFornecedor({ tipo: 'NOVO' });
+    setEditando('novo');
   }
-  const valido =
-    form.nome.trim().length >= 2 &&
-    Number(form.valor) > 0 &&
-    Number(form.contaContabil) > 0 &&
-    form.observacao.trim().length >= 3;
+  function abrirEdicao(b: BeneficiarioAvulso) {
+    setForm({
+      nome: b.nome,
+      cpfCnpj: b.cpfCnpj ?? '',
+      tipoPessoa: b.tipoPessoa,
+      telefone: b.telefone ?? '',
+      email: b.email ?? '',
+      chavePix: b.chavePix ?? '',
+      tipoChavePix: b.tipoChavePix ?? '',
+      formaPagamento: b.formaPagamento,
+      observacoes: b.observacoes ?? '',
+    });
+    setFornecedor(
+      b.idFornecedorIxc
+        ? { tipo: 'REUSAR', idFornecedorIxc: b.idFornecedorIxc, nome: b.nome }
+        : { tipo: 'NOVO' },
+    );
+    setEditando(b.id);
+  }
+  function fecharCadastro() {
+    setEditando(null);
+    setForm(CADASTRO_VAZIO);
+    setFornecedor({ tipo: 'NOVO' });
+  }
+
+  const itens = lista.data ?? [];
+  const pendentes = itens.reduce((s, i) => s + i.pendentesNoCaixa, 0);
+  const abertoBeneficiario = itens.find(
+    (i) => i.beneficiario.id === aberto,
+  )?.beneficiario;
+  const editandoNovo = editando === 'novo';
+  const nomeValido = form.nome.trim().length >= 2;
 
   return (
     <Pagina>
       <CabecalhoPagina
         secao="Pagamentos avulsos"
         titulo="Pagar quem não é da folha"
-        descricao="Patrocínio, serviço pontual, ajuda de custo. O beneficiário vira fornecedor no IXC automaticamente."
+        descricao="Mão de obra contratada, serviço pontual, patrocínio, ajuda de custo. A pessoa fica cadastrada e vira fornecedor no IXC — o pagamento sai por lá (conta a pagar, com PIX) ou em mãos, descontado do caixa."
+        acoes={
+          <button onClick={abrirNovo} className="btn btn-primario">
+            Cadastrar beneficiário
+          </button>
+        }
       />
 
       {feedback && <Aviso tom={erro ? 'erro' : 'marca'}>{feedback}</Aviso>}
 
-      <div className="max-w-3xl">
-        <Bloco className="surgir surgir-1">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      {pendentes > 0 && (
+        <Aviso tom="atencao">
+          {pendentes} pagamento(s) em mãos ainda não saíram do caixa no IXC. Abra
+          a pessoa para tentar de novo ou marcar que você lançou à mão.
+        </Aviso>
+      )}
+
+      {editando && (
+        <Bloco
+          titulo={editandoNovo ? 'Novo beneficiário' : 'Editar cadastro'}
+          className="surgir mb-6"
+        >
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Campo label="Nome ou razão social" span2>
               <input
                 value={form.nome}
-                onChange={(e) => set('nome', e.target.value)}
+                onChange={(e) => setForm({ ...form, nome: e.target.value })}
                 className="campo"
                 placeholder="Ex.: João da Silva"
               />
@@ -88,7 +329,9 @@ export function Avulsos() {
             <Campo label="Tipo de pessoa">
               <select
                 value={form.tipoPessoa}
-                onChange={(e) => set('tipoPessoa', e.target.value)}
+                onChange={(e) =>
+                  setForm({ ...form, tipoPessoa: e.target.value })
+                }
                 className="campo"
               >
                 <option value="F">Física</option>
@@ -96,65 +339,664 @@ export function Avulsos() {
               </select>
             </Campo>
             <Campo label="CPF ou CNPJ">
+              <div className="flex gap-2">
+                <input
+                  value={form.cpfCnpj}
+                  onChange={(e) => {
+                    setForm({ ...form, cpfCnpj: e.target.value });
+                    setFornecedor({ tipo: 'NOVO' });
+                  }}
+                  className="campo"
+                />
+                <button
+                  onClick={() => consultar.mutate(form.cpfCnpj)}
+                  disabled={form.cpfCnpj.trim().length < 3 || consultar.isPending}
+                  className="btn btn-neutro shrink-0"
+                  title="Procura no IXC um fornecedor já cadastrado com esse documento"
+                >
+                  {consultar.isPending ? 'Vendo…' : 'Conferir no IXC'}
+                </button>
+              </div>
+            </Campo>
+            <Campo label="Telefone">
               <input
-                value={form.cpfCnpj}
-                onChange={(e) => set('cpfCnpj', e.target.value)}
+                value={form.telefone}
+                onChange={(e) => setForm({ ...form, telefone: e.target.value })}
                 className="campo"
               />
+            </Campo>
+            <Campo label="E-mail">
+              <input
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                className="campo"
+              />
+            </Campo>
+            <Campo label="Como costuma receber">
+              <select
+                value={form.formaPagamento}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    formaPagamento: e.target.value as FormaPagamento,
+                  })
+                }
+                className="campo"
+              >
+                <option value="IXC">Pelo IXC (conta a pagar)</option>
+                <option value="EM_MAOS">Em mãos (sai do caixa)</option>
+              </select>
             </Campo>
             <Campo label="Chave PIX">
               <input
                 value={form.chavePix}
-                onChange={(e) => set('chavePix', e.target.value)}
+                onChange={(e) => setForm({ ...form, chavePix: e.target.value })}
                 className="campo"
                 placeholder="Sem ela o banco não paga"
               />
             </Campo>
-            <Campo label="Conta contábil (id_conta)">
-              <input
-                type="number"
-                value={form.contaContabil}
-                onChange={(e) => set('contaContabil', e.target.value)}
+            <Campo label="Tipo da chave">
+              <select
+                value={form.tipoChavePix}
+                onChange={(e) =>
+                  setForm({ ...form, tipoChavePix: e.target.value })
+                }
                 className="campo"
-                placeholder="Ex.: 13916"
-              />
+              >
+                <option value="">Pelo formato da chave</option>
+                {TIPOS_CHAVE_PIX.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
             </Campo>
-            <Campo label="Valor (R$)" span2>
-              <CampoDinheiro
-                valor={form.valor}
-                onChange={(v) => set('valor', v)}
-              />
-            </Campo>
-            <Campo label="Observação — é o que aparece no IXC" span2>
+            <Campo label="Observações" span2>
               <input
-                value={form.observacao}
-                onChange={(e) => set('observacao', e.target.value)}
+                value={form.observacoes}
+                onChange={(e) =>
+                  setForm({ ...form, observacoes: e.target.value })
+                }
                 className="campo"
-                placeholder="Ex.: patrocínio do campeonato de julho"
+                placeholder="O que essa pessoa faz, combinados…"
               />
             </Campo>
           </div>
 
-          <div className="mt-6 flex flex-wrap items-center gap-4 border-t border-tinta-100 pt-5">
+          {fornecedor.tipo === 'PERGUNTAR' && fornecedor.consulta.fornecedor && (
+            <EscolhaDoFornecedor
+              fornecedor={fornecedor.consulta.fornecedor}
+              onReusar={() =>
+                setFornecedor({
+                  tipo: 'REUSAR',
+                  idFornecedorIxc: fornecedor.consulta.fornecedor!.idFornecedor,
+                  nome: fornecedor.consulta.fornecedor!.nome,
+                })
+              }
+              onNovo={() => setFornecedor({ tipo: 'NOVO' })}
+            />
+          )}
+          {fornecedor.tipo === 'REUSAR' && (
+            <Aviso tom="pago">
+              Vai usar o fornecedor #{fornecedor.idFornecedorIxc} que já existe
+              no IXC — os dados bancários de lá valem no pagamento.
+            </Aviso>
+          )}
+
+          <div className="mt-5 flex flex-wrap gap-3 border-t border-tinta-100 pt-4">
             <button
-              onClick={() => criar.mutate()}
-              disabled={!valido || criar.isPending}
+              onClick={() => salvar.mutate()}
+              disabled={
+                !nomeValido ||
+                salvar.isPending ||
+                fornecedor.tipo === 'PERGUNTAR'
+              }
               className="btn btn-primario"
             >
-              {criar.isPending ? 'Criando…' : 'Criar pagamento no IXC'}
+              {salvar.isPending ? 'Salvando…' : 'Salvar'}
             </button>
-            {Number(form.valor) > 0 && (
-              <span className="text-sm text-tinta-500">
-                Vai sair{' '}
-                <strong className="valor text-[15px]">
-                  {formatBRL(Number(form.valor))}
-                </strong>
+            <button onClick={fecharCadastro} className="btn btn-neutro">
+              Cancelar
+            </button>
+            {fornecedor.tipo === 'PERGUNTAR' && (
+              <span className="text-sm text-amber-700">
+                Escolha acima o que fazer com o fornecedor que já existe.
               </span>
             )}
           </div>
         </Bloco>
+      )}
+
+      <div className="surgir surgir-1 mb-4 flex flex-wrap items-center gap-3">
+        <input
+          value={busca}
+          onChange={(e) => setBusca(e.target.value)}
+          placeholder="Buscar por nome ou documento"
+          className="campo max-w-xs"
+        />
+        <label className="flex items-center gap-2 text-sm text-tinta-600">
+          <input
+            type="checkbox"
+            className="accent-brand-600"
+            checked={verInativos}
+            onChange={(e) => setVerInativos(e.target.checked)}
+          />
+          Mostrar desativados
+        </label>
       </div>
+
+      <Bloco className="surgir surgir-2" semPadding>
+        <div className="overflow-x-auto rolagem-fina">
+          <table className="w-full text-sm">
+            <thead>
+              <tr>
+                <th className="th">Beneficiário</th>
+                <th className="th">Chave PIX</th>
+                <th className="th">Costuma receber</th>
+                <th className="th text-right">Já pago</th>
+                <th className="th">Último</th>
+                <th className="th text-right">Ação</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lista.isLoading && (
+                <tr>
+                  <td colSpan={6}>
+                    <Carregando />
+                  </td>
+                </tr>
+              )}
+              {!lista.isLoading && itens.length === 0 && (
+                <tr>
+                  <td colSpan={6}>
+                    <Vazio titulo="Ninguém cadastrado ainda">
+                      Cadastre quem presta serviço para a empresa sem estar na
+                      folha — pedreiro, eletricista, patrocinado.
+                    </Vazio>
+                  </td>
+                </tr>
+              )}
+              {itens.map(({ beneficiario: b, ...resumo }) => (
+                <tr key={b.id} className={`linha ${b.ativo ? '' : 'opacity-50'}`}>
+                  <td className="td">
+                    <button
+                      onClick={() => setAberto(aberto === b.id ? null : b.id)}
+                      className="flex flex-wrap items-center gap-2 text-left"
+                    >
+                      <span
+                        className={`text-tinta-300 transition-transform ${
+                          aberto === b.id ? 'rotate-90' : ''
+                        }`}
+                      >
+                        ▸
+                      </span>
+                      <span className="font-medium text-tinta-900">{b.nome}</span>
+                      {!b.ativo && (
+                        <Selo tom="neutro" pequeno>
+                          desativado
+                        </Selo>
+                      )}
+                      {b.idFornecedorIxc && (
+                        <Selo tom="info" pequeno titulo="Fornecedor vinculado no IXC">
+                          #{b.idFornecedorIxc}
+                        </Selo>
+                      )}
+                      {resumo.pendentesNoCaixa > 0 && (
+                        <Selo tom="atencao" pequeno>
+                          {resumo.pendentesNoCaixa} fora do caixa
+                        </Selo>
+                      )}
+                      {resumo.quantidadeComErro > 0 && (
+                        <Selo
+                          tom="erro"
+                          pequeno
+                          titulo="O IXC recusou a conta a pagar — corrija e reenvie em Contas a Pagar"
+                        >
+                          {resumo.quantidadeComErro} com erro
+                        </Selo>
+                      )}
+                    </button>
+                    {b.cpfCnpj && (
+                      <div className="mt-0.5 num text-xs text-tinta-400">
+                        {b.cpfCnpj}
+                      </div>
+                    )}
+                  </td>
+                  <td className="td text-tinta-500">
+                    {b.chavePix || (
+                      <Selo tom="atencao" pequeno>
+                        sem PIX
+                      </Selo>
+                    )}
+                  </td>
+                  <td className="td text-tinta-500">
+                    {FORMA_PAGAMENTO_LABEL[b.formaPagamento]}
+                  </td>
+                  <td className="td text-right">
+                    <span className="valor">{formatBRL(resumo.totalPago)}</span>
+                    <div className="num text-xs text-tinta-400">
+                      {resumo.quantidadePagas} pagamento(s)
+                    </div>
+                    {resumo.totalAguardando > 0 && (
+                      <div
+                        className="mt-0.5 num text-xs text-amber-600"
+                        title="Lançado no IXC, ainda não pago pelo banco"
+                      >
+                        + {formatBRL(resumo.totalAguardando)} a caminho
+                      </div>
+                    )}
+                  </td>
+                  <td className="td num text-tinta-500">
+                    {resumo.ultimoPagamento
+                      ? formatData(resumo.ultimoPagamento)
+                      : '—'}
+                  </td>
+                  <td className="td text-right">
+                    <div className="flex flex-wrap justify-end gap-1.5">
+                      <button
+                        onClick={() => setPagando(b)}
+                        disabled={!b.ativo}
+                        className="btn btn-p bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40"
+                      >
+                        Pagar
+                      </button>
+                      <button
+                        onClick={() => abrirEdicao(b)}
+                        className="btn btn-neutro btn-p"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        onClick={() => alternarAtivo.mutate(b)}
+                        className="btn btn-sutil btn-p"
+                      >
+                        {b.ativo ? 'Desativar' : 'Reativar'}
+                      </button>
+                      {resumo.quantidadePagamentos === 0 && (
+                        <button
+                          onClick={() => {
+                            if (confirm(`Apagar o cadastro de ${b.nome}?`)) {
+                              excluir.mutate(b.id);
+                            }
+                          }}
+                          className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600"
+                        >
+                          Excluir
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Bloco>
+
+      {aberto && abertoBeneficiario && (
+        <Bloco
+          titulo={`Pagamentos — ${abertoBeneficiario.nome}`}
+          className="surgir surgir-3 mt-6"
+          acao={
+            <button onClick={() => setAberto(null)} className="btn btn-sutil btn-p">
+              Fechar
+            </button>
+          }
+          semPadding
+        >
+          {pagamentos.isLoading ? (
+            <Carregando />
+          ) : (pagamentos.data ?? []).length === 0 ? (
+            <Vazio titulo="Nenhum pagamento ainda" />
+          ) : (
+            <div className="overflow-x-auto rolagem-fina">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-t border-tinta-100">
+                    <th className="th">Data</th>
+                    <th className="th">Serviço</th>
+                    <th className="th text-right">Valor</th>
+                    <th className="th">Saiu por</th>
+                    <th className="th text-right">Ação</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(pagamentos.data ?? []).map((p) => (
+                    <tr key={p.id} className="linha">
+                      <td className="td num text-tinta-500">
+                        {formatData(p.data)}
+                      </td>
+                      <td className="td">
+                        <div className="text-tinta-800">{p.descricao}</div>
+                        <div className="mt-0.5 num text-xs text-tinta-400">
+                          conta contábil {p.contaContabil}
+                        </div>
+                        {p.erroIxc && (
+                          <div className="mt-1 max-w-lg text-xs text-rose-600">
+                            {p.erroIxc}
+                          </div>
+                        )}
+                        {p.contaPagar?.erro && (
+                          <div className="mt-1 max-w-lg text-xs text-rose-600">
+                            {p.contaPagar.erro}
+                          </div>
+                        )}
+                      </td>
+                      <td className="td text-right">
+                        <span className="valor">{formatBRL(p.valor)}</span>
+                      </td>
+                      <td className="td">
+                        <SituacaoPagamento pagamento={p} />
+                      </td>
+                      <td className="td text-right">
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                          {pendenteNoCaixa(p) && (
+                            <>
+                              <button
+                                onClick={() =>
+                                  acaoPagamento.mutate({
+                                    id: p.id,
+                                    op: 'lancar-caixa',
+                                  })
+                                }
+                                disabled={acaoPagamento.isPending}
+                                className="btn btn-p bg-amber-500 text-white hover:bg-amber-600"
+                              >
+                                Lançar no caixa
+                              </button>
+                              <button
+                                onClick={() =>
+                                  acaoPagamento.mutate({
+                                    id: p.id,
+                                    op: 'marcar-lancado',
+                                  })
+                                }
+                                title="Marque quando você mesmo lançou a saída na tela do IXC"
+                                className="btn btn-neutro btn-p"
+                              >
+                                Já lancei à mão
+                              </button>
+                            </>
+                          )}
+                          {!p.idLancamentoIxc && (
+                            <button
+                              onClick={() => {
+                                if (
+                                  confirm(
+                                    `Apagar o pagamento de ${formatBRL(p.valor)}?` +
+                                      (p.contaPagarId
+                                        ? '\n\nA conta a pagar também será apagada no IXC.'
+                                        : ''),
+                                  )
+                                ) {
+                                  excluirPagamento.mutate(p.id);
+                                }
+                              }}
+                              className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600"
+                            >
+                              Excluir
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Bloco>
+      )}
+
+      {pagando && (
+        <FormularioPagamento
+          beneficiario={pagando}
+          ocupado={pagar.isPending}
+          onCancelar={() => setPagando(null)}
+          onConfirmar={(body) =>
+            pagar.mutate({ beneficiarioId: pagando.id, body })
+          }
+        />
+      )}
     </Pagina>
+  );
+}
+
+/**
+ * O IXC já tem um fornecedor com aquele documento. Reaproveitar traz junto os
+ * dados bancários que a tela de contas a pagar de lá preenche sozinha — mas
+ * pode ser homônimo, CPF digitado errado ou um cadastro velho que ninguém quer
+ * mexer. Quem decide é quem está cadastrando.
+ */
+function EscolhaDoFornecedor({
+  fornecedor,
+  onReusar,
+  onNovo,
+}: {
+  fornecedor: NonNullable<ConsultaCpfCnpj['fornecedor']>;
+  onReusar: () => void;
+  onNovo: () => void;
+}) {
+  return (
+    <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+      <p className="text-sm text-amber-900">
+        Esse CPF/CNPJ já é fornecedor no IXC:{' '}
+        <strong>{fornecedor.nome}</strong> (#{fornecedor.idFornecedor})
+        {!fornecedor.ativo && ' — inativo por lá'}. O que você quer fazer?
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button onClick={onReusar} className="btn btn-primario btn-p">
+          Usar esse fornecedor
+        </button>
+        <button onClick={onNovo} className="btn btn-neutro btn-p">
+          Criar um novo mesmo assim
+        </button>
+      </div>
+      <p className="mt-2 text-xs text-amber-800">
+        Usar o que existe costuma ser o certo: é lá que estão os dados bancários
+        e o histórico. Criar outro faz sentido quando é outra pessoa com o
+        documento digitado igual por engano.
+      </p>
+    </div>
+  );
+}
+
+/** Por onde o pagamento saiu — e o que ainda falta, quando falta. */
+function SituacaoPagamento({ pagamento }: { pagamento: PagamentoAvulso }) {
+  if (pagamento.forma === 'IXC') {
+    const conta = pagamento.contaPagar;
+    return (
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Selo pequeno tom="info">
+          IXC
+        </Selo>
+        {conta && (
+          <Selo pequeno tom={STATUS_TOM[conta.status]} ponto>
+            {STATUS_LABEL[conta.status]}
+          </Selo>
+        )}
+      </div>
+    );
+  }
+
+  if (pagamento.idLancamentoIxc) {
+    return (
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Selo pequeno tom="pago">
+          caixa {pagamento.caixaIxc ?? '?'}
+        </Selo>
+        <span className="num text-xs text-tinta-400">
+          lanç. {pagamento.idLancamentoIxc}
+        </span>
+      </div>
+    );
+  }
+  if (pagamento.lancadoManual) {
+    return (
+      <Selo pequeno tom="pago" titulo="Lançado na tela do IXC por você">
+        lançado à mão
+      </Selo>
+    );
+  }
+  return (
+    <Selo
+      pequeno
+      tom="atencao"
+      titulo="O dinheiro saiu em mãos, mas a saída ainda não está no caixa do IXC."
+    >
+      fora do caixa
+    </Selo>
+  );
+}
+
+/** O que dizer depois de pagar (ou de tentar lançar no caixa de novo). */
+function resumoDoPagamento(p: PagamentoAvulso): string {
+  if (p.forma === 'IXC') {
+    if (p.contaPagar?.status === 'ERRO') {
+      return `O IXC recusou: ${p.contaPagar.erro ?? 'erro desconhecido'} — corrija e reenvie em Contas a Pagar.`;
+    }
+    return 'Pagamento lançado como conta a pagar no IXC — aprove em Contas a Pagar.';
+  }
+  if (p.erroIxc) return p.erroIxc;
+  if (p.idLancamentoIxc) {
+    return `Pago em mãos e descontado do caixa ${p.caixaIxc} no IXC (lançamento ${p.idLancamentoIxc}).`;
+  }
+  return 'Pagamento registrado.';
+}
+
+function FormularioPagamento({
+  beneficiario,
+  ocupado,
+  onCancelar,
+  onConfirmar,
+}: {
+  beneficiario: BeneficiarioAvulso;
+  ocupado: boolean;
+  onCancelar: () => void;
+  onConfirmar: (body: Record<string, unknown>) => void;
+}) {
+  const [data, setData] = useState(hojeISO());
+  const [valor, setValor] = useState('');
+  const [descricao, setDescricao] = useState('');
+  const [forma, setForma] = useState<FormaPagamento>(beneficiario.formaPagamento);
+  const [chavePix, setChavePix] = useState(beneficiario.chavePix ?? '');
+  const [tipoChavePix, setTipoChavePix] = useState(
+    beneficiario.tipoChavePix ?? '',
+  );
+  const [contaContabil, setContaContabil] = useState('');
+
+  const total = Number(valor) || 0;
+  const semPix = forma === 'IXC' && !chavePix.trim();
+  const valido = total >= 0.01 && descricao.trim().length >= 3 && !semPix;
+
+  return (
+    <Bloco titulo={`Pagar — ${beneficiario.nome}`} className="surgir mt-6">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Campo label="Data">
+          <input
+            type="date"
+            value={data}
+            onChange={(e) => setData(e.target.value)}
+            className="campo"
+          />
+        </Campo>
+        <Campo label="Valor (R$)">
+          <CampoDinheiro valor={valor} onChange={setValor} />
+        </Campo>
+        <Campo label="Como vai pagar">
+          <select
+            value={forma}
+            onChange={(e) => setForma(e.target.value as FormaPagamento)}
+            className="campo"
+          >
+            <option value="IXC">Pelo IXC (conta a pagar)</option>
+            <option value="EM_MAOS">Em mãos (desconta do caixa)</option>
+          </select>
+        </Campo>
+        <Campo label="Serviço feito — vai para o IXC" span2>
+          <input
+            value={descricao}
+            onChange={(e) => setDescricao(e.target.value)}
+            className="campo"
+            placeholder="Ex.: troca do padrão de energia"
+          />
+        </Campo>
+        <Campo label="Conta contábil — vazio usa a padrão">
+          <input
+            type="number"
+            value={contaContabil}
+            onChange={(e) => setContaContabil(e.target.value)}
+            className="campo"
+            placeholder="324"
+          />
+        </Campo>
+        {forma === 'IXC' && (
+          <>
+            <Campo label="Chave PIX — vai exata para o IXC">
+              <input
+                value={chavePix}
+                onChange={(e) => setChavePix(e.target.value)}
+                className="campo"
+                placeholder="Ex.: (99) 99230-0993"
+              />
+            </Campo>
+            <Campo label="Tipo da chave">
+              <select
+                value={tipoChavePix}
+                onChange={(e) => setTipoChavePix(e.target.value)}
+                className="campo"
+              >
+                <option value="">Pelo formato da chave</option>
+                {TIPOS_CHAVE_PIX.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+          </>
+        )}
+      </div>
+
+      <p className="mt-4 text-xs leading-relaxed text-tinta-500">
+        {forma === 'IXC'
+          ? 'Vai virar conta a pagar no IXC: a pessoa é cadastrada como fornecedor e o pagamento passa pela auditoria, como o da folha. A chave e o tipo ficam gravados no cadastro para a próxima vez.'
+          : 'O dinheiro já saiu da sua mão: o pagamento é registrado e a saída é lançada no caixa configurado em Configurações.'}
+      </p>
+
+      <div className="mt-5 flex flex-wrap items-center gap-4 border-t border-tinta-100 pt-4">
+        <button
+          onClick={() =>
+            onConfirmar({
+              data,
+              valor: Number(valor),
+              descricao,
+              forma,
+              contaContabil: contaContabil || undefined,
+              ...(forma === 'IXC' ? { chavePix, tipoChavePix } : {}),
+            })
+          }
+          disabled={!valido || ocupado}
+          className="btn btn-primario"
+        >
+          {ocupado ? 'Registrando…' : 'Confirmar pagamento'}
+        </button>
+        <button onClick={onCancelar} className="btn btn-neutro">
+          Cancelar
+        </button>
+        {semPix && (
+          <span className="text-sm text-rose-600">
+            Sem chave PIX o banco não paga — informe a chave ou pague em mãos.
+          </span>
+        )}
+        {total > 0 && !semPix && (
+          <span className="text-sm text-tinta-500">
+            Vai sair{' '}
+            <strong className="valor text-[15px]">{formatBRL(total)}</strong>
+          </span>
+        )}
+      </div>
+    </Bloco>
   );
 }
 
@@ -165,7 +1007,7 @@ function Campo({
 }: {
   label: string;
   span2?: boolean;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div className={span2 ? 'sm:col-span-2' : ''}>

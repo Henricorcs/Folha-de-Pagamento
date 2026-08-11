@@ -315,15 +315,85 @@ export interface ConfigFinanceira {
   caixaTabelaMovimento: string;
 }
 
+// --- Pagamentos avulsos: quem recebe fora da folha e fora da diária ---
 export interface BeneficiarioAvulso {
   id: string;
   nome: string;
   cpfCnpj: string | null;
+  /** F = física, J = jurídica */
+  tipoPessoa: string;
+  telefone: string | null;
+  email: string | null;
+  chavePix: string | null;
+  tipoChavePix: string | null;
+  formaPagamento: FormaPagamento;
+  observacoes: string | null;
+  ativo: boolean;
+  idFornecedorIxc: number | null;
+  /** Avisado de que o documento já existia no IXC, quis um fornecedor novo */
+  fornecedorNovoNoIxc: boolean;
+}
+
+export interface BeneficiarioComResumo {
+  beneficiario: BeneficiarioAvulso;
+  quantidadePagamentos: number;
+  /** Só o dinheiro que saiu: em mãos, ou conta a pagar já PAGA */
+  totalPago: number;
+  quantidadePagas: number;
+  /** No IXC, ainda a caminho do banco */
+  totalAguardando: number;
+  quantidadeAguardando: number;
+  quantidadeComErro: number;
+  ultimoPagamento: string | null;
+  /** Pagos em mãos que ainda não viraram lançamento no caixa do IXC */
+  pendentesNoCaixa: number;
+}
+
+export interface PagamentoAvulso {
+  id: string;
+  beneficiarioId: string;
+  data: string;
+  valor: string;
+  descricao: string;
+  contaContabil: number;
+  forma: FormaPagamento;
+  contaPagarId: string | null;
+  caixaIxc: number | null;
+  idLancamentoIxc: number | null;
+  lancadoEm: string | null;
+  lancadoManual: boolean;
+  erroIxc: string | null;
+  beneficiario?: { nome: string };
+  contaPagar?: {
+    id: string;
+    status: StatusContaPagar;
+    erro: string | null;
+    idFnApagarIxc: number | null;
+  } | null;
+}
+
+/** Um fornecedor que já existe no IXC com aquele CPF/CNPJ. */
+export interface FornecedorNoIxc {
+  idFornecedor: number;
+  nome: string;
+  nomeFantasia: string | null;
+  cpfCnpj: string | null;
+  email: string | null;
+  telefone: string | null;
+  ativo: boolean;
+}
+
+/** O que já existe com aquele documento, aqui e no IXC. */
+export interface ConsultaCpfCnpj {
+  beneficiario: BeneficiarioAvulso | null;
+  fornecedor: FornecedorNoIxc | null;
+  /** Não deu para perguntar ao IXC agora — o cadastro não precisa parar */
+  ixcIndisponivel: string | null;
 }
 
 // --- Diaristas: quem trabalha por dia e recebe por diária ---
 /** IXC = conta a pagar (banco). EM_MAOS = dinheiro, sai do caixa. */
-export type FormaPagamentoDiaria = 'IXC' | 'EM_MAOS';
+export type FormaPagamento = 'IXC' | 'EM_MAOS';
 
 export interface Diarista {
   id: string;
@@ -339,7 +409,7 @@ export interface Diarista {
   chavePix: string | null;
   tipoChavePix: string | null;
   valorDiaria: string | null;
-  formaPagamento: FormaPagamentoDiaria;
+  formaPagamento: FormaPagamento;
   observacoes: string | null;
   ativo: boolean;
   idFornecedorIxc: number | null;
@@ -364,6 +434,13 @@ export interface DiaristaComResumo {
   pendentesNoCaixa: number;
 }
 
+/** O que aconteceu ao apagar várias diárias de uma vez. */
+export interface ResultadoLoteDiarias {
+  total: number;
+  sucesso: number;
+  falhas: Array<{ id: string; erro: string }>;
+}
+
 export interface Diaria {
   id: string;
   diaristaId: string;
@@ -372,7 +449,7 @@ export interface Diaria {
   valorDiaria: string;
   valor: string;
   descricao: string;
-  forma: FormaPagamentoDiaria;
+  forma: FormaPagamento;
   contaPagarId: string | null;
   /** Caixa do IXC de onde o dinheiro saiu (pagamento em mãos) */
   caixaIxc: number | null;
