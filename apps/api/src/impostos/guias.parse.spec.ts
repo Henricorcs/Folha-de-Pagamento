@@ -3,8 +3,13 @@ import { conferir, GuiaIlegivelError, lerGuia, parseValor } from './guias.parse'
 /**
  * Os textos abaixo são cópias fiéis do que o leitor de PDF devolve para as
  * guias de verdade — mesma ordem de linhas, mesmas tabulações, mesmas colunas
- * embaralhadas. Só CNPJ, razão social, números de documento e valores foram
- * trocados por fictícios: o que se testa aqui é o layout, não o dinheiro.
+ * embaralhadas. O que se testa aqui é o layout, não o dinheiro.
+ *
+ * **Nada de real entra neste arquivo**: CNPJ, razão social, endereço, números
+ * de documento, identificadores, linhas digitáveis e valores são todos
+ * inventados. O repositório é público, e linha digitável é instrumento de
+ * pagamento — vale o mesmo cuidado de não colar uma aqui que de não colar uma
+ * senha.
  */
 
 const DARF_INSS = `Documento de Arrecadação
@@ -27,13 +32,13 @@ PA:07/2026 Vencimento:20/08/2026
 PA:07/2026 Vencimento:20/08/2026
 Totais 1.234,56 1.234,56
 SENDA (Versão:5.2.10) 07/08/2026 14:50:43\t1 1\tPágina: /
-85830000043 2 10760385262 2 32071626219 7 81347004552 6 AUTENTICAÇÃO MECÂNICA
+85830000012 3 34560000000 0 00000000000 0 00011122233 4 AUTENTICAÇÃO MECÂNICA
 Documento de Arrecadação de Receitas Federais
-85830000043 2 10760385262 2 32071626219 7 11.222.333/0001-44
+85830000012 3 34560000000 0 00000000000 0 11.222.333/0001-44
 Número: 07.16.11111.2222222-3
 Pagar até: 20/08/2026
 Valor: 1.234,56
-81347004552 6 CNPJ:
+00011122233 4 CNPJ:
 Pague com o PIX
 `;
 
@@ -63,13 +68,13 @@ Composição do Documento de Arrecadação
 MA - 06/2026
 Totais 6.500,00 6.500,00
 SENDA (Versão:5.2.9) 16/07/2026 11:55:51\t1 1\tPágina: /
-85870000226 2 88270328262 5 01072026197 7 59903383128 0 AUTENTICAÇÃO MECÂNICA
+85870000065 2 00000000000 5 00000000000 7 00011133322 0 AUTENTICAÇÃO MECÂNICA
 Documento de Arrecadação do Simples Nacional
-85870000226 2 88270328262 5 01072026197 7 11.222.333/0001-44
+85870000065 2 00000000000 5 00000000000 7 11.222.333/0001-44
 Número: 07.20.11111.3333333-2
 Pagar até: 20/07/2026
 Valor: 6.500,00
-59903383128 0 CNPJ:
+00011133322 0 CNPJ:
 Pague com o PIX
 `;
 
@@ -80,7 +85,7 @@ EMPRESA EXEMPLO SERVICOS LTDA
 Núm. de Pág.
 1
 Identificador
-0126080754056798-7
+0126080000111222-3
 Tag
 11222333 07/2026 MENSAL
 Pagar este documento até
@@ -111,7 +116,7 @@ PIX Copia e Cola:
 
 /**
  * DARE do estado. Repare na "Relação de Pagamentos": o gerador do documento
- * cospe as colunas fora de ordem e coladas ("0,00100,0006/20263059"), e é por
+ * cospe as colunas fora de ordem e coladas ("0,00100,0006/20264001"), e é por
  * isso que o leitor tira dali só o período e o código da receita.
  */
 const DARE = `Nosso Número
@@ -128,15 +133,15 @@ Válido Até
 EMPRESA EXEMPLO SERVICOS LTDA
 12.345678-9
 20/07/2026
-AVE EXEMPLO 1087 - CENTRO
+AVE EXEMPLO 100 - CENTRO
 TelefoneCPF/CNPJ
 11.222.333/0001-44
 CEP
 65000-000 CIDADE EXEMPLO - MA
 Município / UF
 Nº DOC. ORIGEM REFERÊNCIA/ PARCELA VENCIMENTO VALOR DOS JUROS VALOR DA MULTA VALOR TOTALVALOR PRINCIPALCÓDIGO DA RECEITA
-0,00100,0006/20263059 0,00 100,00*20/07/2026 101
-0,00400,0006/20263075 0,00 400,00*20/07/2026 101
+0,00100,0006/20264001 0,00 100,00*20/07/2026 101
+0,00400,0006/20264002 0,00 400,00*20/07/2026 101
 Quantidade de Itens Total Principal Valor Total
 DARE/Modelo aprovado pela Portaria 030/2013 - SEFAZ.
 INFORMAÇÕES COMPLEMENTARES:
@@ -257,7 +262,7 @@ describe('guia do FGTS Digital', () => {
       valorTotal: 2500,
       trabalhadores: 12,
       razaoSocial: 'EMPRESA EXEMPLO SERVICOS LTDA',
-      numeroDocumento: '0126080754056798-7',
+      numeroDocumento: '0126080000111222-3',
     });
   });
 
