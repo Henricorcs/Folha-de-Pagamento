@@ -224,38 +224,79 @@ interface DiariaDaSerie {
   contaPagar: { status: StatusContaPagar } | null;
 }
 
+/** Onde a diária está no caminho do dinheiro. */
+type SituacaoDaDiaria = 'SAIU' | 'A_CAMINHO' | 'TRAVADA';
+
 /**
- * Gasto com diarista, mês a mês. "Pago" segue a mesma régua da tela de
- * diaristas: em mãos o dinheiro já saiu da gaveta; pelo IXC, só quando o banco
- * confirmou.
+ * A mesma régua da tela de diaristas, para as duas contarem a mesma história:
+ * em mãos o dinheiro saiu da gaveta na hora (o lançamento no caixa do IXC é
+ * escrituração, não pagamento); pelo IXC, só quando o banco confirmou.
+ */
+function situacaoDaDiaria(d: DiariaDaSerie): SituacaoDaDiaria {
+  if (d.forma === FormaPagamentoDiaria.EM_MAOS) return 'SAIU';
+  const status = d.contaPagar?.status;
+  if (status === StatusContaPagar.PAGO) return 'SAIU';
+  if (status && EM_ABERTO.includes(status)) return 'A_CAMINHO';
+  // Reprovada, cancelada, recusada pelo IXC — ou sem conta nenhuma, que é como
+  // fica a diária quando o fn_apagar dela é apagado lá. Nenhuma delas vai sair
+  // sozinha, e é justamente a última que ficava para sempre em "ainda não saiu".
+  return 'TRAVADA';
+}
+
+/**
+ * Gasto com diarista, mês a mês.
+ *
+ * Só entra o que virou dinheiro ou ainda vai virar. Diária travada fica de
+ * fora do gasto — é a mesma regra da série da folha, onde conta reprovada e
+ * cancelada nunca contaram — mas continua somada à parte, senão ela sumiria da
+ * tela sem ninguém saber que existe algo para destravar.
  */
 function montarDiaristas(meses: string[], diarias: DiariaDaSerie[]) {
   const porMes = new Map(
     meses.map((m) => [
       m,
-      { valor: 0, pago: 0, quantidade: 0, pessoas: new Set<string>() },
+      {
+        pago: 0,
+        aCaminho: 0,
+        travado: 0,
+        travadas: 0,
+        quantidade: 0,
+        pessoas: new Set<string>(),
+      },
     ]),
   );
 
   for (const d of diarias) {
     const mes = porMes.get(mesDaData(d.data));
     if (!mes) continue;
+
     const valor = Number(d.valor ?? 0);
-    mes.valor += valor;
+    const situacao = situacaoDaDiaria(d);
+    if (situacao === 'TRAVADA') {
+      mes.travado += valor;
+      mes.travadas++;
+      continue;
+    }
+
+    if (situacao === 'SAIU') mes.pago += valor;
+    else mes.aCaminho += valor;
+    // Quantas diárias e quantas pessoas o número do topo está resumindo — só
+    // as que ele conta, para o detalhe não contradizer o valor.
     mes.quantidade += Number(d.quantidade ?? 0);
     mes.pessoas.add(d.diaristaId);
-    const saiu =
-      d.forma === FormaPagamentoDiaria.EM_MAOS ||
-      d.contaPagar?.status === StatusContaPagar.PAGO;
-    if (saiu) mes.pago += valor;
   }
 
   const serie = meses.map((competencia) => {
     const m = porMes.get(competencia);
+    const pago = arredondar(m?.pago ?? 0);
+    const aCaminho = arredondar(m?.aCaminho ?? 0);
     return {
       competencia,
-      valor: arredondar(m?.valor ?? 0),
-      pago: arredondar(m?.pago ?? 0),
+      valor: arredondar(pago + aCaminho),
+      pago,
+      aCaminho,
+      travado: arredondar(m?.travado ?? 0),
+      travadas: m?.travadas ?? 0,
       quantidade: arredondar(m?.quantidade ?? 0),
       pessoas: m?.pessoas.size ?? 0,
     };
@@ -265,6 +306,8 @@ function montarDiaristas(meses: string[], diarias: DiariaDaSerie[]) {
     serie,
     total: arredondar(serie.reduce((s, m) => s + m.valor, 0)),
     totalPago: arredondar(serie.reduce((s, m) => s + m.pago, 0)),
+    totalACaminho: arredondar(serie.reduce((s, m) => s + m.aCaminho, 0)),
+    totalTravado: arredondar(serie.reduce((s, m) => s + m.travado, 0)),
     quantidade: arredondar(serie.reduce((s, m) => s + m.quantidade, 0)),
   };
 }

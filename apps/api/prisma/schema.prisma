@@ -605,8 +605,8 @@ model ContaPagar {
 }
 
 // ---------------------------------------------------------------------------
-// Guias de imposto que a contabilidade manda todo mês (DARF, FGTS, DAS).
-// Lidas do PDF, conferidas na tela e só então gravadas.
+// Guias de imposto que a contabilidade manda todo mês (DARF, FGTS, DAS e o
+// DARE do ICMS). Lidas do PDF, conferidas na tela e só então gravadas.
 // ---------------------------------------------------------------------------
 enum TipoGuia {
   /// DARF previdenciário (INSS)
@@ -615,6 +615,8 @@ enum TipoGuia {
   FGTS
   /// DAS do Simples Nacional
   DAS_SIMPLES
+  /// DARE estadual — o ICMS (na prática, o DIFAL)
+  DARE_ICMS
   OUTRA
 }
 

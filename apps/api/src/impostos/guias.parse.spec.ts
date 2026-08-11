@@ -109,6 +109,63 @@ O detalhamento da guia pode ser consultado através do endereço https://fgtsdig
 PIX Copia e Cola:
 `;
 
+/**
+ * DARE do estado. Repare na "Relação de Pagamentos": o gerador do documento
+ * cospe as colunas fora de ordem e coladas ("0,00100,0006/20263059"), e é por
+ * isso que o leitor tira dali só o período e o código da receita.
+ */
+const DARE = `Nosso Número
+111222333
+Data de Emissão
+15/07/2026
+ESTADO DO MARANHÃO
+SECRETARIA DE ESTADO DA FAZENDA
+DOCUMENTO DE ARRECADAÇÃO DE RECEITAS ESTADUAIS - DARE
+RELAÇÃO DE PAGAMENTOS
+Nome/ Razão Social
+Endereço Inscrição Estadual/ RENAVAM
+Válido Até
+EMPRESA EXEMPLO SERVICOS LTDA
+12.345678-9
+20/07/2026
+AVE EXEMPLO 1087 - CENTRO
+TelefoneCPF/CNPJ
+11.222.333/0001-44
+CEP
+65000-000 CIDADE EXEMPLO - MA
+Município / UF
+Nº DOC. ORIGEM REFERÊNCIA/ PARCELA VENCIMENTO VALOR DOS JUROS VALOR DA MULTA VALOR TOTALVALOR PRINCIPALCÓDIGO DA RECEITA
+0,00100,0006/20263059 0,00 100,00*20/07/2026 101
+0,00400,0006/20263075 0,00 400,00*20/07/2026 101
+Quantidade de Itens Total Principal Valor Total
+DARE/Modelo aprovado pela Portaria 030/2013 - SEFAZ.
+INFORMAÇÕES COMPLEMENTARES:
+Valor Principal
+500,00
+0,00
+Juros
+0,00
+Multa
+500,00
+Total a Recolher
+Linha digitável: 85650000005 2 00000010200 9 00000000000 0 00111222333 5
+500,002 500,00
+Nome/ Razão Social
+Inscrição Estadual/ RENAVAM
+EMPRESA EXEMPLO SERVICOS LTDA
+12.345678-9
+Total Juros
+0,00
+Total Multa
+0,00
+CPF/CNPJ
+11.222.333/0001-44
+Telefone Válido Até
+20/07/2026
+TOTAIS
+(*) Valor informado pelo Contribuinte.
+`;
+
 describe('DARF previdenciário', () => {
   const guia = lerGuia(DARF_INSS);
 
@@ -226,6 +283,87 @@ describe('guia do FGTS Digital', () => {
 
   it('a soma dos itens bate com o total da guia', () => {
     expect(conferir(guia)).toBeNull();
+  });
+});
+
+describe('DARE do ICMS', () => {
+  const guia = lerGuia(DARE);
+
+  /**
+   * A apuração só existe na coluna "Referência/Parcela" da relação — e é a
+   * única coisa que diz de que mês é o arquivo. Vencimento e código da receita
+   * vêm do fim da mesma linha, o único par que o embaralhamento não alcança.
+   */
+  it('lê a apuração e o vencimento da relação de pagamentos', () => {
+    expect(guia).toMatchObject({
+      tipo: 'DARE_ICMS',
+      competencia: '2026-06',
+      vencimento: '2026-07-20',
+      numeroDocumento: '111222333',
+      cnpj: '11.222.333/0001-44',
+      razaoSocial: 'EMPRESA EXEMPLO SERVICOS LTDA',
+    });
+  });
+
+  /** Imposto de estado é tributo sobre faturamento: nada dele é custo de gente. */
+  it('o ICMS não encosta no custo com pessoal', () => {
+    expect(guia.itens).toEqual([
+      {
+        codigo: '101',
+        denominacao: 'ICMS — DARE estadual',
+        valor: 500,
+        classe: 'FATURAMENTO',
+        classeIncerta: false,
+      },
+    ]);
+  });
+
+  /**
+   * O total sai da linha digitável, montada longe dos totais impressos: se as
+   * duas contas divergirem é porque o leitor perdeu alguma coisa.
+   */
+  it('o total confere com a linha digitável', () => {
+    expect(guia.valorTotal).toBe(500);
+    expect(conferir(guia)).toBeNull();
+  });
+
+  it('juro e multa entram como item à parte', () => {
+    const comJuros = lerGuia(
+      DARE.replace(
+        'Total Juros\n0,00\nTotal Multa\n0,00',
+        'Total Juros\n12,00\nTotal Multa\n8,00',
+      )
+        // A linha digitável passa a cobrar 520,00 — os onze dígitos de valor
+        // atravessam a fronteira entre o primeiro e o segundo bloco.
+        .replace('00000010200 9', '20000010200 9'),
+    );
+    expect(comJuros.itens).toContainEqual({
+      codigo: null,
+      denominacao: 'Juros e multa',
+      valor: 20,
+      classe: 'FATURAMENTO',
+      classeIncerta: false,
+    });
+    expect(comJuros.valorTotal).toBe(520);
+    expect(conferir(comJuros)).toBeNull();
+  });
+
+  /** Receita estadual que o leitor não conhece: entra, mas sai marcada. */
+  it('código de receita novo é lido e marcado para conferência', () => {
+    const outra = lerGuia(DARE.replace(/20\/07\/2026 101/g, '20/07/2026 505'));
+    expect(outra.itens[0]).toMatchObject({
+      codigo: '505',
+      denominacao: 'receita 505 — DARE estadual',
+      classe: 'FATURAMENTO',
+      classeIncerta: true,
+    });
+  });
+
+  /** Sem a relação não há apuração — e guia sem mês não vai para lugar nenhum. */
+  it('DARE sem relação de pagamentos não vira guia', () => {
+    expect(() =>
+      lerGuia(DARE.replace(/^0,00.*20\/07\/2026 101$/gm, '')),
+    ).toThrow(GuiaIlegivelError);
   });
 });
 

@@ -1,18 +1,19 @@
 /**
  * Leitura das guias que a contabilidade manda todo mês.
  *
- * São três documentos de origens diferentes — DARF previdenciário e DAS do
- * Simples (ambos do SENDA, da Receita) e a guia do FGTS Digital (da Caixa). O
- * texto extraído do PDF vem com as colunas fora de ordem, então nada aqui
- * depende de posição: tudo é ancorado no rótulo impresso ("Total da Guia:",
- * "Pagar até:"), que é o que não muda entre uma competência e outra.
+ * São quatro documentos de origens diferentes — DARF previdenciário e DAS do
+ * Simples (ambos do SENDA, da Receita), a guia do FGTS Digital (da Caixa) e o
+ * DARE do ICMS (SEFAZ estadual). O texto extraído do PDF vem com as colunas
+ * fora de ordem, então nada aqui depende de posição: tudo é ancorado no rótulo
+ * impresso ("Total da Guia:", "Pagar até:"), que é o que não muda entre uma
+ * competência e outra.
  *
  * O que sai daqui é uma **leitura**, não um lançamento: quem confere é a
  * pessoa na tela, antes de gravar.
  */
 
 /** Documento reconhecido pelo leitor. */
-export type TipoGuia = 'DARF_INSS' | 'FGTS' | 'DAS_SIMPLES';
+export type TipoGuia = 'DARF_INSS' | 'FGTS' | 'DAS_SIMPLES' | 'DARE_ICMS';
 
 /**
  * O que aquele item representa no bolso da empresa.
@@ -75,6 +76,14 @@ const CLASSE_POR_CODIGO: Record<string, ClasseTributo> = {
   1099: 'FOLHA_RETIDO', // CP descontada do contribuinte individual
 };
 
+/**
+ * Receitas estaduais conhecidas do DARE. Só o nome depende disto — a classe é
+ * sempre a mesma: receita de estado não é folha de pagamento.
+ */
+const RECEITA_ESTADUAL: Record<string, string> = {
+  101: 'ICMS',
+};
+
 const MESES = [
   'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
   'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
@@ -87,8 +96,10 @@ const MESES = [
 export function lerGuia(texto: string): GuiaLida {
   if (/GFD\s*-\s*Guia do FGTS Digital/i.test(texto)) return lerFgts(texto);
   if (/Composição do Documento de Arrecadação/i.test(texto)) return lerSenda(texto);
+  if (/ARRECADAÇÃO DE RECEITAS ESTADUAIS/i.test(texto)) return lerDare(texto);
   throw new GuiaIlegivelError(
-    'Não reconheci este PDF. O leitor entende DARF, DAS do Simples Nacional e guia do FGTS Digital.',
+    'Não reconheci este PDF. O leitor entende DARF, DAS do Simples Nacional, ' +
+      'guia do FGTS Digital e DARE do ICMS.',
   );
 }
 
@@ -192,6 +203,155 @@ function lerFgts(texto: string): GuiaLida {
   };
 }
 
+/**
+ * DARE estadual (SEFAZ) — é por onde o ICMS é pago.
+ *
+ * Da "Relação de Pagamentos" só saem daqui o período e o código da receita. O
+ * gerador do documento entrega as colunas daquela tabela fora de ordem e
+ * coladas umas nas outras ("0,0024,2506/20263059"): as quatro colunas de
+ * dinheiro — principal, juros, multa e total — chegam embaralhadas e não dá
+ * para dizer qual número é qual. Chutar ali é errar o valor do imposto.
+ *
+ * Os totais, esses, vêm rotulados em linha própria ("Valor Principal", "Total
+ * Juros", "Total Multa") e são lidos como no resto do arquivo. O total é
+ * conferido contra a linha digitável, que carrega o valor em centavos e é
+ * montada por outro caminho do documento: quando as duas contas não batem, a
+ * tela avisa antes de gravar.
+ */
+function lerDare(texto: string): GuiaLida {
+  const { competencias, codigos, vencimento } = lerRelacaoDare(texto);
+  if (competencias.length === 0) {
+    throw new GuiaIlegivelError(
+      'Não achei a relação de pagamentos do DARE — o arquivo pode estar incompleto.',
+    );
+  }
+
+  const principal =
+    valorDepoisDoRotulo(texto, 'Valor Principal') ??
+    valorDepoisDoRotulo(texto, 'Total Principal');
+  if (principal === null || principal <= 0) {
+    throw new GuiaIlegivelError(
+      'Não achei o valor principal do DARE — confira se o PDF veio inteiro.',
+    );
+  }
+  // Só os rótulos do quadro de totais servem: no canhoto o número vem *antes*
+  // do rótulo ("0,00 / Juros"), e ler o de baixo daria a multa no lugar do juro
+  // e o total no lugar da multa. Faltando o quadro, juro e multa ficam em zero
+  // — e é a linha digitável, abaixo, que denuncia a diferença.
+  const juros = valorDepoisDoRotulo(texto, 'Total Juros') ?? 0;
+  const multa = valorDepoisDoRotulo(texto, 'Total Multa') ?? 0;
+
+  const conhecidas = codigos.every((c) => c in RECEITA_ESTADUAL);
+  const itens: ItemGuiaLido[] = [
+    {
+      codigo: codigos.join('/') || null,
+      denominacao: `${codigos
+        .map((c) => RECEITA_ESTADUAL[c] ?? `receita ${c}`)
+        .join(' + ')} — DARE estadual`,
+      valor: principal,
+      // Receita de estado nunca é custo de pessoal; o que o código muda é só o
+      // nome. Código novo sai marcado do mesmo jeito, para alguém conferir.
+      classe: 'FATURAMENTO',
+      classeIncerta: !conhecidas,
+    },
+  ];
+  if (juros + multa > 0) {
+    itens.push({
+      codigo: null,
+      denominacao: 'Juros e multa',
+      valor: arredondar(juros + multa),
+      classe: 'FATURAMENTO',
+      classeIncerta: false,
+    });
+  }
+
+  return {
+    tipo: 'DARE_ICMS',
+    // Pagando dois meses no mesmo documento, a guia é do mais antigo — é a
+    // apuração que ela quita primeiro.
+    competencia: competencias[0],
+    vencimento,
+    valorTotal: valorDaLinhaDigitavel(texto) ?? somaDosItens(itens),
+    numeroDocumento: depoisDoRotulo(texto, 'Nosso Número'),
+    cnpj: /(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})/.exec(texto)?.[1] ?? null,
+    razaoSocial: razaoSocialDare(texto),
+    trabalhadores: null,
+    itens,
+  };
+}
+
+/**
+ * As linhas da "Relação de Pagamentos". Cada uma termina no par que o
+ * embaralhamento das colunas não alcança: a data de vencimento seguida do
+ * código da receita. O período de apuração é o outro `MM/AAAA` da linha.
+ */
+function lerRelacaoDare(texto: string): {
+  competencias: string[];
+  codigos: string[];
+  vencimento: string;
+} {
+  const competencias = new Set<string>();
+  const codigos = new Set<string>();
+  let vencimento = '';
+
+  for (const linha of texto.split('\n').map((l) => l.trim())) {
+    const fim = /(\d{2})\/(\d{2})\/(\d{4})\s+(\d{1,4})$/.exec(linha);
+    if (!fim) continue;
+    const referencia = /(\d{2})\/(\d{4})/.exec(linha.slice(0, fim.index));
+    if (!referencia) continue;
+
+    competencias.add(`${referencia[2]}-${referencia[1]}`);
+    codigos.add(fim[4]);
+    if (!vencimento) vencimento = `${fim[3]}-${fim[2]}-${fim[1]}`;
+  }
+
+  return {
+    competencias: [...competencias].sort(),
+    codigos: [...codigos].sort(),
+    vencimento,
+  };
+}
+
+/**
+ * O valor na linha digitável do documento de arrecadação: onze dígitos em
+ * centavos logo depois do prefixo de quatro. Vale como conferência porque é
+ * gerado longe dos totais impressos — e é o que o banco vai cobrar.
+ */
+function valorDaLinhaDigitavel(texto: string): number | null {
+  const m = /Linha digit[áa]vel:\s*([\d ]+)/.exec(texto);
+  if (!m) return null;
+
+  // Quatro blocos de onze dígitos, cada um seguido do seu dígito verificador —
+  // que não faz parte do código de barras.
+  const codigo = m[1]
+    .trim()
+    .split(/\s+/)
+    .filter((bloco) => bloco.length === 11)
+    .join('');
+  if (codigo.length !== 44) return null;
+
+  const centavos = Number(codigo.slice(4, 15));
+  return centavos > 0 ? arredondar(centavos / 100) : null;
+}
+
+/** Rótulos do cabeçalho do DARE, que vêm em bloco antes dos valores. */
+const ROTULOS_DARE =
+  /Inscrição Estadual|Endereço|Válido Até|CPF\/CNPJ|Telefone|CEP|Município/i;
+
+/**
+ * Razão social: no DARE os rótulos do cabeçalho saem em bloco e os valores
+ * logo depois, então é a primeira linha após "Nome/ Razão Social" que não seja
+ * outro rótulo.
+ */
+function razaoSocialDare(texto: string): string | null {
+  const linhas = texto.split('\n').map((l) => l.trim());
+  const i = linhas.findIndex((l) => /^Nome\/\s*Raz[ãa]o Social/i.test(l));
+  if (i < 0) return null;
+  return (
+    linhas.slice(i + 1, i + 5).find((l) => l && !ROTULOS_DARE.test(l)) ?? null
+  );
+}
+
 /** Classe do item: pelo código quando conhecido, pela denominação quando não. */
 function classificar(
   codigo: string | null,
@@ -259,6 +419,12 @@ function depoisDoRotulo(texto: string, rotulo: string): string | null {
   const linhas = texto.split('\n').map((l) => l.trim());
   const i = linhas.findIndex((l) => l === rotulo);
   return i >= 0 && linhas[i + 1] ? linhas[i + 1] : null;
+}
+
+/** Valor monetário na linha logo abaixo de um rótulo isolado. */
+function valorDepoisDoRotulo(texto: string, rotulo: string): number | null {
+  const linha = depoisDoRotulo(texto, rotulo);
+  return linha && /^[\d.]+,\d{2}$/.test(linha) ? parseValor(linha) : null;
 }
 
 function somaDosItens(itens: ItemGuiaLido[]): number {

@@ -101,8 +101,28 @@ Evolução planejada por fases. Cada fase entrega valor de forma incremental.
 - [x] Saldo salarial = base + comissão + horas extras + acertos − descontos −
       vales − adiantamento, detalhado na observação da conta a pagar
       (`HORAS EXTRAS: R$ …· COMISSÃO: 12 x R$ 50,00 · VALE: -R$ …`)
-- [x] **Dashboard** com folha base, situação da competência, série de 6 meses,
-      saldos de vales e pontos de atenção
+- [x] **Dashboard** com folha base, situação da competência, série de 1/3/6/12
+      meses, saldos de vales e pontos de atenção
+- [x] **Guias da contabilidade lidas do PDF**: DARF previdenciário, guia do
+      FGTS Digital, DAS do Simples e DARE do ICMS. O leitor se ancora nos
+      rótulos impressos, e não na posição das colunas — que sai embaralhada da
+      extração. Nada é gravado direto: a tela mostra o que foi lido, aponta
+      quando a soma dos itens não fecha com o total e deixa corrigir a
+      classificação de código desconhecido
+- [x] **Cada item nasce com uma classe**, senão o número mente em mais de 100%:
+      o INSS descontado do segurado é dinheiro do trabalhador só passando pela
+      conta, o consignado do FGTS é empréstimo dele, dentro do DAS só o 1006
+      (INSS) é custo de pessoal, e o ICMS do DARE é tributo sobre faturamento.
+      Custo com pessoal = folha + diaristas + patronal, nunca o retido
+- [x] **As guias são conjuntos mensais**, não uma lista: todo mês chegam os três
+      fixos (DARF, FGTS, DAS) mais o DARE quando houve ICMS a pagar. A tela diz
+      de que mês é o arquivo que está sendo lançado e mostra, mês a mês, o que
+      ainda falta chegar
+- [x] **Diária travada sai do gasto**: conta a pagar reprovada, cancelada,
+      recusada pelo IXC ou apagada de lá nunca virou dinheiro — a série da folha
+      já as deixava de fora e a das diárias contava, prendendo a dashboard num
+      "ainda não saiu" que não tinha pagamento pendente nenhum por trás. Continua
+      visível à parte, para alguém destravar
 - [ ] **Proventos** que faltam: bônus de metas, férias, 13º, salário família
 - [ ] **Descontos** que faltam: INSS, faltas (tabela de horas/periculosidade),
       celular, internet

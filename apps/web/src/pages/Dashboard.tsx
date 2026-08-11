@@ -80,6 +80,10 @@ export function Dashboard() {
           params: { competencia, meses },
         })
       ).data,
+    // É a tela que fica aberta o dia todo, enquanto o dinheiro anda em outro
+    // lugar (a auditoria do IXC, o retorno do banco). Voltar para ela relê os
+    // números em vez de mostrar a foto de quando a aba foi aberta.
+    refetchOnWindowFocus: true,
   });
 
   const f = data?.funcionarios;
@@ -175,10 +179,22 @@ export function Dashboard() {
             <Indicador
               rotulo="Gasto com diaristas"
               valor={formatBRL(diariasDoMes?.valor)}
-              detalhe={`${diariasDoMes?.quantidade ?? 0} diária(s) · ${diariasDoMes?.pessoas ?? 0} pessoa(s)`}
+              detalhe={
+                <>
+                  {`${diariasDoMes?.quantidade ?? 0} diária(s) · ${diariasDoMes?.pessoas ?? 0} pessoa(s)`}
+                  {!!diariasDoMes?.travadas && (
+                    <>
+                      <br />
+                      {formatBRL(diariasDoMes.travado)} em{' '}
+                      {diariasDoMes.travadas} diária(s) travadas no IXC ficaram
+                      de fora
+                    </>
+                  )}
+                </>
+              }
               alerta={
-                diariasDoMes && diariasDoMes.valor > diariasDoMes.pago
-                  ? `${formatBRL(diariasDoMes.valor - diariasDoMes.pago)} ainda não saiu`
+                diariasDoMes && diariasDoMes.aCaminho > 0
+                  ? `${formatBRL(diariasDoMes.aCaminho)} lançado, esperando o banco`
                   : undefined
               }
             />
@@ -264,8 +280,8 @@ export function Dashboard() {
             >
               {semGuia ? (
                 <Vazio titulo="Nenhuma guia lançada">
-                  Suba o PDF do DARF, do FGTS ou do DAS que a contabilidade
-                  manda e o imposto entra aqui.{' '}
+                  Suba o PDF do DARF, do FGTS, do DAS ou do DARE que a
+                  contabilidade manda e o imposto entra aqui.{' '}
                   <Link
                     to="/impostos"
                     className="font-semibold text-brand-700 hover:underline"
@@ -397,6 +413,15 @@ export function Dashboard() {
                     (folha?.emAberto ?? 0) === 0
                       ? 'Nada pendente nesta competência.'
                       : `${formatBRL(folha?.emAberto)} esperando aprovação ou pagamento.`
+                  }
+                />
+                <Atencao
+                  ok={(diariasDoMes?.travadas ?? 0) === 0}
+                  para="/diaristas"
+                  texto={
+                    (diariasDoMes?.travadas ?? 0) === 0
+                      ? 'Nenhuma diária parada no meio do caminho.'
+                      : `${diariasDoMes?.travadas} diária(s) com a conta a pagar reprovada, recusada ou apagada no IXC — fora do gasto do mês.`
                   }
                 />
                 <Atencao

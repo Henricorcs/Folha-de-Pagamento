@@ -472,13 +472,26 @@ export interface Dashboard {
   diaristas: {
     serie: {
       competencia: string;
+      /** Gasto do mês: o que saiu mais o que ainda está a caminho */
       valor: number;
+      /** Já saiu: em mãos, ou conta a pagar que o banco confirmou */
       pago: number;
+      /** Lançado no IXC, esperando aprovação ou o banco */
+      aCaminho: number;
+      /**
+       * Não vai sair sozinha: conta reprovada, cancelada, recusada pelo IXC ou
+       * apagada de lá. Fica fora do gasto, mas visível para alguém destravar.
+       */
+      travado: number;
+      travadas: number;
+      /** Diárias e pessoas por trás de `valor` (as travadas não contam) */
       quantidade: number;
       pessoas: number;
     }[];
     total: number;
     totalPago: number;
+    totalACaminho: number;
+    totalTravado: number;
     quantidade: number;
   };
   impostos: ResumoImpostos;
@@ -563,7 +576,22 @@ export interface PreviewDiaristas {
 // ---------------------------------------------------------------------------
 // Guias de imposto lidas do PDF da contabilidade
 // ---------------------------------------------------------------------------
-export type TipoGuia = 'DARF_INSS' | 'FGTS' | 'DAS_SIMPLES' | 'OUTRA';
+export type TipoGuia =
+  | 'DARF_INSS'
+  | 'FGTS'
+  | 'DAS_SIMPLES'
+  | 'DARE_ICMS'
+  | 'OUTRA';
+
+/**
+ * O conjunto que a contabilidade manda todo mês, na ordem em que se lê. São
+ * três fixos; o DARE do ICMS só aparece nos meses em que houve o que pagar —
+ * daí "3 a 4 arquivos". A tela usa isto para dizer o que ainda falta do mês.
+ */
+export const GUIAS_DO_MES: TipoGuia[] = ['DARF_INSS', 'FGTS', 'DAS_SIMPLES'];
+
+/** Guias que existem em alguns meses só — a ausência não é pendência. */
+export const GUIAS_EVENTUAIS: TipoGuia[] = ['DARE_ICMS', 'OUTRA'];
 
 /**
  * O que o item representa no bolso da empresa. Somar tudo junto mente: o INSS
@@ -576,6 +604,7 @@ export const TIPO_GUIA_LABEL: Record<TipoGuia, string> = {
   DARF_INSS: 'DARF — INSS',
   FGTS: 'FGTS',
   DAS_SIMPLES: 'DAS — Simples Nacional',
+  DARE_ICMS: 'DARE — ICMS',
   OUTRA: 'Outra guia',
 };
 

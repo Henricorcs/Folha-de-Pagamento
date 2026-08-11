@@ -14,11 +14,14 @@ import { formatBRL, formatData } from '../lib/format';
 import {
   CLASSE_CURTA,
   CLASSE_LABEL,
+  GUIAS_DO_MES,
+  GUIAS_EVENTUAIS,
   TIPO_GUIA_LABEL,
   type ClasseTributo,
   type Guia,
   type ItemGuia,
   type LeituraDaGuia,
+  type TipoGuia,
 } from '../lib/types';
 
 const CLASSES: ClasseTributo[] = [
@@ -33,9 +36,52 @@ const TOM_DA_CLASSE: Record<ClasseTributo, 'marca' | 'atencao' | 'neutro'> = {
   FATURAMENTO: 'neutro',
 };
 
+/** Ordem de leitura do conjunto do mês: os três fixos, depois os eventuais. */
+const ORDEM_GUIA: TipoGuia[] = [...GUIAS_DO_MES, ...GUIAS_EVENTUAIS];
+
 function formatComp(comp: string): string {
   const m = /^(\d{4})-(\d{2})$/.exec(comp);
   return m ? `${m[2]}/${m[1]}` : comp;
+}
+
+/** "A", "A e B", "A, B e C" — do jeito que se lê em voz alta. */
+function emLista(itens: string[]): string {
+  if (itens.length <= 1) return itens.join('');
+  return `${itens.slice(0, -1).join(', ')} e ${itens[itens.length - 1]}`;
+}
+
+/** As guias de um mês, e o que ainda não chegou. */
+interface ConjuntoDoMes {
+  competencia: string;
+  guias: Guia[];
+  total: number;
+  faltando: TipoGuia[];
+}
+
+/**
+ * As guias não são uma lista: são conjuntos mensais. Todo mês chegam as três
+ * fixas — DARF do INSS, FGTS e DAS — mais o DARE do ICMS quando houve ICMS a
+ * pagar. Agrupar por apuração é o que deixa ver, de relance, que o mês passado
+ * está inteiro e que falta o FGTS deste.
+ */
+function agruparPorMes(guias: Guia[]): ConjuntoDoMes[] {
+  const porMes = new Map<string, Guia[]>();
+  for (const g of guias) {
+    const doMes = porMes.get(g.competencia);
+    if (doMes) doMes.push(g);
+    else porMes.set(g.competencia, [g]);
+  }
+
+  return [...porMes.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([competencia, doMes]) => ({
+      competencia,
+      guias: [...doMes].sort(
+        (a, b) => ORDEM_GUIA.indexOf(a.tipo) - ORDEM_GUIA.indexOf(b.tipo),
+      ),
+      total: doMes.reduce((s, g) => s + Number(g.valorTotal), 0),
+      faltando: GUIAS_DO_MES.filter((t) => !doMes.some((g) => g.tipo === t)),
+    }));
 }
 
 /**
@@ -126,12 +172,25 @@ export function Impostos() {
   const bate = leitura ? Math.abs(soma - leitura.guia.valorTotal) < 0.01 : false;
   const incertos = itens.filter((i) => i.classeIncerta).length;
 
+  const meses = agruparPorMes(guias.data ?? []);
+  // O mês do arquivo aberto, do jeito que ele vai ficar depois de gravado.
+  const conjuntoDaLeitura = leitura
+    ? (meses.find((m) => m.competencia === leitura.guia.competencia) ?? {
+        competencia: leitura.guia.competencia,
+        guias: [],
+        total: 0,
+        faltando: GUIAS_DO_MES,
+      })
+    : null;
+  const faltaDepoisDesta =
+    conjuntoDaLeitura?.faltando.filter((t) => t !== leitura?.guia.tipo) ?? [];
+
   return (
     <Pagina>
       <CabecalhoPagina
         secao="Impostos"
         titulo="Guias da contabilidade"
-        descricao="Jogue o PDF do DARF, do FGTS ou do DAS. O app lê, você confere, e só então o valor entra no custo com pessoal."
+        descricao="Todo mês chega um conjunto de 3 a 4 arquivos: DARF do INSS, FGTS, DAS do Simples e, quando houve ICMS a pagar, o DARE. Jogue o PDF aqui — o app lê, diz de que mês ele é, você confere, e só então o valor entra no custo com pessoal."
       />
 
       {feedback && <Aviso tom={erro ? 'erro' : 'marca'}>{feedback}</Aviso>}
@@ -153,9 +212,9 @@ export function Impostos() {
           )}
         </div>
         <p className="mt-3 text-xs leading-relaxed text-tinta-500">
-          Entende DARF previdenciário, guia do FGTS Digital e DAS do Simples
-          Nacional. O arquivo precisa ser o PDF original da contabilidade — se
-          for digitalizado, não tem texto para ler.
+          Entende DARF previdenciário, guia do FGTS Digital, DAS do Simples
+          Nacional e DARE do ICMS. O arquivo precisa ser o PDF original da
+          contabilidade — se for digitalizado, não tem texto para ler.
         </p>
       </Bloco>
 
@@ -164,6 +223,25 @@ export function Impostos() {
           titulo={`Confira antes de gravar — ${TIPO_GUIA_LABEL[leitura.guia.tipo]}`}
           className="surgir mt-6"
         >
+          {conjuntoDaLeitura && (
+            <Aviso tom="marca">
+              <span>
+                Este arquivo é do conjunto de{' '}
+                <strong className="num">
+                  {formatComp(conjuntoDaLeitura.competencia)}
+                </strong>
+                {conjuntoDaLeitura.guias.length === 0
+                  ? ' — é a primeira guia deste mês.'
+                  : ` — já estão lançadas ${emLista(
+                      conjuntoDaLeitura.guias.map((g) => TIPO_GUIA_LABEL[g.tipo]),
+                    )}.`}
+                {faltaDepoisDesta.length > 0 &&
+                  ` Depois desta ainda falta ${emLista(
+                    faltaDepoisDesta.map((t) => TIPO_GUIA_LABEL[t]),
+                  )}.`}
+              </span>
+            </Aviso>
+          )}
           {leitura.jaExiste && (
             <Aviso tom="erro">
               Esta guia já foi lançada (
@@ -288,10 +366,14 @@ export function Impostos() {
         </Bloco>
       )}
 
-      <Bloco titulo="Guias lançadas" className="surgir surgir-2 mt-6" semPadding>
+      <Bloco
+        titulo="Guias lançadas, mês a mês"
+        className="surgir surgir-2 mt-6"
+        semPadding
+      >
         {guias.isLoading ? (
           <Carregando />
-        ) : (guias.data ?? []).length === 0 ? (
+        ) : meses.length === 0 ? (
           <Vazio titulo="Nenhuma guia lançada ainda">
             Suba o primeiro PDF acima e o imposto passa a aparecer na dashboard.
           </Vazio>
@@ -301,66 +383,102 @@ export function Impostos() {
               <thead>
                 <tr className="border-t border-tinta-100">
                   <th className="th">Guia</th>
-                  <th className="th">Apuração</th>
                   <th className="th">Vencimento</th>
                   <th className="th">Composição</th>
                   <th className="th text-right">Total</th>
                   <th className="th text-right">Ação</th>
                 </tr>
               </thead>
-              <tbody>
-                {(guias.data ?? []).map((g) => (
-                  <tr key={g.id} className="linha">
-                    <td className="td font-medium text-tinta-800">
-                      {TIPO_GUIA_LABEL[g.tipo]}
-                      {g.trabalhadores != null && (
-                        <div className="text-xs text-tinta-400">
-                          {g.trabalhadores} trabalhadores
+              {meses.map((mes) => (
+                <tbody key={mes.competencia}>
+                  <CabecalhoDoMes mes={mes} />
+                  {mes.guias.map((g) => (
+                    <tr key={g.id} className="linha">
+                      <td className="td font-medium text-tinta-800">
+                        {TIPO_GUIA_LABEL[g.tipo]}
+                        {g.trabalhadores != null && (
+                          <div className="text-xs text-tinta-400">
+                            {g.trabalhadores} trabalhadores
+                          </div>
+                        )}
+                      </td>
+                      <td className="td num text-tinta-500">
+                        {formatData(g.vencimento)}
+                      </td>
+                      <td className="td">
+                        <div className="flex flex-wrap gap-1.5">
+                          {resumirClasses(g.itens).map(([classe, valor]) => (
+                            <Selo
+                              key={classe}
+                              pequeno
+                              tom={TOM_DA_CLASSE[classe]}
+                            >
+                              {CLASSE_CURTA[classe]} {formatBRL(valor)}
+                            </Selo>
+                          ))}
                         </div>
-                      )}
-                    </td>
-                    <td className="td num text-tinta-500">
-                      {formatComp(g.competencia)}
-                    </td>
-                    <td className="td num text-tinta-500">
-                      {formatData(g.vencimento)}
-                    </td>
-                    <td className="td">
-                      <div className="flex flex-wrap gap-1.5">
-                        {resumirClasses(g.itens).map(([classe, valor]) => (
-                          <Selo key={classe} pequeno tom={TOM_DA_CLASSE[classe]}>
-                            {CLASSE_CURTA[classe]} {formatBRL(valor)}
-                          </Selo>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="td text-right">
-                      <span className="valor">{formatBRL(g.valorTotal)}</span>
-                    </td>
-                    <td className="td text-right">
-                      <button
-                        onClick={() => {
-                          if (
-                            confirm(
-                              `Apagar a guia de ${TIPO_GUIA_LABEL[g.tipo]} de ${formatComp(g.competencia)}?\n\nEla sai do custo com pessoal na dashboard.`,
-                            )
-                          ) {
-                            excluir.mutate(g.id);
-                          }
-                        }}
-                        className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600"
-                      >
-                        Excluir
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
+                      </td>
+                      <td className="td text-right">
+                        <span className="valor">{formatBRL(g.valorTotal)}</span>
+                      </td>
+                      <td className="td text-right">
+                        <button
+                          onClick={() => {
+                            if (
+                              confirm(
+                                `Apagar a guia de ${TIPO_GUIA_LABEL[g.tipo]} de ${formatComp(g.competencia)}?\n\nEla sai do custo com pessoal na dashboard.`,
+                              )
+                            ) {
+                              excluir.mutate(g.id);
+                            }
+                          }}
+                          className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600"
+                        >
+                          Excluir
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              ))}
             </table>
           </div>
         )}
       </Bloco>
     </Pagina>
+  );
+}
+
+/**
+ * A faixa que abre o conjunto do mês. É ela que responde "de que mês é este
+ * arquivo" sem obrigar a ler a data de cada linha — e diz na mesma altura o que
+ * ainda não chegou daquele mês.
+ */
+function CabecalhoDoMes({ mes }: { mes: ConjuntoDoMes }) {
+  return (
+    <tr className="border-t border-tinta-100 bg-tinta-50">
+      <td colSpan={5} className="px-5 py-2.5 sm:px-6">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1.5">
+          <span className="font-display num text-sm font-semibold text-tinta-800">
+            {formatComp(mes.competencia)}
+          </span>
+          <span className="text-xs text-tinta-400">
+            {mes.guias.length} arquivo(s) · {formatBRL(mes.total)}
+          </span>
+          {mes.faltando.length === 0 ? (
+            <Selo pequeno tom="pago">
+              conjunto completo
+            </Selo>
+          ) : (
+            mes.faltando.map((t) => (
+              <Selo key={t} pequeno tom="atencao">
+                falta {TIPO_GUIA_LABEL[t]}
+              </Selo>
+            ))
+          )}
+        </div>
+      </td>
+    </tr>
   );
 }
 

@@ -210,8 +210,56 @@ describe('diaristas', () => {
     expect(r.diaristas.serie[0]).toMatchObject({
       valor: 1220,
       pago: 450,
+      aCaminho: 770,
+      travado: 0,
       pessoas: 1,
       quantidade: 3,
+    });
+  });
+
+  /**
+   * Conta reprovada ou recusada pelo IXC nunca virou dinheiro — a série da
+   * folha já as deixava de fora, e a das diárias contava. Ficavam inflando o
+   * custo com pessoal e acendendo "ainda não saiu" por algo que não vai sair.
+   */
+  it('diária reprovada, cancelada ou com erro sai do gasto', async () => {
+    const { service } = montarServico({
+      diarias: [
+        diaria('2026-07-05', 100, FormaPagamentoDiaria.IXC, StatusContaPagar.PAGO),
+        diaria('2026-07-06', 200, FormaPagamentoDiaria.IXC, StatusContaPagar.REPROVADO),
+        diaria('2026-07-07', 300, FormaPagamentoDiaria.IXC, StatusContaPagar.CANCELADO),
+        diaria('2026-07-08', 400, FormaPagamentoDiaria.IXC, StatusContaPagar.ERRO),
+      ],
+    });
+
+    const r = await service.resumo(COMP, 1);
+    expect(r.diaristas.serie[0]).toMatchObject({
+      valor: 100,
+      pago: 100,
+      aCaminho: 0,
+      travado: 900,
+      travadas: 3,
+      quantidade: 1,
+    });
+    expect(r.custoPessoal[0].diaristas).toBe(100);
+  });
+
+  /**
+   * Conta a pagar apagada no IXC deixa a diária sem conta nenhuma. Contá-la
+   * como gasto pendente prendia a tela num "ainda não saiu" que nunca ia
+   * embora: não havia pagamento pendente algum para acertar.
+   */
+  it('diária cuja conta a pagar sumiu do IXC não fica pendente para sempre', async () => {
+    const { service } = montarServico({
+      diarias: [diaria('2026-07-05', 1590, FormaPagamentoDiaria.IXC)],
+    });
+
+    const r = await service.resumo(COMP, 1);
+    expect(r.diaristas.serie[0]).toMatchObject({
+      valor: 0,
+      pago: 0,
+      aCaminho: 0,
+      travado: 1590,
     });
   });
 
