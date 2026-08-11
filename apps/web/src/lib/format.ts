@@ -34,7 +34,7 @@ export function parseValorBR(
   if (typeof texto === 'number') return Number.isFinite(texto) ? texto : null;
 
   const limpo = String(texto ?? '')
-    .replace(/[R$\s ]/gi, '')
+    .replace(/[R$\s\u00A0]/gi, '')
     .trim();
   if (!limpo || !/\d/.test(limpo)) return null;
 

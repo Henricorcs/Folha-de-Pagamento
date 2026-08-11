@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma, SyncStatus } from '@prisma/client';
+import { SyncStatus } from '@prisma/client';
 import { ConfigFinanceiraService } from '../financeiro/config-financeira.service';
 import { DadosBancariosService } from '../ixc/dados-bancarios.service';
 import { IxcClient } from '../ixc/ixc.client';
@@ -128,7 +128,8 @@ export class SyncService {
           create,
           update,
         });
-        existente ? atualizados++ : novos++;
+        if (existente) atualizados++;
+        else novos++;
       }
 
       // Os dados bancários (banco/agência/conta/PIX) não vêm daqui: são lidos
@@ -205,7 +206,8 @@ export class SyncService {
           create,
           update,
         });
-        existente ? atualizados++ : novos++;
+        if (existente) atualizados++;
+        else novos++;
       }
 
       if (ignorados > 0) {

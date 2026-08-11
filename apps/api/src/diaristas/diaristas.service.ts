@@ -241,7 +241,7 @@ export class DiaristasService {
 
     return forma === FormaPagamentoDiaria.IXC
       ? this.pagarPeloIxc(diarista, base, { quantidade, valorDiaria, valor }, usuarioId)
-      : this.pagarEmMaos(diarista, base, { quantidade, valorDiaria, valor });
+      : this.pagarEmMaos(base);
   }
 
   /**
@@ -314,9 +314,7 @@ export class DiaristasService {
    * gaveta tem de estar escrito em algum lugar.
    */
   private async pagarEmMaos(
-    diarista: Diarista,
     base: Prisma.DiariaUncheckedCreateInput,
-    numeros: { quantidade: number; valorDiaria: number; valor: number },
   ): Promise<Diaria> {
     const cfg = await this.config.obter();
     const caixaId = await this.caixa.resolverCaixa(cfg);

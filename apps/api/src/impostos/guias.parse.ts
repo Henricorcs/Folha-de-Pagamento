@@ -128,7 +128,7 @@ function lerSenda(texto: string): GuiaLida {
     competencia: competenciaPorExtenso(texto),
     vencimento: vencimento(texto),
     valorTotal,
-    numeroDocumento: /Número:\s*([\d.\-]+)/.exec(texto)?.[1] ?? null,
+    numeroDocumento: /Número:\s*([\d.-]+)/.exec(texto)?.[1] ?? null,
     cnpj: /(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})/.exec(texto)?.[1] ?? null,
     razaoSocial: razaoSocialSenda(texto),
     trabalhadores: null,
