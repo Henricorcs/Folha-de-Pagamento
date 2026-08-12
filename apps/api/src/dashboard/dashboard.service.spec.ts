@@ -24,7 +24,9 @@ interface ContaDoTeste {
   tipo: TipoLancamento;
   status: StatusContaPagar;
   valor: number;
-  funcionarioId?: string | null;
+  /** Quanto do valor era comissão de venda, como a folha gravou. */
+  comissaoVendas?: number;
+  vendas?: number;
 }
 
 interface PagamentoDoTeste {
@@ -43,13 +45,6 @@ function montarServico(dados: {
   contas?: ContaDoTeste[];
   diarias?: PagamentoDoTeste[];
   avulsos?: PagamentoDoTeste[];
-  variaveis?: Array<{
-    funcionarioId: string;
-    competencia: string;
-    vendas: number;
-    valorPorVenda: number | null;
-    funcionario: { valorPorVenda: number | null } | null;
-  }>;
   impostos?: {
     serie: Array<{
       competencia: string;
@@ -69,7 +64,11 @@ function montarServico(dados: {
     funcionario: { count: jest.fn().mockResolvedValue(0) },
     contaPagar: {
       groupBy: jest.fn().mockResolvedValue([]),
-      findMany: jest.fn().mockResolvedValue(dados.contas ?? []),
+      findMany: jest
+        .fn()
+        .mockResolvedValue(
+          (dados.contas ?? []).map((c) => ({ comissaoVendas: 0, vendas: 0, ...c })),
+        ),
     },
     diaria: {
       findMany: jest.fn().mockResolvedValue((dados.diarias ?? []).map(normalizar)),
@@ -77,7 +76,6 @@ function montarServico(dados: {
     pagamentoAvulso: {
       findMany: jest.fn().mockResolvedValue((dados.avulsos ?? []).map(normalizar)),
     },
-    variavelMes: { findMany: jest.fn().mockResolvedValue(dados.variaveis ?? []) },
     syncLog: { findFirst: jest.fn().mockResolvedValue(null) },
   } as any;
 
@@ -367,9 +365,10 @@ describe('pagamentos avulsos', () => {
 
 /**
  * Quem vende é de três tipos, e mostrar só um daria um número que parece o
- * total e não é. Diarista e avulso recebem a comissão junto do próprio
- * pagamento; funcionário recebe pela folha, no salário do mês seguinte ao
- * trabalhado.
+ * total e não é. O que este bloco protege é mais duro do que a soma: **só entra
+ * o que está escrito no pagamento**. Refazer a conta pelas vendas lançadas dava
+ * um número que ninguém pagou — o que foi lançado antes de a empresa passar a
+ * pagar comissão por aqui aparecia como gasto que nunca saiu.
  */
 describe('gasto com vendas', () => {
   it('soma a comissão de diarista e de avulso pelo mês do pagamento', async () => {
@@ -408,8 +407,8 @@ describe('gasto com vendas', () => {
     });
   });
 
-  /** A comissão do funcionário sai dentro do salário — e só se ele existir. */
-  it('a comissão do funcionário conta quando o salário da competência foi gerado', async () => {
+  /** A comissão do funcionário sai dentro do salário, e a folha grava quanto. */
+  it('conta a comissão gravada no salário', async () => {
     const { service } = montarServico({
       contas: [
         {
@@ -417,16 +416,8 @@ describe('gasto com vendas', () => {
           tipo: TipoLancamento.SALARIO,
           status: StatusContaPagar.PAGO,
           valor: 3000,
-          funcionarioId: 'f1',
-        },
-      ],
-      variaveis: [
-        {
-          funcionarioId: 'f1',
-          competencia: '2026-06',
+          comissaoVendas: 600,
           vendas: 12,
-          valorPorVenda: null,
-          funcionario: { valorPorVenda: 50 },
         },
       ],
     });
@@ -436,27 +427,12 @@ describe('gasto com vendas', () => {
   });
 
   /**
-   * Sem o salário gerado, a comissão ainda não saiu de lugar nenhum. Contar
-   * mostraria como gasto do mês algo que só vai sair quando a folha for feita.
+   * O caso que motivou tudo isto: vendas lançadas no cadastro, salário pago sem
+   * comissão nenhuma, e a tela mostrando milhares de reais de "gasto com
+   * vendas" que jamais saíram do caixa. Salário antigo não tem a comissão
+   * registrada, e chutar seria repetir o erro.
    */
-  it('sem salário gerado, a comissão do funcionário ainda não é gasto', async () => {
-    const { service } = montarServico({
-      variaveis: [
-        {
-          funcionarioId: 'f1',
-          competencia: '2026-06',
-          vendas: 12,
-          valorPorVenda: null,
-          funcionario: { valorPorVenda: 50 },
-        },
-      ],
-    });
-
-    const r = await service.resumo(COMP, 1);
-    expect(r.vendas.serie[0]).toMatchObject({ funcionarios: 0, total: 0 });
-  });
-
-  it('o valor por venda do mês vence o do cadastro', async () => {
+  it('salário sem comissão registrada não vira gasto com vendas', async () => {
     const { service } = montarServico({
       contas: [
         {
@@ -464,22 +440,31 @@ describe('gasto com vendas', () => {
           tipo: TipoLancamento.SALARIO,
           status: StatusContaPagar.PAGO,
           valor: 3000,
-          funcionarioId: 'f1',
-        },
-      ],
-      variaveis: [
-        {
-          funcionarioId: 'f1',
-          competencia: '2026-06',
-          vendas: 10,
-          valorPorVenda: 5,
-          funcionario: { valorPorVenda: 50 },
         },
       ],
     });
 
     const r = await service.resumo(COMP, 1);
-    expect(r.vendas.serie[0].funcionarios).toBe(50);
+    expect(r.vendas.serie[0]).toMatchObject({ funcionarios: 0, total: 0, vendas: 0 });
+  });
+
+  /** Salário reprovado não saiu — nem ele, nem a comissão dentro dele. */
+  it('comissão de salário reprovado fica de fora', async () => {
+    const { service } = montarServico({
+      contas: [
+        {
+          competencia: COMP,
+          tipo: TipoLancamento.SALARIO,
+          status: StatusContaPagar.REPROVADO,
+          valor: 3000,
+          comissaoVendas: 600,
+          vendas: 12,
+        },
+      ],
+    });
+
+    const r = await service.resumo(COMP, 1);
+    expect(r.vendas.serie[0]).toMatchObject({ funcionarios: 0, total: 0 });
   });
 });
 

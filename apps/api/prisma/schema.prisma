@@ -656,6 +656,15 @@ model ContaPagar {
   idFornecedorIxc  Int?   @map("id_fornecedor_ixc")
 
   valor            Decimal  @db.Decimal(14, 2)
+
+  // --- Quanto deste pagamento era comissão de venda ---
+  // Só o salário traz isso preenchido: a comissão do mês entra dentro dele, e
+  // sem gravar aqui não há como responder quanto o mês custou em venda. Fica
+  // congelado no momento em que a folha é gerada — refazer a conta depois,
+  // pelas vendas lançadas, dá um número que ninguém pagou.
+  vendas           Int      @default(0)
+  comissaoVendas   Decimal  @default(0) @map("comissao_vendas") @db.Decimal(14, 2)
+
   contaContabil    Int      @map("conta_contabil") // fn_apagar.id_conta
   contaPagamento   Int      @map("conta_pagamento") // fn_apagar.id_contas
   /// fn_apagar.tipo_pagamento desta conta; null = o padrão da configuração

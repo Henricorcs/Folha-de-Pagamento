@@ -106,7 +106,7 @@ export function Funcionarios() {
 
       {feedback && <Aviso tom="marca">{feedback}</Aviso>}
 
-      <div className="surgir surgir-1 mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="surgir surgir-1 mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Indicador
           acento
           rotulo="Folha base mensal"
@@ -123,11 +123,6 @@ export function Funcionarios() {
           rotulo="Ativos"
           valor={resumo.data?.ativos ?? '—'}
           detalhe="entram na próxima folha"
-        />
-        <Indicador
-          rotulo="Inativos"
-          valor={resumo.data?.inativos ?? '—'}
-          detalhe="ficam no histórico, fora do cálculo"
         />
       </div>
 

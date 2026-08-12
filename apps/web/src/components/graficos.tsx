@@ -35,6 +35,25 @@ export function rotuloMes(competencia: string): string {
   return m ? `${MES_CURTO[Number(m[2]) - 1]}/${m[1].slice(2)}` : competencia;
 }
 
+/** Só o mês, sem o ano ("ago"). */
+function mesCurto(competencia: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(competencia);
+  return m ? MES_CURTO[Number(m[2]) - 1] : competencia;
+}
+
+/**
+ * De quantos em quantos meses o eixo escreve um rótulo.
+ *
+ * Doze meses num cartão de um terço da tela dão uns 30px por coluna, e
+ * "set/25out/25nov/25" vira uma tarja ilegível. Pular rótulos é melhor do que
+ * encolher a fonte: o que se lê num eixo é o começo, o fim e o mês em foco.
+ */
+function passoDoRotulo(quantidade: number): number {
+  if (quantidade > 8) return 3;
+  if (quantidade > 5) return 2;
+  return 1;
+}
+
 type LinhaDoMes = { competencia: string } & Record<string, number | string>;
 
 /**
@@ -60,6 +79,23 @@ export function BarrasEmpilhadas({
   const totais = meses.map((m) => somar(m, series));
   const maior = Math.max(1, ...totais);
   const vazio = totais.every((t) => t === 0);
+  const passo = passoDoRotulo(meses.length);
+
+  // Nada lançado: as barras seriam doze tocos cinzas com um eixo por baixo,
+  // ocupando meia tela para dizer "zero". A frase diz o mesmo e se lê de longe.
+  if (vazio) {
+    return (
+      <div className={`flex ${altura} flex-col justify-center`}>
+        <p className="text-sm text-tinta-400">
+          Nada lançado no período escolhido.
+        </p>
+        <p className="mt-1 text-xs text-tinta-300">
+          {rotuloMes(meses[0].competencia)} a{' '}
+          {rotuloMes(meses[meses.length - 1].competencia)}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -67,6 +103,10 @@ export function BarrasEmpilhadas({
         {meses.map((mes, i) => {
           const total = totais[i];
           const eAtual = mes.competencia === atual;
+          // Do fim para o começo: o último mês sempre ganha rótulo, e é dele
+          // que a contagem parte — senão o mês em foco pode ficar mudo.
+          const mostraRotulo =
+            eAtual || (meses.length - 1 - i) % passo === 0;
           return (
             <div
               key={mes.competencia}
@@ -114,11 +154,16 @@ export function BarrasEmpilhadas({
               </div>
 
               <span
-                className={`text-[11px] ${
+                className={`text-[11px] leading-none ${
                   eAtual ? 'font-semibold text-tinta-800' : 'text-tinta-400'
                 }`}
               >
-                {rotuloMes(mes.competencia)}
+                {/* O ano só no mês em foco e em janeiro, que é onde ele vira. */}
+                {mostraRotulo
+                  ? eAtual || mes.competencia.endsWith('-01')
+                    ? rotuloMes(mes.competencia)
+                    : mesCurto(mes.competencia)
+                  : ''}
               </span>
 
               {total > 0 && (
@@ -146,11 +191,6 @@ export function BarrasEmpilhadas({
       </div>
 
       <Legenda series={series} meses={meses} />
-      {vazio && (
-        <p className="mt-3 text-xs text-tinta-400">
-          Nada lançado no período escolhido.
-        </p>
-      )}
     </div>
   );
 }

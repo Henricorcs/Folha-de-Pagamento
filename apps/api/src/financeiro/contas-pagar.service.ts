@@ -366,6 +366,8 @@ export class ContasPagarService {
         diaristaId: item.diaristaId ?? null,
         beneficiarioNome,
         valor: new Prisma.Decimal(item.valor),
+        vendas: item.vendas ?? 0,
+        comissaoVendas: new Prisma.Decimal(item.comissaoVendas ?? 0),
         contaContabil,
         // Dá para pagar por outra conta que não a padrão (ex.: um caixa).
         contaPagamento: item.contaPagamento ?? cfg.contaPagamentoId,

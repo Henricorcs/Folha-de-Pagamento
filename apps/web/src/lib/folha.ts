@@ -28,3 +28,46 @@ export function rotuloParcelaAtual(v: ValeComSaldo): string {
   const total = v.vale.quantidadeParcelas;
   return `${v.proximaParcela?.numero ?? total}/${total}`;
 }
+
+// ---------------------------------------------------------------------------
+// Meses
+//
+// A empresa paga o trabalho de um mês no mês seguinte: o salário de agosto sai
+// em setembro. As telas perguntam pelo **mês trabalhado**, que é como se fala
+// ("a folha de agosto"), e traduzem para o mês do pagamento na hora de chamar a
+// API — que trabalha em cima do mês em que o dinheiro sai.
+// ---------------------------------------------------------------------------
+
+const MESES = [
+  'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+  'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
+];
+
+/** "AAAA-MM" do mês corrente. */
+export function mesAtual(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function deslocar(competencia: string, meses: number): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(competencia);
+  if (!m) return competencia;
+  // Dia 1 de propósito: somar mês em cima do dia 31 escorrega para o mês
+  // seguinte ("31/01" + 1 mês = 03/03).
+  const d = new Date(Number(m[1]), Number(m[2]) - 1 + meses, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+export function mesSeguinte(competencia: string): string {
+  return deslocar(competencia, 1);
+}
+
+export function mesAnterior(competencia: string): string {
+  return deslocar(competencia, -1);
+}
+
+/** "2026-08" → "agosto/2026", que é como se lê em voz alta. */
+export function nomeDoMes(competencia: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(competencia);
+  return m ? `${MESES[Number(m[2]) - 1]}/${m[1]}` : competencia;
+}

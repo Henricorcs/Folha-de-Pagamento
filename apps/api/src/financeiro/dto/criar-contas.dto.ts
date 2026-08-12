@@ -37,6 +37,15 @@ export class ItemContaPagarDto {
 
   @IsOptional() @IsString() observacao?: string;
 
+  /**
+   * Quanto deste pagamento é comissão de venda, e de quantas vendas. Vem da
+   * folha, no salário. Fica gravado na conta: é a única resposta honesta para
+   * "quanto o mês custou em venda" depois que a folha já saiu.
+   */
+  @IsOptional() @IsInt() @Min(0) vendas?: number;
+
+  @IsOptional() @IsNumber() @Min(0) comissaoVendas?: number;
+
   @IsOptional()
   @Matches(/^\d{4}-\d{2}$/, { message: 'competencia deve estar no formato AAAA-MM' })
   competencia?: string;

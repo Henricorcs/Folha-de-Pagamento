@@ -154,6 +154,15 @@ export interface LancamentoCalculado {
   valor: number;
   contaContabil: number;
   observacao: string;
+  /**
+   * Quanto deste pagamento é comissão de venda, e de quantas vendas. Só o
+   * salário traz: a comissão entra dentro dele. Vai junto para a conta a pagar
+   * porque, sem ficar escrito lá, "quanto o mês custou em venda" só poderia
+   * ser refeito pelas vendas lançadas — e aí lançar uma venda velha mudaria o
+   * gasto de um mês já pago.
+   */
+  vendas?: number;
+  comissaoVendas?: number;
 }
 
 /** Comissão do mês: quantas vendas a pessoa fez × o valor de cada venda. */
@@ -296,6 +305,8 @@ export function montarLancamentosFolha(
         valor: saldo,
         contaContabil: params.contaContabilSalario,
         observacao: params.obsSalario + sufixoObservacaoSalario(d),
+        vendas: d.vendas ?? 0,
+        comissaoVendas: calcularComissao(d),
       });
     }
   }

@@ -41,9 +41,6 @@ export class DashboardService {
     const comp = competencia ?? competenciaAtual();
     const quantidade = Math.min(Math.max(mesesPedidos ?? MESES_NA_SERIE, 1), 24);
     const meses = ultimosMeses(comp, quantidade);
-    // A comissão de venda do funcionário é do mês trabalhado e entra no salário
-    // da competência seguinte — por isso a série precisa do mês anterior a cada.
-    const mesesTrabalhados = meses.map(competenciaAnterior);
     const inicio = primeiroDia(meses[0]);
     const fim = depoisDoUltimoDia(comp);
 
@@ -67,7 +64,6 @@ export class DashboardService {
       serieContas,
       diarias,
       avulsos,
-      variaveis,
       impostos,
       ultimasContas,
       ultimoSync,
@@ -101,7 +97,8 @@ export class DashboardService {
           tipo: true,
           status: true,
           valor: true,
-          funcionarioId: true,
+          comissaoVendas: true,
+          vendas: true,
         },
       }),
       this.prisma.diaria.findMany({
@@ -129,16 +126,6 @@ export class DashboardService {
           contaPagar: { select: { status: true } },
         },
       }),
-      this.prisma.variavelMes.findMany({
-        where: { competencia: { in: mesesTrabalhados } },
-        select: {
-          funcionarioId: true,
-          competencia: true,
-          vendas: true,
-          valorPorVenda: true,
-          funcionario: { select: { valorPorVenda: true } },
-        },
-      }),
       this.impostos.resumo(meses),
       this.prisma.contaPagar.findMany({ orderBy: { createdAt: 'desc' }, take: 8 }),
       this.prisma.syncLog.findFirst({ orderBy: { iniciadoEm: 'desc' } }),
@@ -159,12 +146,7 @@ export class DashboardService {
     const diariasDoMes = diaristas.serie.find((d) => d.competencia === comp);
     const avulsosDoMes = avulsosSerie.serie.find((a) => a.competencia === comp);
     const serieTipos = comDiariaEAvulso(serie.porTipo, diaristas, avulsosSerie);
-    const vendas = montarVendas(
-      meses,
-      [...diarias, ...avulsos],
-      variaveis,
-      serieContas,
-    );
+    const vendas = montarVendas(meses, [...diarias, ...avulsos], serieContas);
 
     return {
       competencia: comp,
@@ -244,7 +226,9 @@ interface ContaDaSerie {
   tipo: TipoLancamento;
   status: StatusContaPagar;
   valor: unknown;
-  funcionarioId: string | null;
+  /** Quanto do valor era comissão de venda, gravado ao gerar a folha. */
+  comissaoVendas: unknown;
+  vendas: number;
 }
 
 /**
@@ -420,75 +404,51 @@ function comDiariaEAvulso(
   }));
 }
 
-/** Vendas e comissão lançadas num mês trabalhado, por funcionário. */
-interface VariavelDaSerie {
-  funcionarioId: string;
-  competencia: string;
-  vendas: number;
-  valorPorVenda: unknown;
-  funcionario: { valorPorVenda: unknown } | null;
-}
-
 /**
  * Quanto o mês custou em comissão de venda.
  *
- * Vem de três lugares porque quem vende é de três tipos. Diarista e avulso
- * recebem a comissão junto do próprio pagamento, e o valor está congelado lá —
- * corrigir o cadastro depois não reescreve um mês fechado. Funcionário recebe
- * pela folha: a comissão do mês trabalhado entra no salário da competência
- * seguinte, então só conta quando aquele salário existe e não foi reprovado.
+ * Só entra o que está **escrito** no pagamento. Diarista e avulso recebem a
+ * comissão junto do próprio pagamento; funcionário recebe dentro do salário, e
+ * a folha grava na conta a pagar quanto dela era comissão.
+ *
+ * Refazer essa conta pelas vendas lançadas seria mais fácil e daria um número
+ * que ninguém pagou: venda lançada depois da folha (ou corrigida depois)
+ * reescreveria um mês fechado, e o que foi lançado antes de a empresa passar a
+ * pagar comissão por aqui viraria gasto que nunca saiu. Por isso as contas
+ * antigas contam zero — a comissão delas não foi registrada.
  */
 function montarVendas(
   meses: string[],
   pagamentos: PagamentoDaSerie[],
-  variaveis: VariavelDaSerie[],
   contas: ContaDaSerie[],
 ) {
-  const forasDaFolha = new Map(meses.map((m) => [m, { valor: 0, vendas: 0 }]));
+  const porMes = new Map(
+    meses.map((m) => [m, { fora: 0, folha: 0, vendas: 0 }]),
+  );
+
   for (const p of pagamentos) {
-    const mes = forasDaFolha.get(mesDaData(p.data));
+    const mes = porMes.get(mesDaData(p.data));
     // Comissão de pagamento travado não saiu nem vai sair, como o resto dele.
     if (!mes || situacaoDoPagamento(p) === 'TRAVADO') continue;
-    mes.valor += Number(p.comissaoVendas ?? 0);
+    mes.fora += Number(p.comissaoVendas ?? 0);
     mes.vendas += p.vendas;
   }
 
-  // Quem teve salário gerado (e vivo) em cada competência: é o salário que
-  // carrega a comissão do mês trabalhado.
-  const comSalario = new Map<string, Set<string>>();
   for (const c of contas) {
-    if (c.tipo !== TipoLancamento.SALARIO) continue;
-    if (!c.competencia || !c.funcionarioId) continue;
-    if (SEM_SAIDA.includes(c.status)) continue;
-    const doMes = comSalario.get(c.competencia) ?? new Set<string>();
-    comSalario.set(c.competencia, doMes);
-    doMes.add(c.funcionarioId);
+    const mes = c.competencia ? porMes.get(c.competencia) : undefined;
+    if (!mes || SEM_SAIDA.includes(c.status)) continue;
+    mes.folha += Number(c.comissaoVendas ?? 0);
+    mes.vendas += c.vendas;
   }
 
   const serie = meses.map((competencia) => {
-    const pagos = comSalario.get(competencia) ?? new Set<string>();
-    const mesTrabalhado = competenciaAnterior(competencia);
-    let folha = 0;
-    let vendasFolha = 0;
-    for (const v of variaveis) {
-      if (v.competencia !== mesTrabalhado) continue;
-      if (!pagos.has(v.funcionarioId)) continue;
-      // O valor por venda do mês vence o do cadastro (ex.: campanha), a mesma
-      // ordem que a folha usa para calcular o salário.
-      const unitario = Number(
-        v.valorPorVenda ?? v.funcionario?.valorPorVenda ?? 0,
-      );
-      folha += v.vendas * unitario;
-      vendasFolha += v.vendas;
-    }
-
-    const fora = forasDaFolha.get(competencia) ?? { valor: 0, vendas: 0 };
+    const m = porMes.get(competencia) ?? { fora: 0, folha: 0, vendas: 0 };
     return {
       competencia,
-      funcionarios: arredondar(folha),
-      foraDaFolha: arredondar(fora.valor),
-      total: arredondar(folha + fora.valor),
-      vendas: vendasFolha + fora.vendas,
+      funcionarios: arredondar(m.folha),
+      foraDaFolha: arredondar(m.fora),
+      total: arredondar(m.folha + m.fora),
+      vendas: m.vendas,
     };
   });
 

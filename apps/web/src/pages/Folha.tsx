@@ -11,6 +11,7 @@ import {
   type Tom,
 } from '../components/ui';
 import { api, mensagemErro } from '../lib/api';
+import { mesAnterior, mesAtual, mesSeguinte, nomeDoMes } from '../lib/folha';
 import { formatBRL, formatData } from '../lib/format';
 import { STATUS_LABEL, TIPO_LABEL } from '../lib/status';
 import type {
@@ -310,7 +311,7 @@ function OpcaoDia25({
         )}
         {ligado && naoGerado && (
           <span className="text-amber-700">
-            — o dia 25 não saiu nesta competência; confira se a pessoa recebeu.
+            — o dia 25 não saiu neste mês; confira se a pessoa recebeu.
           </span>
         )}
       </label>
@@ -353,7 +354,7 @@ function ValesJaBaixados({ vales }: { vales: ParcelaValeFolha[] }) {
   if (baixadas.length === 0) return null;
   return (
     <p className="mb-4 text-xs text-tinta-500">
-      Já acertado nesta competência, fora deste saldo:{' '}
+      Já acertado nesta folha, fora deste saldo:{' '}
       {baixadas
         .map(
           (v) =>
@@ -404,7 +405,7 @@ function SeloJaGerado({
     <Selo
       tom={conta.situacao === 'PAGO' ? 'erro' : 'atencao'}
       pequeno
-      titulo={`Já existe conta a pagar de ${nome} nesta competência. Gerar de novo paga duas vezes — confira em Contas a Pagar antes.`}
+      titulo={`Já existe conta a pagar de ${nome} nesta folha. Gerar de novo paga duas vezes — confira em Contas a Pagar antes.`}
     >
       {conta.situacao === 'PAGO'
         ? `${nome} já pago${conta.pagoEm ? ` em ${formatData(conta.pagoEm)}` : ''}`
@@ -440,7 +441,7 @@ function SeloAdiantamento({
       <Selo
         pequeno
         tom={situacao === 'PAGO' ? 'pago' : 'atencao'}
-        titulo="Este adiantamento já foi gerado nesta competência — gerar de novo duplica o pagamento."
+        titulo="Este adiantamento já foi gerado neste mês — gerar de novo duplica o pagamento."
       >
         {situacao === 'PAGO'
           ? `já pago${pagoEm ? ` em ${formatData(pagoEm)}` : ''}`
@@ -474,18 +475,13 @@ function SeloAdiantamento({
       tom={tom}
       titulo={
         abatido > 0
-          ? `Não há conta a pagar do dia 25 nesta competência, mas ${formatBRL(abatido)} estão sendo descontados do pagamento. Confira antes de gerar.`
-          : 'Não há conta a pagar do dia 25 nesta competência.'
+          ? `Não há conta a pagar do dia 25 neste mês, mas ${formatBRL(abatido)} estão sendo descontados do pagamento. Confira antes de gerar.`
+          : 'Não há conta a pagar do dia 25 neste mês.'
       }
     >
       dia 25 não gerado{abatido > 0 ? ` · ${formatBRL(abatido)} descontados` : ''}
     </Selo>
   );
-}
-
-function competenciaAtual(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 /** Os dois pagamentos do mês. */
@@ -496,10 +492,33 @@ function modoInicial(): ModoPagamento {
   return new Date().getDate() >= 20 ? 'DIA_25' : 'QUINTO_DIA';
 }
 
+/**
+ * Em que mês o dinheiro sai, dado o mês que foi trabalhado.
+ *
+ * O adiantamento é pago no dia 25 do próprio mês em que se trabalha; o salário,
+ * no início do mês seguinte — o de agosto sai em setembro. A API raciocina pelo
+ * mês do pagamento; a tela pergunta pelo mês trabalhado, que é como se fala.
+ */
+function mesDoPagamento(mesTrabalhado: string, modo: ModoPagamento): string {
+  return modo === 'DIA_25' ? mesTrabalhado : mesSeguinte(mesTrabalhado);
+}
+
+/**
+ * Qual mês de trabalho está na mesa hoje. Perto do dia 25 é o mês corrente (o
+ * adiantamento é sobre o que se está trabalhando agora); no começo do mês é o
+ * anterior, que é o que se vai pagar.
+ */
+function mesTrabalhadoInicial(modo: ModoPagamento): string {
+  return modo === 'DIA_25' ? mesAtual() : mesAnterior(mesAtual());
+}
+
 export function Folha() {
   const navigate = useNavigate();
-  const [competencia, setCompetencia] = useState(competenciaAtual());
   const [modo, setModo] = useState<ModoPagamento>(modoInicial());
+  const [mesTrabalhado, setMesTrabalhado] = useState(() =>
+    mesTrabalhadoInicial(modoInicial()),
+  );
+  const competencia = mesDoPagamento(mesTrabalhado, modo);
   const [itens, setItens] = useState<ItemGerar[]>([]);
   const [feedback, setFeedback] = useState<string | null>(null);
   /** Funcionários com o detalhamento aberto. */
@@ -563,9 +582,9 @@ export function Folha() {
         flat.length === 0
           ? modo === 'DIA_25'
             ? 'Ninguém está marcado para receber adiantamento no dia 25.'
-            : 'Nenhum salário ou bônus a gerar nesta competência.'
+            : 'Nenhum salário ou bônus a gerar neste mês trabalhado.'
           : jaGerados > 0
-            ? `${jaGerados} pagamento(s) já existem nesta competência e vieram desmarcados — marque só se quiser mesmo gerar de novo.`
+            ? `${jaGerados} pagamento(s) já existem nesta folha e vieram desmarcados — marque só se quiser mesmo gerar de novo.`
             : null,
       );
     },
@@ -680,13 +699,22 @@ export function Folha() {
       ),
     );
   }
+  function limparPrevia() {
+    setItens([]);
+    setAbertos({});
+    setFeedback(null);
+  }
   /** Trocar de pagamento invalida a prévia anterior. */
   function trocarModo(novo: ModoPagamento) {
     if (novo === modo) return;
     setModo(novo);
-    setItens([]);
-    setAbertos({});
-    setFeedback(null);
+    limparPrevia();
+  }
+  /** O mês trabalhado é o mesmo nos dois pagamentos — só muda quando sai. */
+  function trocarMes(novo: string) {
+    if (!novo || novo === mesTrabalhado) return;
+    setMesTrabalhado(novo);
+    limparPrevia();
   }
   function alternarDetalhe(funcionarioId: string) {
     setAbertos((prev) => ({ ...prev, [funcionarioId]: !prev[funcionarioId] }));
@@ -710,48 +738,52 @@ export function Folha() {
         }
         descricao={
           modo === 'DIA_25'
-            ? 'Só o adiantamento de quem recebe no dia 25.'
-            : 'Salário e bônus. Quem recebeu no dia 25 vem com o adiantamento descontado; quem tem carteira assinada vem cheio, mas dá para descontar.'
+            ? 'Só o adiantamento de quem recebe no dia 25, sobre o mês que está sendo trabalhado.'
+            : 'Salário e bônus do mês trabalhado. Quem recebeu no dia 25 vem com o adiantamento descontado; quem tem carteira assinada vem cheio, mas dá para descontar.'
         }
       />
 
-      <div className="surgir surgir-1 card mb-6 flex flex-wrap items-end gap-5 p-5">
-        <div>
-          <span className="rotulo">Pagamento</span>
-          <div className="inline-flex rounded-xl bg-tinta-100 p-1">
-            <BotaoModo
-              ativo={modo === 'DIA_25'}
-              onClick={() => trocarModo('DIA_25')}
-            >
-              Dia 25
-            </BotaoModo>
-            <BotaoModo
-              ativo={modo === 'QUINTO_DIA'}
-              onClick={() => trocarModo('QUINTO_DIA')}
-            >
-              Quinto dia
-            </BotaoModo>
+      <div className="surgir surgir-1 card mb-6 p-5">
+        <div className="flex flex-wrap items-end gap-5">
+          <div>
+            <span className="rotulo">Pagamento</span>
+            <div className="inline-flex rounded-xl bg-tinta-100 p-1">
+              <BotaoModo
+                ativo={modo === 'DIA_25'}
+                onClick={() => trocarModo('DIA_25')}
+              >
+                Dia 25
+              </BotaoModo>
+              <BotaoModo
+                ativo={modo === 'QUINTO_DIA'}
+                onClick={() => trocarModo('QUINTO_DIA')}
+              >
+                Quinto dia
+              </BotaoModo>
+            </div>
           </div>
+          <div>
+            <label className="rotulo" htmlFor="mes-folha">
+              Mês trabalhado
+            </label>
+            <input
+              id="mes-folha"
+              type="month"
+              value={mesTrabalhado}
+              onChange={(e) => trocarMes(e.target.value)}
+              className="campo"
+            />
+          </div>
+          <button
+            onClick={() => preview.mutate()}
+            disabled={preview.isPending}
+            className="btn btn-primario"
+          >
+            {preview.isPending ? 'Calculando…' : 'Calcular prévia'}
+          </button>
         </div>
-        <div>
-          <label className="rotulo" htmlFor="comp-folha">
-            Competência
-          </label>
-          <input
-            id="comp-folha"
-            type="month"
-            value={competencia}
-            onChange={(e) => setCompetencia(e.target.value)}
-            className="campo"
-          />
-        </div>
-        <button
-          onClick={() => preview.mutate()}
-          disabled={preview.isPending}
-          className="btn btn-primario"
-        >
-          {preview.isPending ? 'Calculando…' : 'Calcular prévia'}
-        </button>
+
+        <QuandoSai modo={modo} mesTrabalhado={mesTrabalhado} />
       </div>
 
       {feedback && <Aviso tom="marca">{feedback}</Aviso>}
@@ -788,7 +820,7 @@ export function Folha() {
       {itens.length === 0 && !preview.isPending && (
         <div className="card">
           <Vazio titulo="Nada calculado ainda">
-            Escolha o pagamento e a competência e clique em “Calcular prévia”.
+            Escolha o pagamento e o mês trabalhado e clique em “Calcular prévia”.
             Nada é enviado ao IXC até você conferir.
           </Vazio>
         </div>
@@ -1051,6 +1083,44 @@ export function Folha() {
         </div>
       )}
     </Pagina>
+  );
+}
+
+/**
+ * A frase que desfaz a confusão da competência: qual mês foi trabalhado e
+ * quando o dinheiro dele sai. A empresa paga o mês seguinte ao trabalhado, e
+ * pedir "competência" na tela fazia a pessoa escolher setembro para pagar
+ * agosto — ou agosto, e receber a folha errada.
+ */
+function QuandoSai({
+  modo,
+  mesTrabalhado,
+}: {
+  modo: ModoPagamento;
+  mesTrabalhado: string;
+}) {
+  const trabalho = nomeDoMes(mesTrabalhado);
+  return (
+    <p className="mt-4 border-t border-tinta-100 pt-4 text-sm leading-relaxed text-tinta-600">
+      {modo === 'DIA_25' ? (
+        <>
+          Adiantamento sobre o trabalho de{' '}
+          <strong className="text-tinta-900">{trabalho}</strong>, pago no{' '}
+          <strong className="text-tinta-900">dia 25 de {trabalho}</strong> — no
+          meio do próprio mês.
+        </>
+      ) : (
+        <>
+          Salário e bônus de{' '}
+          <strong className="text-tinta-900">{trabalho}</strong>, pagos no
+          começo de{' '}
+          <strong className="text-tinta-900">
+            {nomeDoMes(mesSeguinte(mesTrabalhado))}
+          </strong>{' '}
+          — o mês trabalhado sempre sai no mês seguinte.
+        </>
+      )}
+    </p>
   );
 }
 
