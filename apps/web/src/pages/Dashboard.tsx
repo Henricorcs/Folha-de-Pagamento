@@ -96,6 +96,12 @@ export function Dashboard() {
   const diariasDoMes = data?.diaristas.serie.find(
     (d) => d.competencia === competencia,
   );
+  const avulsosDoMes = data?.avulsos.serie.find(
+    (a) => a.competencia === competencia,
+  );
+  const vendasDoMes = data?.vendas.serie.find(
+    (v) => v.competencia === competencia,
+  );
   const impostoDoMes = data?.impostos.serie.find(
     (i) => i.competencia === competencia,
   );
@@ -156,24 +162,15 @@ export function Dashboard() {
 
       {data && (
         <div className="space-y-6">
-          <div className="surgir surgir-1 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="surgir surgir-1 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <Indicador
               acento
               rotulo={`Custo com pessoal em ${formatComp(competencia)}`}
               valor={formatBRL(custoDoMes?.total)}
               detalhe={
                 custoDoMes
-                  ? `${formatBRL(custoDoMes.folha)} de folha + ${formatBRL(custoDoMes.diaristas)} de diárias + ${formatBRL(custoDoMes.encargos)} de encargos`
+                  ? `${formatBRL(custoDoMes.folha)} de folha e avulsos + ${formatBRL(custoDoMes.diaristas)} de diárias + ${formatBRL(custoDoMes.encargos)} de encargos`
                   : 'nada lançado nesta competência'
-              }
-            />
-            <Indicador
-              rotulo="Bônus pago"
-              valor={formatBRL(tiposDoMes?.bonus)}
-              detalhe={
-                f && f.bonusFixoMensal > 0
-                  ? `${formatBRL(f.bonusFixoMensal)} de bônus fixos no cadastro`
-                  : 'sem bônus fixo no cadastro'
               }
             />
             <Indicador
@@ -196,6 +193,34 @@ export function Dashboard() {
                 diariasDoMes && diariasDoMes.aCaminho > 0
                   ? `${formatBRL(diariasDoMes.aCaminho)} lançado, esperando o banco`
                   : undefined
+              }
+            />
+            <Indicador
+              rotulo="Gasto com vendas"
+              valor={formatBRL(vendasDoMes?.total)}
+              detalhe={
+                vendasDoMes && vendasDoMes.total > 0
+                  ? `${vendasDoMes.vendas} venda(s) · ${formatBRL(vendasDoMes.foraDaFolha)} a diaristas e avulsos + ${formatBRL(vendasDoMes.funcionarios)} dentro da folha`
+                  : 'nenhuma comissão de venda neste mês'
+              }
+            />
+            <Indicador
+              rotulo="Pagamentos avulsos"
+              valor={formatBRL(avulsosDoMes?.valor)}
+              detalhe={`${avulsosDoMes?.quantidade ?? 0} pagamento(s) · ${avulsosDoMes?.pessoas ?? 0} pessoa(s)`}
+              alerta={
+                avulsosDoMes && avulsosDoMes.aCaminho > 0
+                  ? `${formatBRL(avulsosDoMes.aCaminho)} lançado, esperando o banco`
+                  : undefined
+              }
+            />
+            <Indicador
+              rotulo="Bônus pago"
+              valor={formatBRL(tiposDoMes?.bonus)}
+              detalhe={
+                f && f.bonusFixoMensal > 0
+                  ? `${formatBRL(f.bonusFixoMensal)} de bônus fixos no cadastro`
+                  : 'sem bônus fixo no cadastro'
               }
             />
             <Indicador

@@ -31,6 +31,13 @@ export class CriarBeneficiarioDto {
   @IsIn([...TIPOS_CHAVE_PIX])
   tipoChavePix?: string | null;
 
+  /** Quanto ganha por venda — cliente da empresa também vende e comissiona. */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value == null ? null : Number(value)))
+  @IsNumber()
+  @Min(0)
+  valorPorVenda?: number | null;
+
   @IsOptional() @IsEnum(FormaPagamento) formaPagamento?: FormaPagamento;
 
   @IsOptional() @IsString() observacoes?: string;
@@ -60,15 +67,44 @@ export class UpdateBeneficiarioDto extends CriarBeneficiarioDto {
   @IsOptional() @IsBoolean() ativo?: boolean;
 }
 
-/** Um pagamento avulso: quanto, por quê e por onde sai. */
+/**
+ * Um pagamento avulso: o serviço, a comissão das vendas que a pessoa fechou e
+ * o extra do trabalho por fora. Tudo somado sai num pagamento só — ver
+ * `pagamento.calc`, compartilhado com a diária.
+ */
 export class PagarAvulsoDto {
   /** Dia do pagamento (AAAA-MM-DD). Vazio = hoje. */
   @IsOptional() @IsISO8601() data?: string;
 
+  /** O trabalho contratado. Zero quando o acerto é só de comissão. */
+  @IsOptional()
   @Transform(({ value }) => (value === '' || value == null ? undefined : Number(value)))
   @IsNumber()
-  @Min(0.01)
-  valor!: number;
+  @Min(0)
+  valorServico?: number;
+
+  /** Quantas vendas a pessoa fechou no período que este pagamento cobre. */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value == null ? undefined : Number(value)))
+  @IsInt()
+  @Min(0)
+  vendas?: number;
+
+  /** Quanto cada venda paga. Vazio = o do cadastro. */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value == null ? undefined : Number(value)))
+  @IsNumber()
+  @Min(0)
+  valorPorVenda?: number;
+
+  /** Trabalho por fora que rendeu um troco a mais no mesmo acerto. */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value == null ? undefined : Number(value)))
+  @IsNumber()
+  @Min(0)
+  valorExtra?: number;
+
+  @IsOptional() @IsString() descricaoExtra?: string;
 
   /** O que foi feito — vira observação no IXC e histórico no caixa. */
   @IsString() @MinLength(3) descricao!: string;

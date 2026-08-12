@@ -430,6 +430,10 @@ model BeneficiarioAvulso {
   /// Sem ele o rádio do fn_apagar fica em branco e o banco recusa o PIX.
   tipoChavePix String? @map("tipo_chave_pix")
 
+  /// Quanto ganha por venda: cliente da empresa também vende e comissiona.
+  /// Só sugere o valor no pagamento.
+  valorPorVenda Decimal? @map("valor_por_venda") @db.Decimal(14, 2)
+
   /// Forma habitual de pagar essa pessoa (dá para mudar em cada pagamento)
   formaPagamento FormaPagamento @default(IXC) @map("forma_pagamento")
 
@@ -464,11 +468,19 @@ model PagamentoAvulso {
   beneficiarioId String             @map("beneficiario_id")
 
   data          DateTime
+  /// Total pago = serviço + comissão de venda + extra, editável na tela
   valor         Decimal  @db.Decimal(14, 2)
   /// O que foi feito — vira a observação da conta a pagar no IXC
   descricao     String
   /// fn_apagar.id_conta deste pagamento (padrão: o da configuração)
   contaContabil Int      @map("conta_contabil")
+
+  // --- Comissão de venda e o serviço por fora (ver `Diaria`) ---
+  vendas         Int      @default(0)
+  valorPorVenda  Decimal? @map("valor_por_venda") @db.Decimal(14, 2)
+  comissaoVendas Decimal  @default(0) @map("comissao_vendas") @db.Decimal(14, 2)
+  valorExtra     Decimal  @default(0) @map("valor_extra") @db.Decimal(14, 2)
+  descricaoExtra String?  @map("descricao_extra")
 
   forma FormaPagamento
 
@@ -527,6 +539,9 @@ model Diarista {
 
   /// Quanto essa pessoa cobra por dia. Só sugere o valor no pagamento.
   valorDiaria    Decimal?       @map("valor_diaria") @db.Decimal(14, 2)
+  /// Quanto ganha por venda: diarista também é vendedor externo. Igual ao
+  /// campo do funcionário, só sugere o valor no pagamento.
+  valorPorVenda  Decimal?       @map("valor_por_venda") @db.Decimal(14, 2)
   /// Forma habitual de pagar essa pessoa (dá para mudar em cada diária)
   formaPagamento FormaPagamento @default(IXC) @map("forma_pagamento")
 
@@ -551,7 +566,9 @@ model Diarista {
   @@map("diaristas")
 }
 
-/// Uma diária paga (ou a pagar): quantos dias, por quanto, e por onde saiu.
+/// Um pagamento ao diarista: os dias trabalhados, a comissão das vendas que ele
+/// fechou e o serviço por fora — tudo somado num pagamento só, que é como a
+/// pessoa recebe. Cada parte fica gravada para o gasto poder ser aberto depois.
 model Diaria {
   id String @id @default(uuid())
 
@@ -562,9 +579,21 @@ model Diaria {
   data        DateTime
   quantidade  Decimal  @default(1) @db.Decimal(8, 2)
   valorDiaria Decimal  @map("valor_diaria") @db.Decimal(14, 2)
-  /// Total pago = quantidade × valor da diária, editável na tela
+  /// Total pago = diárias + comissão de venda + extra, editável na tela
   valor       Decimal  @db.Decimal(14, 2)
   descricao   String
+
+  // --- Vendas: o diarista também é vendedor externo ---
+  /// Quantas vendas entraram neste pagamento
+  vendas         Int      @default(0)
+  /// Valor de cada venda aqui; vazio = o do cadastro do diarista
+  valorPorVenda  Decimal? @map("valor_por_venda") @db.Decimal(14, 2)
+  /// vendas × valorPorVenda, congelado: o gasto com vendas de um mês fechado
+  /// não pode mudar porque alguém corrigiu o cadastro depois.
+  comissaoVendas Decimal  @default(0) @map("comissao_vendas") @db.Decimal(14, 2)
+  /// Serviço feito por fora que rendeu um troco a mais no mesmo pagamento
+  valorExtra     Decimal  @default(0) @map("valor_extra") @db.Decimal(14, 2)
+  descricaoExtra String?  @map("descricao_extra")
 
   forma FormaPagamento
 

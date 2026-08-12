@@ -6,6 +6,7 @@ import {
   CabecalhoPagina,
   CampoDinheiro,
   Carregando,
+  Janela,
   Pagina,
   Selo,
   Vazio,
@@ -32,6 +33,7 @@ const CADASTRO_VAZIO = {
   chavePix: '',
   tipoChavePix: '',
   valorDiaria: '',
+  valorPorVenda: '',
   formaPagamento: 'IXC' as FormaPagamento,
   observacoes: '',
 };
@@ -45,6 +47,27 @@ function hojeISO(): string {
 /** A diária em mãos ainda não virou lançamento no caixa do IXC. */
 function pendenteNoCaixa(d: Diaria): boolean {
   return d.forma === 'EM_MAOS' && !d.idLancamentoIxc && !d.lancadoManual;
+}
+
+/**
+ * De onde veio o valor daquele pagamento. Sai um pagamento só, então sem esta
+ * linha não há como saber se os R$ 510 foram dia trabalhado, venda ou o extra.
+ */
+function partesDaDiaria(d: Diaria): string[] {
+  const partes: string[] = [];
+  const diarias = Number(d.quantidade) * Number(d.valorDiaria);
+  if (diarias > 0) {
+    partes.push(`${Number(d.quantidade)} × ${formatBRL(d.valorDiaria)}`);
+  }
+  if (Number(d.comissaoVendas) > 0) {
+    partes.push(`${d.vendas} venda(s) = ${formatBRL(d.comissaoVendas)}`);
+  }
+  if (Number(d.valorExtra) > 0) {
+    partes.push(
+      `extra ${formatBRL(d.valorExtra)}${d.descricaoExtra ? ` (${d.descricaoExtra})` : ''}`,
+    );
+  }
+  return partes;
 }
 
 export function Diaristas() {
@@ -169,6 +192,7 @@ export function Diaristas() {
         chavePix: form.chavePix || undefined,
         tipoChavePix: form.tipoChavePix,
         valorDiaria: form.valorDiaria || null,
+        valorPorVenda: form.valorPorVenda || null,
         formaPagamento: form.formaPagamento,
         observacoes: form.observacoes || undefined,
       };
@@ -262,6 +286,7 @@ export function Diaristas() {
       chavePix: d.chavePix ?? '',
       tipoChavePix: d.tipoChavePix ?? '',
       valorDiaria: d.valorDiaria ?? '',
+      valorPorVenda: d.valorPorVenda ?? '',
       formaPagamento: d.formaPagamento,
       observacoes: d.observacoes ?? '',
     });
@@ -360,6 +385,13 @@ export function Diaristas() {
                 valor={form.valorDiaria}
                 onChange={(v) => setForm({ ...form, valorDiaria: v })}
                 placeholder="Sugere o valor na hora de pagar"
+              />
+            </Campo>
+            <Campo label="Valor por venda (R$)">
+              <CampoDinheiro
+                valor={form.valorPorVenda}
+                onChange={(v) => setForm({ ...form, valorPorVenda: v })}
+                placeholder="Se ele também vende"
               />
             </Campo>
             <Campo label="Como costuma receber">
@@ -552,6 +584,11 @@ export function Diaristas() {
                     ) : (
                       '—'
                     )}
+                    {d.valorPorVenda && Number(d.valorPorVenda) > 0 && (
+                      <div className="num text-xs text-tinta-400">
+                        {formatBRL(d.valorPorVenda)}/venda
+                      </div>
+                    )}
                   </td>
                   <td className="td text-right">
                     <span className="valor">{formatBRL(resumo.totalPago)}</span>
@@ -577,7 +614,7 @@ export function Diaristas() {
                         disabled={!d.ativo}
                         className="btn btn-p bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40"
                       >
-                        Pagar diária
+                        Pagar
                       </button>
                       <button
                         onClick={() => abrirEdicao(d)}
@@ -653,7 +690,7 @@ export function Diaristas() {
                       <td className="td">
                         <div className="text-tinta-800">{d.descricao}</div>
                         <div className="mt-0.5 num text-xs text-tinta-400">
-                          {Number(d.quantidade)} × {formatBRL(d.valorDiaria)}
+                          {partesDaDiaria(d).join(' · ')}
                         </div>
                         {d.erroIxc && (
                           <div className="mt-1 max-w-lg text-xs text-rose-600">
@@ -967,8 +1004,12 @@ function resumoDoPagamento(d: Diaria): string {
 }
 
 /**
- * Lançar uma diária. Quantidade × valor do dia dá o total, mas o total é
- * editável: é comum acertar um valor redondo na hora.
+ * Pagar um diarista, numa janela por cima da tela.
+ *
+ * Três partes que somam num pagamento só: os dias trabalhados, a comissão das
+ * vendas que ele fechou (diarista também é vendedor externo) e um extra quando
+ * fez algo por fora no mesmo acerto. O total é sempre a soma — nada de um campo
+ * que sobrescreve os outros em silêncio.
  */
 function FormularioDiaria({
   diarista,
@@ -984,22 +1025,27 @@ function FormularioDiaria({
   const [data, setData] = useState(hojeISO());
   const [quantidade, setQuantidade] = useState('1');
   const [valorDiaria, setValorDiaria] = useState(diarista.valorDiaria ?? '');
-  const [total, setTotal] = useState('');
-  const [descricao, setDescricao] = useState('');
-  const [forma, setForma] = useState<FormaPagamento>(
-    diarista.formaPagamento,
+  const [vendas, setVendas] = useState('');
+  const [valorPorVenda, setValorPorVenda] = useState(
+    diarista.valorPorVenda ?? '',
   );
+  const [valorExtra, setValorExtra] = useState('');
+  const [descricaoExtra, setDescricaoExtra] = useState('');
+  const [descricao, setDescricao] = useState('');
+  const [forma, setForma] = useState<FormaPagamento>(diarista.formaPagamento);
   const [chavePix, setChavePix] = useState(diarista.chavePix ?? '');
   const [tipoChavePix, setTipoChavePix] = useState(diarista.tipoChavePix ?? '');
 
-  const calculado = (Number(quantidade) || 0) * (Number(valorDiaria) || 0);
-  const totalEfetivo = Number(total) > 0 ? Number(total) : calculado;
-  const valido = totalEfetivo >= 0.01 && descricao.trim().length >= 3;
+  const diarias = (Number(quantidade) || 0) * (Number(valorDiaria) || 0);
+  const comissao = (Number(vendas) || 0) * (Number(valorPorVenda) || 0);
+  const extra = Number(valorExtra) || 0;
+  const total = diarias + comissao + extra;
+  const valido = total >= 0.01 && descricao.trim().length >= 3;
 
   return (
-    <Bloco titulo={`Pagar diária — ${diarista.nome}`} className="surgir mt-6">
+    <Janela titulo={`Pagar — ${diarista.nome}`} onFechar={onCancelar}>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Campo label="Dia trabalhado">
+        <Campo label="Data do acerto">
           <input
             type="date"
             value={data}
@@ -1007,27 +1053,7 @@ function FormularioDiaria({
             className="campo"
           />
         </Campo>
-        <Campo label="Quantas diárias">
-          <input
-            type="number"
-            step="0.5"
-            min="0.5"
-            value={quantidade}
-            onChange={(e) => setQuantidade(e.target.value)}
-            className="campo"
-          />
-        </Campo>
-        <Campo label="Valor do dia (R$)">
-          <CampoDinheiro valor={valorDiaria} onChange={setValorDiaria} />
-        </Campo>
-        <Campo label="Total (R$) — vazio usa a conta acima">
-          <CampoDinheiro
-            valor={total}
-            onChange={setTotal}
-            placeholder={calculado > 0 ? formatBRL(calculado) : ''}
-          />
-        </Campo>
-        <Campo label="Como vai pagar">
+        <Campo label="Como vai pagar" span2>
           <select
             value={forma}
             onChange={(e) => setForma(e.target.value as FormaPagamento)}
@@ -1037,12 +1063,77 @@ function FormularioDiaria({
             <option value="EM_MAOS">Em mãos (desconta do caixa)</option>
           </select>
         </Campo>
-        <Campo label="Serviço feito — vai para o IXC" span2>
+      </div>
+
+      <Parte titulo="Dias trabalhados" valor={diarias}>
+        <Campo label="Quantas diárias">
+          <input
+            type="number"
+            step="0.5"
+            min="0"
+            value={quantidade}
+            onChange={(e) => setQuantidade(e.target.value)}
+            className="campo"
+          />
+        </Campo>
+        <Campo label="Valor do dia (R$)">
+          <CampoDinheiro valor={valorDiaria} onChange={setValorDiaria} />
+        </Campo>
+      </Parte>
+
+      <Parte
+        titulo="Vendas"
+        valor={comissao}
+        nota="Diarista também é vendedor externo. Deixe em zero quando o acerto não tiver venda."
+      >
+        <Campo label="Quantas vendas">
+          <input
+            type="number"
+            min="0"
+            value={vendas}
+            onChange={(e) => setVendas(e.target.value)}
+            placeholder="0"
+            className="campo"
+          />
+        </Campo>
+        <Campo label="Valor de cada venda (R$)">
+          <CampoDinheiro
+            valor={valorPorVenda}
+            onChange={setValorPorVenda}
+            placeholder={
+              diarista.valorPorVenda
+                ? `combinado ${formatBRL(diarista.valorPorVenda)}`
+                : 'ex.: 50,00'
+            }
+          />
+        </Campo>
+      </Parte>
+
+      <Parte
+        titulo="Serviço por fora"
+        valor={extra}
+        nota="Aquele trabalho a mais que rendeu um troco no mesmo acerto."
+      >
+        <Campo label="Valor extra (R$)">
+          <CampoDinheiro valor={valorExtra} onChange={setValorExtra} />
+        </Campo>
+        <Campo label="O que foi">
+          <input
+            value={descricaoExtra}
+            onChange={(e) => setDescricaoExtra(e.target.value)}
+            className="campo"
+            placeholder="Ex.: instalação"
+          />
+        </Campo>
+      </Parte>
+
+      <div className="mt-5 grid grid-cols-1 gap-4 border-t border-tinta-100 pt-5 sm:grid-cols-2 lg:grid-cols-3">
+        <Campo label="Do que se trata — vai para o IXC" span2>
           <input
             value={descricao}
             onChange={(e) => setDescricao(e.target.value)}
             className="campo"
-            placeholder="Ex.: pintura do galpão"
+            placeholder="Ex.: acerto da semana"
           />
         </Campo>
         {forma === 'IXC' && (
@@ -1075,8 +1166,8 @@ function FormularioDiaria({
 
       <p className="mt-4 text-xs leading-relaxed text-tinta-500">
         {forma === 'IXC'
-          ? 'Vai virar conta a pagar no IXC: o diarista é cadastrado como fornecedor, e o pagamento passa pela auditoria como o da folha. A chave e o tipo ficam gravados no cadastro para o próximo pagamento.'
-          : 'O dinheiro já saiu da sua mão: a diária é registrada como paga e a saída é lançada no caixa configurado em Configurações.'}
+          ? 'Vai virar uma conta a pagar só no IXC: o diarista é cadastrado como fornecedor, e o pagamento passa pela auditoria como o da folha. A chave e o tipo ficam gravados no cadastro para o próximo pagamento.'
+          : 'O dinheiro já saiu da sua mão: o pagamento é registrado como pago e a saída é lançada no caixa configurado em Configurações.'}
       </p>
 
       <div className="mt-5 flex flex-wrap items-center gap-4 border-t border-tinta-100 pt-4">
@@ -1084,9 +1175,12 @@ function FormularioDiaria({
           onClick={() =>
             onConfirmar({
               data,
-              quantidade: Number(quantidade) || 1,
+              quantidade: Number(quantidade) || 0,
               valorDiaria: valorDiaria || undefined,
-              valor: total || undefined,
+              vendas: Number(vendas) || 0,
+              valorPorVenda: valorPorVenda || undefined,
+              valorExtra: valorExtra || undefined,
+              descricaoExtra: descricaoExtra || undefined,
               descricao,
               forma,
               ...(forma === 'IXC' ? { chavePix, tipoChavePix } : {}),
@@ -1100,16 +1194,47 @@ function FormularioDiaria({
         <button onClick={onCancelar} className="btn btn-neutro">
           Cancelar
         </button>
-        {totalEfetivo > 0 && (
-          <span className="text-sm text-tinta-500">
-            Vai sair{' '}
-            <strong className="valor text-[15px]">
-              {formatBRL(totalEfetivo)}
-            </strong>
-          </span>
-        )}
+        <span className="ml-auto text-sm text-tinta-500">
+          Vai sair{' '}
+          <strong className="valor text-lg text-tinta-900">
+            {formatBRL(total)}
+          </strong>
+        </span>
       </div>
-    </Bloco>
+    </Janela>
+  );
+}
+
+/**
+ * Uma parte do pagamento, com o que ela soma à direita. Ver as três somas
+ * separadas é o que permite conferir o total sem refazer a conta de cabeça.
+ */
+function Parte({
+  titulo,
+  valor,
+  nota,
+  children,
+}: {
+  titulo: string;
+  valor: number;
+  nota?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="mt-5 rounded-xl border border-tinta-100 p-4">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <h3 className="text-[11px] font-semibold uppercase tracking-[0.1em] text-tinta-500">
+          {titulo}
+        </h3>
+        <span
+          className={`valor text-sm ${valor > 0 ? 'text-tinta-800' : 'text-tinta-300'}`}
+        >
+          {formatBRL(valor)}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">{children}</div>
+      {nota && <p className="mt-3 text-xs text-tinta-400">{nota}</p>}
+    </section>
   );
 }
 

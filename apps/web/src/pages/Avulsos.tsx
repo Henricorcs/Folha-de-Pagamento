@@ -6,6 +6,7 @@ import {
   CabecalhoPagina,
   CampoDinheiro,
   Carregando,
+  Janela,
   Pagina,
   Selo,
   Vazio,
@@ -32,6 +33,7 @@ const CADASTRO_VAZIO = {
   email: '',
   chavePix: '',
   tipoChavePix: '',
+  valorPorVenda: '',
   formaPagamento: 'IXC' as FormaPagamento,
   observacoes: '',
 };
@@ -51,6 +53,29 @@ function hojeISO(): string {
 /** O pagamento em mãos ainda não virou lançamento no caixa do IXC. */
 function pendenteNoCaixa(p: PagamentoAvulso): boolean {
   return p.forma === 'EM_MAOS' && !p.idLancamentoIxc && !p.lancadoManual;
+}
+
+/**
+ * De onde veio o valor daquele pagamento. Sai um pagamento só, então sem esta
+ * linha não há como saber se os R$ 630 foram serviço, venda ou o extra. O
+ * serviço é o que sobra: só o total é gravado numa coluna.
+ */
+function partesDoPagamento(p: PagamentoAvulso): string[] {
+  const comissao = Number(p.comissaoVendas);
+  const extra = Number(p.valorExtra);
+  const servico = Number(p.valor) - comissao - extra;
+
+  const partes: string[] = [];
+  if (servico > 0) partes.push(`serviço ${formatBRL(servico)}`);
+  if (comissao > 0) {
+    partes.push(`${p.vendas} venda(s) = ${formatBRL(comissao)}`);
+  }
+  if (extra > 0) {
+    partes.push(
+      `extra ${formatBRL(extra)}${p.descricaoExtra ? ` (${p.descricaoExtra})` : ''}`,
+    );
+  }
+  return partes;
 }
 
 export function Avulsos() {
@@ -151,6 +176,7 @@ export function Avulsos() {
         email: form.email || undefined,
         chavePix: form.chavePix || undefined,
         tipoChavePix: form.tipoChavePix,
+        valorPorVenda: form.valorPorVenda || null,
         formaPagamento: form.formaPagamento,
         observacoes: form.observacoes || undefined,
         ...(fornecedor.tipo === 'REUSAR'
@@ -299,6 +325,7 @@ export function Avulsos() {
       email: b.email ?? '',
       chavePix: b.chavePix ?? '',
       tipoChavePix: b.tipoChavePix ?? '',
+      valorPorVenda: b.valorPorVenda ?? '',
       formaPagamento: b.formaPagamento,
       observacoes: b.observacoes ?? '',
     });
@@ -447,6 +474,13 @@ export function Avulsos() {
                   </option>
                 ))}
               </select>
+            </Campo>
+            <Campo label="Valor por venda (R$)">
+              <CampoDinheiro
+                valor={form.valorPorVenda}
+                onChange={(v) => setForm({ ...form, valorPorVenda: v })}
+                placeholder="Se essa pessoa também vende"
+              />
             </Campo>
             <Campo label="Observações" span2>
               <input
@@ -700,7 +734,8 @@ export function Avulsos() {
                       <td className="td">
                         <div className="text-tinta-800">{p.descricao}</div>
                         <div className="mt-0.5 num text-xs text-tinta-400">
-                          conta contábil {p.contaContabil}
+                          {[...partesDoPagamento(p), `conta ${p.contaContabil}`]
+                            .join(' · ')}
                         </div>
                         {p.erroIxc && (
                           <div className="mt-1 max-w-lg text-xs text-rose-600">
@@ -895,6 +930,13 @@ function resumoDoPagamento(p: PagamentoAvulso): string {
   return 'Pagamento registrado.';
 }
 
+/**
+ * Pagar um beneficiário avulso, numa janela por cima da tela.
+ *
+ * Três partes que somam num pagamento só: o serviço contratado, a comissão das
+ * vendas que a pessoa fechou (cliente da empresa também vende) e um extra
+ * quando fez algo por fora no mesmo acerto.
+ */
 function FormularioPagamento({
   beneficiario,
   ocupado,
@@ -907,7 +949,13 @@ function FormularioPagamento({
   onConfirmar: (body: Record<string, unknown>) => void;
 }) {
   const [data, setData] = useState(hojeISO());
-  const [valor, setValor] = useState('');
+  const [valorServico, setValorServico] = useState('');
+  const [vendas, setVendas] = useState('');
+  const [valorPorVenda, setValorPorVenda] = useState(
+    beneficiario.valorPorVenda ?? '',
+  );
+  const [valorExtra, setValorExtra] = useState('');
+  const [descricaoExtra, setDescricaoExtra] = useState('');
   const [descricao, setDescricao] = useState('');
   const [forma, setForma] = useState<FormaPagamento>(beneficiario.formaPagamento);
   const [chavePix, setChavePix] = useState(beneficiario.chavePix ?? '');
@@ -916,12 +964,15 @@ function FormularioPagamento({
   );
   const [contaContabil, setContaContabil] = useState('');
 
-  const total = Number(valor) || 0;
+  const servico = Number(valorServico) || 0;
+  const comissao = (Number(vendas) || 0) * (Number(valorPorVenda) || 0);
+  const extra = Number(valorExtra) || 0;
+  const total = servico + comissao + extra;
   const semPix = forma === 'IXC' && !chavePix.trim();
   const valido = total >= 0.01 && descricao.trim().length >= 3 && !semPix;
 
   return (
-    <Bloco titulo={`Pagar — ${beneficiario.nome}`} className="surgir mt-6">
+    <Janela titulo={`Pagar — ${beneficiario.nome}`} onFechar={onCancelar}>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Campo label="Data">
           <input
@@ -930,9 +981,6 @@ function FormularioPagamento({
             onChange={(e) => setData(e.target.value)}
             className="campo"
           />
-        </Campo>
-        <Campo label="Valor (R$)">
-          <CampoDinheiro valor={valor} onChange={setValor} />
         </Campo>
         <Campo label="Como vai pagar">
           <select
@@ -944,14 +992,6 @@ function FormularioPagamento({
             <option value="EM_MAOS">Em mãos (desconta do caixa)</option>
           </select>
         </Campo>
-        <Campo label="Serviço feito — vai para o IXC" span2>
-          <input
-            value={descricao}
-            onChange={(e) => setDescricao(e.target.value)}
-            className="campo"
-            placeholder="Ex.: troca do padrão de energia"
-          />
-        </Campo>
         <Campo label="Conta contábil — vazio usa a padrão">
           <input
             type="number"
@@ -959,6 +999,69 @@ function FormularioPagamento({
             onChange={(e) => setContaContabil(e.target.value)}
             className="campo"
             placeholder="324"
+          />
+        </Campo>
+      </div>
+
+      <Parte titulo="Serviço" valor={servico}>
+        <Campo label="Valor do serviço (R$)" span2>
+          <CampoDinheiro valor={valorServico} onChange={setValorServico} />
+        </Campo>
+      </Parte>
+
+      <Parte
+        titulo="Vendas"
+        valor={comissao}
+        nota="Cliente da empresa também vende e recebe comissão. Deixe em zero quando o acerto não tiver venda."
+      >
+        <Campo label="Quantas vendas">
+          <input
+            type="number"
+            min="0"
+            value={vendas}
+            onChange={(e) => setVendas(e.target.value)}
+            placeholder="0"
+            className="campo"
+          />
+        </Campo>
+        <Campo label="Valor de cada venda (R$)">
+          <CampoDinheiro
+            valor={valorPorVenda}
+            onChange={setValorPorVenda}
+            placeholder={
+              beneficiario.valorPorVenda
+                ? `combinado ${formatBRL(beneficiario.valorPorVenda)}`
+                : 'ex.: 50,00'
+            }
+          />
+        </Campo>
+      </Parte>
+
+      <Parte
+        titulo="Serviço por fora"
+        valor={extra}
+        nota="Aquele trabalho a mais que rendeu um troco no mesmo acerto."
+      >
+        <Campo label="Valor extra (R$)">
+          <CampoDinheiro valor={valorExtra} onChange={setValorExtra} />
+        </Campo>
+        <Campo label="O que foi">
+          <input
+            value={descricaoExtra}
+            onChange={(e) => setDescricaoExtra(e.target.value)}
+            className="campo"
+            placeholder="Ex.: instalação"
+          />
+        </Campo>
+      </Parte>
+
+      <div className="mt-5 grid grid-cols-1 gap-4 border-t border-tinta-100 pt-5 sm:grid-cols-2 lg:grid-cols-3">
+        <Campo label="Do que se trata — vai para o IXC" span2>
+          <input
+            value={descricao}
+            onChange={(e) => setDescricao(e.target.value)}
+            className="campo"
+            placeholder="Ex.: troca do padrão de energia"
           />
         </Campo>
         {forma === 'IXC' && (
@@ -991,7 +1094,7 @@ function FormularioPagamento({
 
       <p className="mt-4 text-xs leading-relaxed text-tinta-500">
         {forma === 'IXC'
-          ? 'Vai virar conta a pagar no IXC: a pessoa é cadastrada como fornecedor e o pagamento passa pela auditoria, como o da folha. A chave e o tipo ficam gravados no cadastro para a próxima vez.'
+          ? 'Vai virar uma conta a pagar só no IXC: a pessoa é cadastrada como fornecedor e o pagamento passa pela auditoria, como o da folha. A chave e o tipo ficam gravados no cadastro para a próxima vez.'
           : 'O dinheiro já saiu da sua mão: o pagamento é registrado e a saída é lançada no caixa configurado em Configurações.'}
       </p>
 
@@ -1000,7 +1103,11 @@ function FormularioPagamento({
           onClick={() =>
             onConfirmar({
               data,
-              valor: Number(valor),
+              valorServico: valorServico || undefined,
+              vendas: Number(vendas) || 0,
+              valorPorVenda: valorPorVenda || undefined,
+              valorExtra: valorExtra || undefined,
+              descricaoExtra: descricaoExtra || undefined,
               descricao,
               forma,
               contaContabil: contaContabil || undefined,
@@ -1015,19 +1122,53 @@ function FormularioPagamento({
         <button onClick={onCancelar} className="btn btn-neutro">
           Cancelar
         </button>
-        {semPix && (
+        {semPix ? (
           <span className="text-sm text-rose-600">
             Sem chave PIX o banco não paga — informe a chave ou pague em mãos.
           </span>
-        )}
-        {total > 0 && !semPix && (
-          <span className="text-sm text-tinta-500">
+        ) : (
+          <span className="ml-auto text-sm text-tinta-500">
             Vai sair{' '}
-            <strong className="valor text-[15px]">{formatBRL(total)}</strong>
+            <strong className="valor text-lg text-tinta-900">
+              {formatBRL(total)}
+            </strong>
           </span>
         )}
       </div>
-    </Bloco>
+    </Janela>
+  );
+}
+
+/**
+ * Uma parte do pagamento, com o que ela soma à direita. Ver as três somas
+ * separadas é o que permite conferir o total sem refazer a conta de cabeça.
+ */
+function Parte({
+  titulo,
+  valor,
+  nota,
+  children,
+}: {
+  titulo: string;
+  valor: number;
+  nota?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="mt-5 rounded-xl border border-tinta-100 p-4">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <h3 className="text-[11px] font-semibold uppercase tracking-[0.1em] text-tinta-500">
+          {titulo}
+        </h3>
+        <span
+          className={`valor text-sm ${valor > 0 ? 'text-tinta-800' : 'text-tinta-300'}`}
+        >
+          {formatBRL(valor)}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">{children}</div>
+      {nota && <p className="mt-3 text-xs text-tinta-400">{nota}</p>}
+    </section>
   );
 }
 

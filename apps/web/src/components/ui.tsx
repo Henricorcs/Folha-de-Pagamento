@@ -137,6 +137,63 @@ export function Bloco({
   );
 }
 
+/**
+ * Janela por cima da tela, para o que precisa de resposta agora — pagar alguém,
+ * por exemplo. Um bloco no rodapé da página resolveria o mesmo, mas nasce fora
+ * da área visível: quem clica em "Pagar" no meio de uma tabela longa não vê
+ * nada acontecer e conclui que o botão está quebrado.
+ */
+export function Janela({
+  titulo,
+  onFechar,
+  children,
+}: {
+  titulo: string;
+  onFechar: () => void;
+  children: ReactNode;
+}) {
+  useEffect(() => {
+    const aoTeclar = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onFechar();
+    };
+    window.addEventListener('keydown', aoTeclar);
+    // Rolar a página atrás da janela tira do lugar o que se está lendo nela.
+    const overflowAnterior = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', aoTeclar);
+      document.body.style.overflow = overflowAnterior;
+    };
+  }, [onFechar]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex justify-center overflow-y-auto rolagem-fina bg-tinta-900/40 p-4 backdrop-blur-sm sm:p-6"
+      onClick={onFechar}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={titulo}
+        onClick={(e) => e.stopPropagation()}
+        className="surgir my-auto h-fit w-full max-w-3xl rounded-2xl bg-white shadow-2xl"
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-tinta-100 px-5 py-4 sm:px-6">
+          <h2 className="titulo-bloco">{titulo}</h2>
+          <button
+            onClick={onFechar}
+            aria-label="Fechar"
+            className="-mr-1 -mt-1 rounded-lg px-2 py-1 text-lg leading-none text-tinta-400 transition hover:bg-tinta-100 hover:text-tinta-700"
+          >
+            ×
+          </button>
+        </div>
+        <div className="px-5 py-5 sm:px-6">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 /** Indicador de topo: rótulo pequeno, número grande, contexto embaixo. */
 export function Indicador({
   rotulo,

@@ -326,6 +326,8 @@ export interface BeneficiarioAvulso {
   email: string | null;
   chavePix: string | null;
   tipoChavePix: string | null;
+  /** Quanto ganha por venda — cliente da empresa também vende e comissiona */
+  valorPorVenda: string | null;
   formaPagamento: FormaPagamento;
   observacoes: string | null;
   ativo: boolean;
@@ -353,9 +355,15 @@ export interface PagamentoAvulso {
   id: string;
   beneficiarioId: string;
   data: string;
+  /** Total: serviço + comissão de venda + extra */
   valor: string;
   descricao: string;
   contaContabil: number;
+  vendas: number;
+  valorPorVenda: string | null;
+  comissaoVendas: string;
+  valorExtra: string;
+  descricaoExtra: string | null;
   forma: FormaPagamento;
   contaPagarId: string | null;
   caixaIxc: number | null;
@@ -427,6 +435,8 @@ export interface Diarista {
   chavePix: string | null;
   tipoChavePix: string | null;
   valorDiaria: string | null;
+  /** Quanto ganha por venda — diarista também é vendedor externo */
+  valorPorVenda: string | null;
   formaPagamento: FormaPagamento;
   observacoes: string | null;
   ativo: boolean;
@@ -465,8 +475,14 @@ export interface Diaria {
   data: string;
   quantidade: string;
   valorDiaria: string;
+  /** Total: diárias + comissão de venda + extra */
   valor: string;
   descricao: string;
+  vendas: number;
+  valorPorVenda: string | null;
+  comissaoVendas: string;
+  valorExtra: string;
+  descricaoExtra: string | null;
   forma: FormaPagamento;
   contaPagarId: string | null;
   /** Caixa do IXC de onde o dinheiro saiu (pagamento em mãos) */
@@ -521,6 +537,37 @@ export interface Resumo {
   folhaBaseMensal: string;
 }
 
+/**
+ * Gasto mês a mês com quem não é da folha — diarista ou avulso. Os dois entram
+ * pela data em que o dinheiro saiu, porque a conta a pagar deles nasce sem
+ * competência (e a paga em mãos nem vira conta).
+ */
+export interface SerieDeGasto {
+  serie: {
+    competencia: string;
+    /** Gasto do mês: o que saiu mais o que ainda está a caminho */
+    valor: number;
+    /** Já saiu: em mãos, ou conta a pagar que o banco confirmou */
+    pago: number;
+    /** Lançado no IXC, esperando aprovação ou o banco */
+    aCaminho: number;
+    /**
+     * Não vai sair sozinho: conta reprovada, cancelada, recusada pelo IXC ou
+     * apagada de lá. Fica fora do gasto, mas visível para alguém destravar.
+     */
+    travado: number;
+    travadas: number;
+    /** Pagamentos e pessoas por trás de `valor` (os travados não contam) */
+    quantidade: number;
+    pessoas: number;
+  }[];
+  total: number;
+  totalPago: number;
+  totalACaminho: number;
+  totalTravado: number;
+  quantidade: number;
+}
+
 /** Números da tela inicial. */
 export interface Dashboard {
   competencia: string;
@@ -564,30 +611,26 @@ export interface Dashboard {
     diaria: number;
     desconto: number;
   }[];
-  diaristas: {
+  diaristas: SerieDeGasto;
+  /**
+   * Pagamentos avulsos, contados pela data em que saíram: a conta a pagar deles
+   * nasce sem competência, então agregar por competência perdia todos.
+   */
+  avulsos: SerieDeGasto;
+  /** Comissão de venda paga no mês, some quem vende: fora da folha e dentro */
+  vendas: {
     serie: {
       competencia: string;
-      /** Gasto do mês: o que saiu mais o que ainda está a caminho */
-      valor: number;
-      /** Já saiu: em mãos, ou conta a pagar que o banco confirmou */
-      pago: number;
-      /** Lançado no IXC, esperando aprovação ou o banco */
-      aCaminho: number;
-      /**
-       * Não vai sair sozinha: conta reprovada, cancelada, recusada pelo IXC ou
-       * apagada de lá. Fica fora do gasto, mas visível para alguém destravar.
-       */
-      travado: number;
-      travadas: number;
-      /** Diárias e pessoas por trás de `valor` (as travadas não contam) */
-      quantidade: number;
-      pessoas: number;
+      /** Comissão que saiu dentro do salário dos funcionários */
+      funcionarios: number;
+      /** Comissão paga a diaristas e beneficiários avulsos */
+      foraDaFolha: number;
+      total: number;
+      /** Quantas vendas o total está resumindo */
+      vendas: number;
     }[];
     total: number;
-    totalPago: number;
-    totalACaminho: number;
-    totalTravado: number;
-    quantidade: number;
+    vendas: number;
   };
   impostos: ResumoImpostos;
   /**

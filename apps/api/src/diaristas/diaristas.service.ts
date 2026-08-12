@@ -14,13 +14,15 @@ import {
 } from '@prisma/client';
 import { ConfigFinanceiraService } from '../financeiro/config-financeira.service';
 import { ContasPagarService } from '../financeiro/contas-pagar.service';
+import {
+  calcularComissaoVendas,
+  calcularTotalPagamento,
+  montarHistoricoCaixa,
+  montarObservacaoPagamento,
+  type PartesDoPagamento,
+} from '../financeiro/pagamento.calc';
 import { CaixaService } from '../ixc/caixa.service';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  calcularTotalDiaria,
-  montarHistoricoCaixa,
-  montarObservacaoDiaria,
-} from './diarias.calc';
 import { PagarDiariaDto } from './dto/diaria.dto';
 import { CriarDiaristaDto, UpdateDiaristaDto } from './dto/diarista.dto';
 
@@ -189,6 +191,14 @@ export class DiaristasService {
                 ? null
                 : new Prisma.Decimal(dto.valorDiaria),
           }),
+      ...(dto.valorPorVenda === undefined
+        ? {}
+        : {
+            valorPorVenda:
+              dto.valorPorVenda == null || dto.valorPorVenda <= 0
+                ? null
+                : new Prisma.Decimal(dto.valorPorVenda),
+          }),
       ...(dto.formaPagamento === undefined
         ? {}
         : { formaPagamento: dto.formaPagamento }),
@@ -268,9 +278,11 @@ export class DiaristasService {
   }
 
   /**
-   * Paga uma diária. Pelo IXC vira conta a pagar como qualquer beneficiário
-   * (fornecedor, auditoria, banco). Em mãos, o dinheiro já saiu da gaveta: a
-   * diária é registrada como paga e o app lança a saída no caixa configurado.
+   * Paga um diarista: os dias trabalhados, a comissão das vendas que ele fechou
+   * e o serviço por fora, somados num pagamento só. Pelo IXC vira conta a pagar
+   * como qualquer beneficiário (fornecedor, auditoria, banco). Em mãos, o
+   * dinheiro já saiu da gaveta: o pagamento nasce pago e o app lança a saída no
+   * caixa configurado.
    */
   async pagar(
     diaristaId: string,
@@ -283,24 +295,36 @@ export class DiaristasService {
     );
     const forma = dto.forma ?? diarista.formaPagamento;
 
-    const quantidade = dto.quantidade ?? 1;
-    const valorDiaria = dto.valorDiaria ?? Number(diarista.valorDiaria ?? 0);
-    if (valorDiaria <= 0 && !dto.valor) {
+    // O que não veio na tela cai no combinado do cadastro — é para isso que
+    // valor da diária e valor por venda existem lá.
+    const partes: PartesDoPagamento = {
+      quantidade: dto.quantidade ?? 1,
+      valorDiaria: dto.valorDiaria ?? Number(diarista.valorDiaria ?? 0),
+      vendas: dto.vendas ?? 0,
+      valorPorVenda: dto.valorPorVenda ?? Number(diarista.valorPorVenda ?? 0),
+      valorExtra: dto.valorExtra ?? 0,
+      descricaoExtra: dto.descricaoExtra?.trim() || null,
+    };
+    const valor = calcularTotalPagamento(partes);
+    if (valor < 0.01) {
       throw new BadRequestException(
-        'Informe o valor da diária (ou um valor total) — o cadastro não tem valor combinado.',
+        'O pagamento ficou em zero. Informe os dias e o valor do dia, ' +
+          'as vendas e quanto cada uma paga, ou um valor extra.',
       );
     }
-    const valor = calcularTotalDiaria({ quantidade, valorDiaria, valor: dto.valor });
-    if (valor < 0.01) {
-      throw new BadRequestException('O valor da diária tem de ser maior que zero');
-    }
 
-    const data = dto.data ? new Date(dto.data) : hojeUtc();
     const base = {
       diaristaId,
-      data,
-      quantidade: new Prisma.Decimal(quantidade),
-      valorDiaria: new Prisma.Decimal(valorDiaria || valor),
+      data: dto.data ? new Date(dto.data) : hojeUtc(),
+      quantidade: new Prisma.Decimal(partes.quantidade ?? 0),
+      valorDiaria: new Prisma.Decimal(partes.valorDiaria ?? 0),
+      vendas: partes.vendas ?? 0,
+      valorPorVenda: partes.valorPorVenda
+        ? new Prisma.Decimal(partes.valorPorVenda)
+        : null,
+      comissaoVendas: new Prisma.Decimal(calcularComissaoVendas(partes)),
+      valorExtra: new Prisma.Decimal(partes.valorExtra ?? 0),
+      descricaoExtra: partes.descricaoExtra,
       valor: new Prisma.Decimal(valor),
       descricao: dto.descricao.trim(),
       forma,
@@ -308,7 +332,7 @@ export class DiaristasService {
     };
 
     return forma === FormaPagamento.IXC
-      ? this.pagarPeloIxc(diarista, base, { quantidade, valorDiaria, valor }, usuarioId)
+      ? this.pagarPeloIxc(diarista, base, partes, usuarioId)
       : this.pagarEmMaos(base);
   }
 
@@ -342,23 +366,20 @@ export class DiaristasService {
   private async pagarPeloIxc(
     diarista: Diarista,
     base: Prisma.DiariaUncheckedCreateInput,
-    numeros: { quantidade: number; valorDiaria: number; valor: number },
+    partes: PartesDoPagamento,
     usuarioId?: string,
   ): Promise<Diaria> {
-    const observacao = montarObservacaoDiaria({
-      descricao: base.descricao,
-      quantidade: numeros.quantidade,
-      valorDiaria: numeros.valorDiaria,
-    });
-
     const [conta] = await this.contasPagar.criar(
       {
         itens: [
           {
             diaristaId: diarista.id,
             tipo: TipoLancamento.DIARIA,
-            valor: numeros.valor,
-            observacao,
+            valor: Number(base.valor),
+            observacao: montarObservacaoPagamento({
+              ...partes,
+              descricao: base.descricao,
+            }),
           },
         ],
       },
@@ -440,6 +461,10 @@ export class DiaristasService {
             descricao: diaria.descricao,
             quantidade: Number(diaria.quantidade),
             valorDiaria: Number(diaria.valorDiaria),
+            vendas: diaria.vendas,
+            valorPorVenda: Number(diaria.valorPorVenda ?? 0),
+            valorExtra: Number(diaria.valorExtra),
+            descricaoExtra: diaria.descricaoExtra,
           }),
         },
         cfg,

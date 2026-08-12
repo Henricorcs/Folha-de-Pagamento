@@ -22,6 +22,13 @@ import {
   UpdateBeneficiarioDto,
 } from './dto/avulso.dto';
 import { FornecedorService, type FornecedorNoIxc } from './fornecedor.service';
+import {
+  calcularComissaoVendas,
+  calcularTotalPagamento,
+  montarHistoricoCaixa,
+  montarObservacaoPagamento,
+  type PartesDoPagamento,
+} from './pagamento.calc';
 
 /** Beneficiário com o que a listagem mostra sem abrir o cadastro. */
 export interface BeneficiarioComResumo {
@@ -236,6 +243,14 @@ export class AvulsosService {
       ...(dto.tipoChavePix === undefined
         ? {}
         : { tipoChavePix: dto.tipoChavePix }),
+      ...(dto.valorPorVenda === undefined
+        ? {}
+        : {
+            valorPorVenda:
+              dto.valorPorVenda == null || dto.valorPorVenda <= 0
+                ? null
+                : new Prisma.Decimal(dto.valorPorVenda),
+          }),
       ...(dto.formaPagamento === undefined
         ? {}
         : { formaPagamento: dto.formaPagamento }),
@@ -270,9 +285,10 @@ export class AvulsosService {
   }
 
   /**
-   * Paga alguém de fora da folha. Pelo IXC vira conta a pagar como qualquer
-   * beneficiário; em mãos, o dinheiro já saiu da gaveta e o app lança a saída
-   * no caixa configurado.
+   * Paga alguém de fora da folha: o serviço contratado, a comissão das vendas
+   * que a pessoa fechou e o extra do trabalho por fora, somados num pagamento
+   * só. Pelo IXC vira conta a pagar como qualquer beneficiário; em mãos, o
+   * dinheiro já saiu da gaveta e o app lança a saída no caixa configurado.
    */
   async pagar(
     beneficiarioId: string,
@@ -292,10 +308,33 @@ export class AvulsosService {
       );
     }
 
+    const partes: PartesDoPagamento = {
+      valorServico: dto.valorServico ?? 0,
+      vendas: dto.vendas ?? 0,
+      valorPorVenda:
+        dto.valorPorVenda ?? Number(beneficiario.valorPorVenda ?? 0),
+      valorExtra: dto.valorExtra ?? 0,
+      descricaoExtra: dto.descricaoExtra?.trim() || null,
+    };
+    const valor = calcularTotalPagamento(partes);
+    if (valor < 0.01) {
+      throw new BadRequestException(
+        'O pagamento ficou em zero. Informe o valor do serviço, as vendas e ' +
+          'quanto cada uma paga, ou um valor extra.',
+      );
+    }
+
     const base = {
       beneficiarioId,
       data: dto.data ? new Date(dto.data) : hojeUtc(),
-      valor: new Prisma.Decimal(dto.valor),
+      valor: new Prisma.Decimal(valor),
+      vendas: partes.vendas ?? 0,
+      valorPorVenda: partes.valorPorVenda
+        ? new Prisma.Decimal(partes.valorPorVenda)
+        : null,
+      comissaoVendas: new Prisma.Decimal(calcularComissaoVendas(partes)),
+      valorExtra: new Prisma.Decimal(partes.valorExtra ?? 0),
+      descricaoExtra: partes.descricaoExtra,
       descricao: dto.descricao.trim(),
       contaContabil: dto.contaContabil ?? cfg.contaContabilAvulso,
       forma,
@@ -303,7 +342,7 @@ export class AvulsosService {
     };
 
     return forma === FormaPagamento.IXC
-      ? this.pagarPeloIxc(base, usuarioId)
+      ? this.pagarPeloIxc(base, partes, usuarioId)
       : this.pagarEmMaos(beneficiario, base);
   }
 
@@ -335,6 +374,7 @@ export class AvulsosService {
   /** Conta a pagar no IXC (o caminho já usado pela folha e pelas diárias). */
   private async pagarPeloIxc(
     base: Prisma.PagamentoAvulsoUncheckedCreateInput,
+    partes: PartesDoPagamento,
     usuarioId?: string,
   ): Promise<PagamentoAvulso> {
     const [conta] = await this.contasPagar.criar(
@@ -345,7 +385,10 @@ export class AvulsosService {
             tipo: TipoLancamento.AVULSO,
             valor: Number(base.valor),
             contaContabil: base.contaContabil,
-            observacao: base.descricao,
+            observacao: montarObservacaoPagamento({
+              ...partes,
+              descricao: base.descricao,
+            }),
           },
         ],
       },
@@ -431,7 +474,20 @@ export class AvulsosService {
           caixaId,
           valor: Number(pagamento.valor),
           data: pagamento.data,
-          historico: `${beneficiario.nome} — ${pagamento.descricao}`,
+          historico: montarHistoricoCaixa({
+            nome: beneficiario.nome,
+            descricao: pagamento.descricao,
+            // O serviço é o que sobrou depois de tirar comissão e extra: é
+            // assim que ele é guardado (só o total vai para a coluna `valor`).
+            valorServico:
+              Number(pagamento.valor) -
+              Number(pagamento.comissaoVendas) -
+              Number(pagamento.valorExtra),
+            vendas: pagamento.vendas,
+            valorPorVenda: Number(pagamento.valorPorVenda ?? 0),
+            valorExtra: Number(pagamento.valorExtra),
+            descricaoExtra: pagamento.descricaoExtra,
+          }),
         },
         cfg,
       );

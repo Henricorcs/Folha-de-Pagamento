@@ -145,14 +145,52 @@ describe('pagar pelo IXC', () => {
     expect(contasPagar.criar.mock.calls[0][0].itens[0].valor).toBe(120);
   });
 
-  it('valor fechado combinado na hora vence a multiplicação', async () => {
+  /**
+   * O diarista também é vendedor externo, e às vezes fez um serviço por fora no
+   * mesmo acerto. Sai um pagamento só — é assim que ele recebe.
+   */
+  it('diárias, comissão de venda e extra viram um pagamento só', async () => {
+    const { service, contasPagar } = montarServico();
+
+    const diaria = await service.pagar('d1', {
+      quantidade: 2,
+      valorDiaria: 140,
+      vendas: 3,
+      valorPorVenda: 50,
+      valorExtra: 80,
+      descricaoExtra: 'instalação',
+      descricao: 'Acerto da semana',
+    });
+
+    expect(contasPagar.criar.mock.calls[0][0].itens[0]).toMatchObject({
+      valor: 510,
+      observacao:
+        'Acerto da semana (2 diárias de R$ 140,00 · 3 vendas de R$ 50,00 = ' +
+        'R$ 150,00 · extra R$ 80,00: instalação)',
+    });
+    expect(Number((diaria as { comissaoVendas: unknown }).comissaoVendas)).toBe(
+      150,
+    );
+  });
+
+  /** Semana só de venda: não houve dia trabalhado para cobrar. */
+  it('paga um acerto que é só de comissão', async () => {
     const { service, contasPagar } = montarServico();
     await service.pagar('d1', {
-      quantidade: 2.5,
-      valor: 300,
-      descricao: 'Mudança',
+      quantidade: 0,
+      vendas: 4,
+      valorPorVenda: 50,
+      descricao: 'Vendas da semana',
     });
-    expect(contasPagar.criar.mock.calls[0][0].itens[0].valor).toBe(300);
+    expect(contasPagar.criar.mock.calls[0][0].itens[0].valor).toBe(200);
+  });
+
+  it('recusa o pagamento que ficou em zero', async () => {
+    const { service, contasPagar } = montarServico();
+    await expect(
+      service.pagar('d1', { quantidade: 0, descricao: 'Nada' }),
+    ).rejects.toThrow(/zero/i);
+    expect(contasPagar.criar).not.toHaveBeenCalled();
   });
 
   /**

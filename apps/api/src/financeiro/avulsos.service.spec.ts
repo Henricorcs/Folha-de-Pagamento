@@ -140,7 +140,10 @@ describe('pagamento pelo IXC', () => {
   it('vira conta a pagar com a conta contábil dos avulsos', async () => {
     const { service, contasPagar } = montarServico();
 
-    await service.pagar('b1', { valor: 500, descricao: 'pintura do galpão' });
+    await service.pagar('b1', {
+      valorServico: 500,
+      descricao: 'pintura do galpão',
+    });
 
     expect(contasPagar.criar).toHaveBeenCalledWith(
       {
@@ -150,7 +153,7 @@ describe('pagamento pelo IXC', () => {
             tipo: TipoLancamento.AVULSO,
             valor: 500,
             contaContabil: 324,
-            observacao: 'pintura do galpão',
+            observacao: 'pintura do galpão (serviço R$ 500,00)',
           },
         ],
       },
@@ -162,12 +165,75 @@ describe('pagamento pelo IXC', () => {
     const { service, contasPagar } = montarServico();
 
     await service.pagar('b1', {
-      valor: 500,
+      valorServico: 500,
       descricao: 'serviço',
       contaContabil: 999,
     });
 
     expect(contasPagar.criar.mock.calls[0][0].itens[0].contaContabil).toBe(999);
+  });
+
+  /**
+   * Cliente da empresa também vende e comissiona, e às vezes fez um serviço por
+   * fora no mesmo acerto. Sai um pagamento só: é assim que a pessoa recebe, e
+   * três contas a pagar de R$ 50 entupiriam a auditoria do IXC.
+   */
+  it('serviço, comissão de venda e extra viram um pagamento só', async () => {
+    const { service, contasPagar } = montarServico();
+
+    const pago = await service.pagar('b1', {
+      valorServico: 400,
+      vendas: 3,
+      valorPorVenda: 50,
+      valorExtra: 80,
+      descricaoExtra: 'instalação',
+      descricao: 'acerto de agosto',
+    });
+
+    expect(contasPagar.criar.mock.calls[0][0].itens[0]).toMatchObject({
+      valor: 630,
+      observacao:
+        'acerto de agosto (serviço R$ 400,00 · 3 vendas de R$ 50,00 = ' +
+        'R$ 150,00 · extra R$ 80,00: instalação)',
+    });
+    // A comissão fica congelada no registro: é dela que sai o "gasto com
+    // vendas" do mês, e corrigir o cadastro depois não pode reescrever isso.
+    expect(pago).toMatchObject({ vendas: 3, comissaoVendas: expect.anything() });
+    expect(Number((pago as { comissaoVendas: unknown }).comissaoVendas)).toBe(150);
+  });
+
+  /** Quem só vendeu recebe só a comissão — não há serviço a informar. */
+  it('paga um acerto que é só de comissão', async () => {
+    const { service, contasPagar } = montarServico();
+
+    await service.pagar('b1', {
+      vendas: 4,
+      valorPorVenda: 50,
+      descricao: 'comissão de agosto',
+    });
+
+    expect(contasPagar.criar.mock.calls[0][0].itens[0].valor).toBe(200);
+  });
+
+  /** Sem nada informado, o pagamento fecharia em zero e iria ao IXC assim. */
+  it('recusa o pagamento que ficou em zero', async () => {
+    const { service, contasPagar } = montarServico();
+
+    await expect(
+      service.pagar('b1', { vendas: 3, descricao: 'comissão' }),
+    ).rejects.toThrow(/zero/i);
+    expect(contasPagar.criar).not.toHaveBeenCalled();
+  });
+
+  /** O valor por venda combinado no cadastro poupa digitar a cada acerto. */
+  it('sem valor por venda na tela, usa o do cadastro', async () => {
+    const { service, contasPagar } = montarServico({
+      beneficiario: { valorPorVenda: 50 },
+    });
+
+    await service.pagar('b1', { vendas: 2, descricao: 'comissão de agosto' });
+
+    expect(contasPagar.criar.mock.calls[0][0].itens[0].valor).toBe(100);
   });
 
   /**
@@ -180,7 +246,7 @@ describe('pagamento pelo IXC', () => {
     });
 
     await expect(
-      service.pagar('b1', { valor: 500, descricao: 'serviço' }),
+      service.pagar('b1', { valorServico: 500, descricao: 'serviço' }),
     ).rejects.toThrow(/chave PIX/i);
     expect(contasPagar.criar).not.toHaveBeenCalled();
   });
@@ -192,7 +258,7 @@ describe('pagamento pelo IXC', () => {
     });
 
     await service.pagar('b1', {
-      valor: 100,
+      valorServico: 100,
       descricao: 'serviço',
       chavePix: 'certa@pix',
       tipoChavePix: 'E-mail',
@@ -209,7 +275,7 @@ describe('pagamento pelo IXC', () => {
     const { service } = montarServico({ beneficiario: { chavePix: null } });
 
     const pago = await service.pagar('b1', {
-      valor: 200,
+      valorServico: 200,
       descricao: 'serviço',
       forma: FormaPagamento.EM_MAOS,
     });
@@ -223,7 +289,7 @@ describe('pagamento em mãos', () => {
     const { service, caixa } = montarServico();
 
     const pago = await service.pagar('b1', {
-      valor: 350,
+      valorServico: 350,
       descricao: 'carreto',
       forma: FormaPagamento.EM_MAOS,
     });
@@ -232,7 +298,7 @@ describe('pagamento em mãos', () => {
       expect.objectContaining({
         caixaId: 7,
         valor: 350,
-        historico: 'Deda Pedreiro — carreto',
+        historico: 'Pagamento Deda Pedreiro — serviço R$ 350,00 — carreto',
       }),
       CFG,
     );
@@ -247,7 +313,7 @@ describe('pagamento em mãos', () => {
     const { service, caixa } = montarServico({ caixaId: null });
 
     const pago = await service.pagar('b1', {
-      valor: 350,
+      valorServico: 350,
       descricao: 'carreto',
       forma: FormaPagamento.EM_MAOS,
     });
@@ -262,7 +328,7 @@ describe('pagamento em mãos', () => {
     const { service } = montarServico({ erroLancamento: 'tabela sem modelo' });
 
     const pago = await service.pagar('b1', {
-      valor: 350,
+      valorServico: 350,
       descricao: 'carreto',
       forma: FormaPagamento.EM_MAOS,
     });

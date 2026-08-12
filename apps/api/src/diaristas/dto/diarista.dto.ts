@@ -39,6 +39,13 @@ export class CriarDiaristaDto {
   @Min(0)
   valorDiaria?: number | null;
 
+  /** Quanto ganha por venda — diarista também é vendedor externo. */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value == null ? null : Number(value)))
+  @IsNumber()
+  @Min(0)
+  valorPorVenda?: number | null;
+
   @IsOptional() @IsEnum(FormaPagamento) formaPagamento?: FormaPagamento;
 
   @IsOptional() @IsString() observacoes?: string;

@@ -18,6 +18,13 @@ const EM_ABERTO: StatusContaPagar[] = [
   StatusContaPagar.AGUARDANDO_PAGAMENTO,
 ];
 
+/** O contrário: nunca virou dinheiro, então nunca foi gasto. */
+const SEM_SAIDA: StatusContaPagar[] = [
+  StatusContaPagar.REPROVADO,
+  StatusContaPagar.CANCELADO,
+  StatusContaPagar.ERRO,
+];
+
 /** Quantos meses a série histórica mostra, contando a competência atual. */
 const MESES_NA_SERIE = 12;
 
@@ -34,6 +41,22 @@ export class DashboardService {
     const comp = competencia ?? competenciaAtual();
     const quantidade = Math.min(Math.max(mesesPedidos ?? MESES_NA_SERIE, 1), 24);
     const meses = ultimosMeses(comp, quantidade);
+    // A comissão de venda do funcionário é do mês trabalhado e entra no salário
+    // da competência seguinte — por isso a série precisa do mês anterior a cada.
+    const mesesTrabalhados = meses.map(competenciaAnterior);
+    const inicio = primeiroDia(meses[0]);
+    const fim = depoisDoUltimoDia(comp);
+
+    // Diária e pagamento avulso não têm competência na conta a pagar (ela nasce
+    // sem, e o pago em mãos nem vira conta). Os dois entram pela data do
+    // pagamento — mas a situação do mês lê a conta, e sem esta janela o avulso
+    // pago sumia da tela inteira.
+    const doMes = {
+      OR: [
+        { competencia: comp },
+        { competencia: null, dataEmissao: { gte: primeiroDia(comp), lt: fim } },
+      ],
+    };
 
     const [
       funcionarios,
@@ -43,6 +66,8 @@ export class DashboardService {
       porTipo,
       serieContas,
       diarias,
+      avulsos,
+      variaveis,
       impostos,
       ultimasContas,
       ultimoSync,
@@ -58,32 +83,60 @@ export class DashboardService {
       }),
       this.prisma.contaPagar.groupBy({
         by: ['status'],
-        where: { competencia: comp },
+        where: doMes,
         _count: { _all: true },
         _sum: { valor: true },
       }),
       this.prisma.contaPagar.groupBy({
         by: ['tipo'],
-        where: { competencia: comp },
+        where: doMes,
         _count: { _all: true },
         _sum: { valor: true },
       }),
       // Uma leitura só para todas as séries: tipo, status e mês por conta.
       this.prisma.contaPagar.findMany({
         where: { competencia: { in: meses } },
-        select: { competencia: true, tipo: true, status: true, valor: true },
+        select: {
+          competencia: true,
+          tipo: true,
+          status: true,
+          valor: true,
+          funcionarioId: true,
+        },
       }),
-      // Diárias vêm da própria tabela, e não das contas a pagar: as pagas em
-      // mãos nunca viram conta, e as do IXC nascem sem competência.
       this.prisma.diaria.findMany({
-        where: { data: { gte: primeiroDia(meses[0]), lt: depoisDoUltimoDia(comp) } },
+        where: { data: { gte: inicio, lt: fim } },
         select: {
           data: true,
           valor: true,
           quantidade: true,
+          comissaoVendas: true,
+          vendas: true,
           forma: true,
           diaristaId: true,
           contaPagar: { select: { status: true } },
+        },
+      }),
+      this.prisma.pagamentoAvulso.findMany({
+        where: { data: { gte: inicio, lt: fim } },
+        select: {
+          data: true,
+          valor: true,
+          comissaoVendas: true,
+          vendas: true,
+          forma: true,
+          beneficiarioId: true,
+          contaPagar: { select: { status: true } },
+        },
+      }),
+      this.prisma.variavelMes.findMany({
+        where: { competencia: { in: mesesTrabalhados } },
+        select: {
+          funcionarioId: true,
+          competencia: true,
+          vendas: true,
+          valorPorVenda: true,
+          funcionario: { select: { valorPorVenda: true } },
         },
       }),
       this.impostos.resumo(meses),
@@ -97,8 +150,21 @@ export class DashboardService {
         .reduce((soma, s) => soma + Number(s._sum.valor ?? 0), 0);
 
     const serie = montarSerieContas(meses, serieContas);
-    const diaristas = montarDiaristas(meses, diarias);
+    const diaristas = montarPagamentosPorData(meses, diarias, (d) => d.diaristaId);
+    const avulsosSerie = montarPagamentosPorData(
+      meses,
+      avulsos,
+      (p) => p.beneficiarioId,
+    );
     const diariasDoMes = diaristas.serie.find((d) => d.competencia === comp);
+    const avulsosDoMes = avulsosSerie.serie.find((a) => a.competencia === comp);
+    const serieTipos = comDiariaEAvulso(serie.porTipo, diaristas, avulsosSerie);
+    const vendas = montarVendas(
+      meses,
+      [...diarias, ...avulsos],
+      variaveis,
+      serieContas,
+    );
 
     return {
       competencia: comp,
@@ -132,31 +198,41 @@ export class DashboardService {
               quantidade: t._count._all,
               valor: Number(t._sum.valor ?? 0),
             }))
-            // A diária não tem competência na conta a pagar; entra pela data.
-            .filter((t) => t.tipo !== TipoLancamento.DIARIA)
+            // Diária e avulso não têm competência na conta a pagar; entram pela
+            // data do pagamento, que é o que a série ao lado já sabe contar.
+            .filter(
+              (t) =>
+                t.tipo !== TipoLancamento.DIARIA &&
+                t.tipo !== TipoLancamento.AVULSO,
+            )
             .concat(
-              diariasDoMes && diariasDoMes.valor > 0
-                ? [
-                    {
-                      tipo: TipoLancamento.DIARIA,
-                      quantidade: diariasDoMes.quantidade,
-                      valor: diariasDoMes.valor,
-                    },
-                  ]
-                : [],
+              linhaDoTipo(TipoLancamento.DIARIA, diariasDoMes),
+              linhaDoTipo(TipoLancamento.AVULSO, avulsosDoMes),
             ),
         ),
       },
       vales: valesResumo,
       serie: serie.total,
-      serieTipos: serie.porTipo,
+      serieTipos,
       diaristas,
+      avulsos: avulsosSerie,
+      vendas,
       impostos,
-      custoPessoal: montarCustoPessoal(meses, serie.porTipo, diaristas, impostos),
+      custoPessoal: montarCustoPessoal(meses, serieTipos, diaristas, impostos),
       ultimasContas,
       ultimoSync,
     };
   }
+}
+
+/** A linha daquele tipo na repartição do mês — omitida quando não houve nada. */
+function linhaDoTipo(
+  tipo: TipoLancamento,
+  mes: { quantidade: number; valor: number } | undefined,
+): Array<{ tipo: TipoLancamento; quantidade: number; valor: number }> {
+  return mes && mes.valor > 0
+    ? [{ tipo, quantidade: mes.quantidade, valor: mes.valor }]
+    : [];
 }
 
 // ---------------------------------------------------------------------------
@@ -168,6 +244,7 @@ interface ContaDaSerie {
   tipo: TipoLancamento;
   status: StatusContaPagar;
   valor: unknown;
+  funcionarioId: string | null;
 }
 
 /**
@@ -190,11 +267,7 @@ function montarSerieContas(meses: string[], contas: ContaDaSerie[]) {
     if (conta.status === StatusContaPagar.PAGO) mes.pago += valor;
 
     // Reprovada e cancelada não são gasto: nunca viraram dinheiro.
-    if (
-      conta.status !== StatusContaPagar.REPROVADO &&
-      conta.status !== StatusContaPagar.CANCELADO &&
-      conta.status !== StatusContaPagar.ERRO
-    ) {
+    if (!SEM_SAIDA.includes(conta.status)) {
       tipos[CHAVE_DO_TIPO[conta.tipo]] += valor;
     }
   }
@@ -215,43 +288,55 @@ function montarSerieContas(meses: string[], contas: ContaDaSerie[]) {
   };
 }
 
-interface DiariaDaSerie {
+/**
+ * Um pagamento a quem não é da folha — diária ou avulso. Os dois entram na
+ * dashboard pela data em que o dinheiro saiu, e não pela competência, porque a
+ * conta a pagar dos dois nasce sem competência (e a paga em mãos nem vira
+ * conta). Era isso que fazia o avulso pago sumir de todos os números.
+ */
+interface PagamentoDaSerie {
   data: Date;
   valor: unknown;
-  quantidade: unknown;
+  /** Diárias trabalhadas; ausente no avulso, que conta um por pagamento. */
+  quantidade?: unknown;
+  comissaoVendas: unknown;
+  vendas: number;
   forma: FormaPagamento;
-  diaristaId: string;
   contaPagar: { status: StatusContaPagar } | null;
 }
 
-/** Onde a diária está no caminho do dinheiro. */
-type SituacaoDaDiaria = 'SAIU' | 'A_CAMINHO' | 'TRAVADA';
+/** Onde o pagamento está no caminho do dinheiro. */
+type SituacaoDoPagamento = 'SAIU' | 'A_CAMINHO' | 'TRAVADO';
 
 /**
- * A mesma régua da tela de diaristas, para as duas contarem a mesma história:
- * em mãos o dinheiro saiu da gaveta na hora (o lançamento no caixa do IXC é
- * escrituração, não pagamento); pelo IXC, só quando o banco confirmou.
+ * A mesma régua das telas de diarista e avulso, para todas contarem a mesma
+ * história: em mãos o dinheiro saiu da gaveta na hora (o lançamento no caixa do
+ * IXC é escrituração, não pagamento); pelo IXC, só quando o banco confirmou.
  */
-function situacaoDaDiaria(d: DiariaDaSerie): SituacaoDaDiaria {
-  if (d.forma === FormaPagamento.EM_MAOS) return 'SAIU';
-  const status = d.contaPagar?.status;
+function situacaoDoPagamento(p: PagamentoDaSerie): SituacaoDoPagamento {
+  if (p.forma === FormaPagamento.EM_MAOS) return 'SAIU';
+  const status = p.contaPagar?.status;
   if (status === StatusContaPagar.PAGO) return 'SAIU';
   if (status && EM_ABERTO.includes(status)) return 'A_CAMINHO';
   // Reprovada, cancelada, recusada pelo IXC — ou sem conta nenhuma, que é como
-  // fica a diária quando o fn_apagar dela é apagado lá. Nenhuma delas vai sair
-  // sozinha, e é justamente a última que ficava para sempre em "ainda não saiu".
-  return 'TRAVADA';
+  // fica o pagamento quando o fn_apagar dele é apagado lá. Nenhum deles vai
+  // sair sozinho, e é o último que ficava para sempre em "ainda não saiu".
+  return 'TRAVADO';
 }
 
 /**
- * Gasto com diarista, mês a mês.
+ * Gasto com diaristas (ou com avulsos), mês a mês.
  *
- * Só entra o que virou dinheiro ou ainda vai virar. Diária travada fica de
+ * Só entra o que virou dinheiro ou ainda vai virar. Pagamento travado fica de
  * fora do gasto — é a mesma regra da série da folha, onde conta reprovada e
- * cancelada nunca contaram — mas continua somada à parte, senão ela sumiria da
- * tela sem ninguém saber que existe algo para destravar.
+ * cancelada nunca contaram — mas continua somado à parte, senão sumiria da tela
+ * sem ninguém saber que existe algo para destravar.
  */
-function montarDiaristas(meses: string[], diarias: DiariaDaSerie[]) {
+function montarPagamentosPorData<T extends PagamentoDaSerie>(
+  meses: string[],
+  pagamentos: T[],
+  quemRecebeu: (p: T) => string,
+) {
   const porMes = new Map(
     meses.map((m) => [
       m,
@@ -266,13 +351,13 @@ function montarDiaristas(meses: string[], diarias: DiariaDaSerie[]) {
     ]),
   );
 
-  for (const d of diarias) {
-    const mes = porMes.get(mesDaData(d.data));
+  for (const p of pagamentos) {
+    const mes = porMes.get(mesDaData(p.data));
     if (!mes) continue;
 
-    const valor = Number(d.valor ?? 0);
-    const situacao = situacaoDaDiaria(d);
-    if (situacao === 'TRAVADA') {
+    const valor = Number(p.valor ?? 0);
+    const situacao = situacaoDoPagamento(p);
+    if (situacao === 'TRAVADO') {
       mes.travado += valor;
       mes.travadas++;
       continue;
@@ -280,10 +365,10 @@ function montarDiaristas(meses: string[], diarias: DiariaDaSerie[]) {
 
     if (situacao === 'SAIU') mes.pago += valor;
     else mes.aCaminho += valor;
-    // Quantas diárias e quantas pessoas o número do topo está resumindo — só
-    // as que ele conta, para o detalhe não contradizer o valor.
-    mes.quantidade += Number(d.quantidade ?? 0);
-    mes.pessoas.add(d.diaristaId);
+    // Quantos pagamentos e quantas pessoas o número do topo está resumindo — só
+    // os que ele conta, para o detalhe não contradizer o valor.
+    mes.quantidade += p.quantidade === undefined ? 1 : Number(p.quantidade ?? 0);
+    mes.pessoas.add(quemRecebeu(p));
   }
 
   const serie = meses.map((competencia) => {
@@ -309,6 +394,108 @@ function montarDiaristas(meses: string[], diarias: DiariaDaSerie[]) {
     totalACaminho: arredondar(serie.reduce((s, m) => s + m.aCaminho, 0)),
     totalTravado: arredondar(serie.reduce((s, m) => s + m.travado, 0)),
     quantidade: arredondar(serie.reduce((s, m) => s + m.quantidade, 0)),
+  };
+}
+
+/** Uma série de gasto mês a mês, como as de diarista e avulso devolvem. */
+type SerieDeGasto = { serie: Array<{ competencia: string; valor: number }> };
+
+/**
+ * Preenche na repartição por tipo o que a conta a pagar não alcança. Diária e
+ * avulso nascem sem competência, então a série montada por competência as
+ * mostrava sempre em zero — e o custo com pessoal saía menor do que foi.
+ */
+function comDiariaEAvulso(
+  porTipo: Array<{ competencia: string } & PorTipo>,
+  diaristas: SerieDeGasto,
+  avulsos: SerieDeGasto,
+): Array<{ competencia: string } & PorTipo> {
+  const valorEm = (s: SerieDeGasto, competencia: string) =>
+    s.serie.find((m) => m.competencia === competencia)?.valor ?? 0;
+
+  return porTipo.map((mes) => ({
+    ...mes,
+    diaria: valorEm(diaristas, mes.competencia),
+    avulso: valorEm(avulsos, mes.competencia),
+  }));
+}
+
+/** Vendas e comissão lançadas num mês trabalhado, por funcionário. */
+interface VariavelDaSerie {
+  funcionarioId: string;
+  competencia: string;
+  vendas: number;
+  valorPorVenda: unknown;
+  funcionario: { valorPorVenda: unknown } | null;
+}
+
+/**
+ * Quanto o mês custou em comissão de venda.
+ *
+ * Vem de três lugares porque quem vende é de três tipos. Diarista e avulso
+ * recebem a comissão junto do próprio pagamento, e o valor está congelado lá —
+ * corrigir o cadastro depois não reescreve um mês fechado. Funcionário recebe
+ * pela folha: a comissão do mês trabalhado entra no salário da competência
+ * seguinte, então só conta quando aquele salário existe e não foi reprovado.
+ */
+function montarVendas(
+  meses: string[],
+  pagamentos: PagamentoDaSerie[],
+  variaveis: VariavelDaSerie[],
+  contas: ContaDaSerie[],
+) {
+  const forasDaFolha = new Map(meses.map((m) => [m, { valor: 0, vendas: 0 }]));
+  for (const p of pagamentos) {
+    const mes = forasDaFolha.get(mesDaData(p.data));
+    // Comissão de pagamento travado não saiu nem vai sair, como o resto dele.
+    if (!mes || situacaoDoPagamento(p) === 'TRAVADO') continue;
+    mes.valor += Number(p.comissaoVendas ?? 0);
+    mes.vendas += p.vendas;
+  }
+
+  // Quem teve salário gerado (e vivo) em cada competência: é o salário que
+  // carrega a comissão do mês trabalhado.
+  const comSalario = new Map<string, Set<string>>();
+  for (const c of contas) {
+    if (c.tipo !== TipoLancamento.SALARIO) continue;
+    if (!c.competencia || !c.funcionarioId) continue;
+    if (SEM_SAIDA.includes(c.status)) continue;
+    const doMes = comSalario.get(c.competencia) ?? new Set<string>();
+    comSalario.set(c.competencia, doMes);
+    doMes.add(c.funcionarioId);
+  }
+
+  const serie = meses.map((competencia) => {
+    const pagos = comSalario.get(competencia) ?? new Set<string>();
+    const mesTrabalhado = competenciaAnterior(competencia);
+    let folha = 0;
+    let vendasFolha = 0;
+    for (const v of variaveis) {
+      if (v.competencia !== mesTrabalhado) continue;
+      if (!pagos.has(v.funcionarioId)) continue;
+      // O valor por venda do mês vence o do cadastro (ex.: campanha), a mesma
+      // ordem que a folha usa para calcular o salário.
+      const unitario = Number(
+        v.valorPorVenda ?? v.funcionario?.valorPorVenda ?? 0,
+      );
+      folha += v.vendas * unitario;
+      vendasFolha += v.vendas;
+    }
+
+    const fora = forasDaFolha.get(competencia) ?? { valor: 0, vendas: 0 };
+    return {
+      competencia,
+      funcionarios: arredondar(folha),
+      foraDaFolha: arredondar(fora.valor),
+      total: arredondar(folha + fora.valor),
+      vendas: vendasFolha + fora.vendas,
+    };
+  });
+
+  return {
+    serie,
+    total: arredondar(serie.reduce((s, m) => s + m.total, 0)),
+    vendas: serie.reduce((s, m) => s + m.vendas, 0),
   };
 }
 
@@ -385,7 +572,7 @@ function depoisDoUltimoDia(competencia: string): Date {
 // Tipos de lançamento
 // ---------------------------------------------------------------------------
 
-interface PorTipo {
+export interface PorTipo {
   salario: number;
   adiantamento: number;
   bonus: number;

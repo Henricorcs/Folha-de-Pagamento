@@ -21,6 +21,8 @@ export function mapFuncionario(raw: IxcFuncionario): {
   const bancarios = extrairDadosBancarios(raw);
   const salario = parseIxcDecimal(raw.salario);
 
+  const ativoNoIxc = parseIxcBool(raw.ativo);
+
   const common = {
     nome: (raw.funcionario ?? '').trim() || `Funcionário ${ixcId}`,
     cpfCnpj: emptyToNull(raw.cpf_cnpj),
@@ -31,10 +33,15 @@ export function mapFuncionario(raw: IxcFuncionario): {
     idDepartamento: parseIxcId(raw.id_departamento),
     dataAdmissao: parseIxcDate(raw.data_admissao),
     dataDemissao: parseIxcDate(raw.data_demissao),
-    ativo: parseIxcBool(raw.ativo),
     ixcRaw: raw as unknown as Prisma.InputJsonValue,
     ultimoSyncAt: new Date(),
   };
+
+  // Desativar aqui tira a pessoa das próximas folhas, e é o que se faz quando
+  // alguém pede para sair. O cadastro no IXC costuma continuar ativo por
+  // semanas depois disso — reler `ativo` de lá ressuscitava a pessoa na folha
+  // seguinte. O sync só desativa: reativar é decisão de quem desativou.
+  const ativoUpdate = ativoNoIxc ? {} : { ativo: false };
 
   // Dados bancários (banco/agência/conta/PIX) da tabela `funcionarios` do IXC
   // costumam vir vazios — o real fica no fornecedor. No update só sobrescreve
@@ -60,10 +67,11 @@ export function mapFuncionario(raw: IxcFuncionario): {
     create: {
       ixcId,
       ...common,
+      ativo: ativoNoIxc,
       salarioBase: new Prisma.Decimal(salario),
       ...bancarios,
     },
-    update: { ...common, ...salarioUpdate, ...bancariosUpdate },
+    update: { ...common, ...ativoUpdate, ...salarioUpdate, ...bancariosUpdate },
   };
 }
 

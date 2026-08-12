@@ -40,6 +40,28 @@ export function Funcionarios() {
     },
   });
 
+  /**
+   * Quem pede para sair some das próximas folhas, mas o cadastro fica: o que já
+   * foi pago a ele é histórico, e continua contando na dashboard. Reativar é
+   * por aqui — a sincronização com o IXC não desfaz o que se decidiu na tela.
+   */
+  const alternarAtivo = useMutation({
+    mutationFn: async (f: Funcionario) =>
+      (await api.patch<Funcionario>(`/funcionarios/${f.id}`, { ativo: !f.ativo }))
+        .data,
+    onSuccess: (f) => {
+      setFeedback(
+        f.ativo
+          ? `${f.nome} voltou para a folha.`
+          : `${f.nome} saiu da folha. O que já foi pago a ele continua nos números.`,
+      );
+      qc.invalidateQueries({ queryKey: ['funcionarios'] });
+      qc.invalidateQueries({ queryKey: ['resumo'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: (err) => setFeedback(mensagemErro(err)),
+  });
+
   const sync = useMutation({
     mutationFn: async () =>
       (await api.post<{ resultados: SyncResult[] }>('/sync')).data,
@@ -144,26 +166,27 @@ export function Funcionarios() {
                 <th className="th">Chave PIX</th>
                 <th className="th text-right">Base da folha</th>
                 <th className="th text-center">Situação</th>
+                <th className="th text-right">Ação</th>
               </tr>
             </thead>
             <tbody>
               {lista.isLoading && (
                 <tr>
-                  <td colSpan={5}>
+                  <td colSpan={6}>
                     <Carregando />
                   </td>
                 </tr>
               )}
               {lista.isError && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-sm text-rose-600">
+                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-rose-600">
                     {mensagemErro(lista.error)}
                   </td>
                 </tr>
               )}
               {lista.data?.itens.length === 0 && (
                 <tr>
-                  <td colSpan={5}>
+                  <td colSpan={6}>
                     <Vazio titulo="Nenhum funcionário por aqui">
                       Sincronize com o IXC para trazer os fornecedores ativos
                       isentos de ICMS.
@@ -206,6 +229,20 @@ export function Funcionarios() {
                     <Selo tom={f.ativo ? 'pago' : 'neutro'} ponto>
                       {f.ativo ? 'Ativo' : 'Inativo'}
                     </Selo>
+                  </td>
+                  <td className="td text-right">
+                    <button
+                      onClick={() => alternarAtivo.mutate(f)}
+                      disabled={alternarAtivo.isPending}
+                      title={
+                        f.ativo
+                          ? 'Sai das próximas folhas. O que já foi pago continua no histórico e na dashboard.'
+                          : 'Volta a entrar no cálculo da folha.'
+                      }
+                      className="btn btn-sutil btn-p"
+                    >
+                      {f.ativo ? 'Desativar' : 'Reativar'}
+                    </button>
                   </td>
                 </tr>
               ))}

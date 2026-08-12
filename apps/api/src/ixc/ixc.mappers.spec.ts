@@ -42,6 +42,26 @@ describe('mapFuncionario', () => {
     expect(() => mapFuncionario({ id: '0', funcionario: 'X' })).toThrow();
   });
 
+  /**
+   * Quem pede para sair é desativado aqui, mas o cadastro no IXC segue ativo
+   * por semanas. Reler `ativo` de lá punha a pessoa de volta na folha seguinte
+   * — o sync só desativa; reativar é decisão de quem desativou.
+   */
+  it('no update, não reativa quem foi desativado aqui', () => {
+    const { create, update } = mapFuncionario({
+      id: '9',
+      funcionario: 'X',
+      ativo: 'S',
+    });
+    expect(create.ativo).toBe(true);
+    expect('ativo' in update).toBe(false);
+  });
+
+  it('no update, desativa quem o IXC diz que saiu', () => {
+    const { update } = mapFuncionario({ id: '9', funcionario: 'X', ativo: 'N' });
+    expect(update.ativo).toBe(false);
+  });
+
   it('no update, não sobrescreve dados bancários quando o IXC não informa', () => {
     const { create, update } = mapFuncionario({ id: '7', funcionario: 'X' });
     // Sem dados no IXC: create fixa null, mas update não toca nesses campos.
