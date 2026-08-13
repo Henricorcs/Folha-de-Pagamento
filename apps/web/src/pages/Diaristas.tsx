@@ -44,9 +44,19 @@ function hojeISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** A diária em mãos ainda não virou lançamento no caixa do IXC. */
+/**
+ * Diária em mãos do tempo em que "em mãos" escrevia direto na movimentação
+ * financeira: nunca virou conta a pagar e nunca virou lançamento no caixa. É a
+ * única que ainda precisa ser fechada à mão — hoje o dinheiro em mãos sai do
+ * caixa pela própria conta a pagar.
+ */
 function pendenteNoCaixa(d: Diaria): boolean {
-  return d.forma === 'EM_MAOS' && !d.idLancamentoIxc && !d.lancadoManual;
+  return (
+    d.forma === 'EM_MAOS' &&
+    !d.contaPagarId &&
+    !d.idLancamentoIxc &&
+    !d.lancadoManual
+  );
 }
 
 /**
@@ -308,7 +318,7 @@ export function Diaristas() {
       <CabecalhoPagina
         secao="Diaristas"
         titulo="Quem trabalha por dia"
-        descricao="Quem está marcado como “Estrangeiro” no cadastro de fornecedor do IXC é diarista (quem é isento de ICMS é funcionário, e aparece na outra tela). O pagamento sai pelo IXC (conta a pagar, como a folha) ou em mãos — e aí o dinheiro é descontado do caixa configurado."
+        descricao="Quem está marcado como “Estrangeiro” no cadastro de fornecedor do IXC é diarista (quem é isento de ICMS é funcionário, e aparece na outra tela). O pagamento sai pelo IXC como conta a pagar, do banco por PIX ou do caixa em dinheiro."
         acoes={
           <div className="flex flex-wrap gap-2">
             <button
@@ -329,8 +339,9 @@ export function Diaristas() {
 
       {pendentes > 0 && (
         <Aviso tom="atencao">
-          {pendentes} diária(s) paga(s) em mãos ainda não saíram do caixa no IXC.
-          Abra a pessoa para tentar de novo ou marcar que você lançou à mão.
+          {pendentes} diária(s) paga(s) em mãos antigas ainda não saíram do
+          caixa no IXC. Abra a pessoa para tentar de novo ou marcar que você
+          lançou à mão. As novas saem do caixa pela própria conta a pagar.
         </Aviso>
       )}
 
@@ -940,20 +951,33 @@ function CampoLeitura({
   );
 }
 
-/** Por onde a diária saiu — e o que ainda falta, quando falta. */
+/**
+ * Por onde a diária saiu — e o que ainda falta, quando falta.
+ *
+ * As duas formas são conta a pagar no IXC, então é a conta que manda no que
+ * aparece; o selo só diz de onde o dinheiro sai. Sem conta a pagar é uma diária
+ * em mãos antiga, de quando a saída ia direto para a movimentação financeira.
+ */
 function SituacaoDiaria({ diaria }: { diaria: Diaria }) {
-  if (diaria.forma === 'IXC') {
-    const conta = diaria.contaPagar;
+  const conta = diaria.contaPagar;
+  if (conta) {
+    const emMaos = diaria.forma === 'EM_MAOS';
     return (
       <div className="flex flex-wrap items-center gap-1.5">
-        <Selo pequeno tom="info">
-          IXC
+        <Selo
+          pequeno
+          tom="info"
+          titulo={
+            emMaos
+              ? 'Conta a pagar no IXC, na conta do caixa'
+              : 'Conta a pagar no IXC, na conta do banco'
+          }
+        >
+          {emMaos ? 'caixa' : 'IXC'}
         </Selo>
-        {conta && (
-          <Selo pequeno tom={STATUS_TOM[conta.status]} ponto>
-            {STATUS_LABEL[conta.status]}
-          </Selo>
-        )}
+        <Selo pequeno tom={STATUS_TOM[conta.status]} ponto>
+          {STATUS_LABEL[conta.status]}
+        </Selo>
       </div>
     );
   }
@@ -990,11 +1014,13 @@ function SituacaoDiaria({ diaria }: { diaria: Diaria }) {
 
 /** O que dizer depois de pagar (ou de tentar lançar no caixa de novo). */
 function resumoDoPagamento(d: Diaria): string {
-  if (d.forma === 'IXC') {
-    if (d.contaPagar?.status === 'ERRO') {
+  if (d.contaPagar) {
+    if (d.contaPagar.status === 'ERRO') {
       return `O IXC recusou: ${d.contaPagar.erro ?? 'erro desconhecido'} — corrija e reenvie em Contas a Pagar.`;
     }
-    return 'Diária lançada como conta a pagar no IXC — aprove em Contas a Pagar.';
+    return d.forma === 'EM_MAOS'
+      ? 'Diária lançada como conta a pagar no IXC, saindo do caixa — aprove em Contas a Pagar.'
+      : 'Diária lançada como conta a pagar no IXC — aprove em Contas a Pagar.';
   }
   if (d.erroIxc) return d.erroIxc;
   if (d.idLancamentoIxc) {
@@ -1167,7 +1193,7 @@ function FormularioDiaria({
       <p className="mt-4 text-xs leading-relaxed text-tinta-500">
         {forma === 'IXC'
           ? 'Vai virar uma conta a pagar só no IXC: o diarista é cadastrado como fornecedor, e o pagamento passa pela auditoria como o da folha. A chave e o tipo ficam gravados no cadastro para o próximo pagamento.'
-          : 'O dinheiro já saiu da sua mão: o pagamento é registrado como pago e a saída é lançada no caixa configurado em Configurações.'}
+          : 'Vira a mesma conta a pagar no IXC, mudando só de onde o dinheiro sai: a conta do caixa em vez da do banco, em dinheiro. Sem chave PIX, e passando pela auditoria como as outras.'}
       </p>
 
       <div className="mt-5 flex flex-wrap items-center gap-4 border-t border-tinta-100 pt-4">

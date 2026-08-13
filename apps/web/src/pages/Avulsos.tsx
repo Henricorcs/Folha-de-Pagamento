@@ -50,9 +50,19 @@ function hojeISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** O pagamento em mãos ainda não virou lançamento no caixa do IXC. */
+/**
+ * Pagamento em mãos do tempo em que "em mãos" escrevia direto na movimentação
+ * financeira: nunca virou conta a pagar e nunca virou lançamento no caixa. É o
+ * único que ainda precisa ser fechado à mão — hoje o dinheiro em mãos sai do
+ * caixa pela própria conta a pagar.
+ */
 function pendenteNoCaixa(p: PagamentoAvulso): boolean {
-  return p.forma === 'EM_MAOS' && !p.idLancamentoIxc && !p.lancadoManual;
+  return (
+    p.forma === 'EM_MAOS' &&
+    !p.contaPagarId &&
+    !p.idLancamentoIxc &&
+    !p.lancadoManual
+  );
 }
 
 /**
@@ -359,7 +369,7 @@ export function Avulsos() {
       <CabecalhoPagina
         secao="Pagamentos avulsos"
         titulo="Pagar quem não é da folha"
-        descricao="Mão de obra contratada, serviço pontual, patrocínio, ajuda de custo. A pessoa fica cadastrada e vira fornecedor no IXC — o pagamento sai por lá (conta a pagar, com PIX) ou em mãos, descontado do caixa."
+        descricao="Mão de obra contratada, serviço pontual, patrocínio, ajuda de custo. A pessoa fica cadastrada e vira fornecedor no IXC — o pagamento sai por lá como conta a pagar, do banco por PIX ou do caixa em dinheiro."
         acoes={
           <button onClick={abrirNovo} className="btn btn-primario">
             Cadastrar beneficiário
@@ -371,8 +381,9 @@ export function Avulsos() {
 
       {pendentes > 0 && (
         <Aviso tom="atencao">
-          {pendentes} pagamento(s) em mãos ainda não saíram do caixa no IXC. Abra
-          a pessoa para tentar de novo ou marcar que você lançou à mão.
+          {pendentes} pagamento(s) em mãos antigos ainda não saíram do caixa no
+          IXC. Abra a pessoa para tentar de novo ou marcar que você lançou à
+          mão. Os novos saem do caixa pela própria conta a pagar.
         </Aviso>
       )}
 
@@ -867,20 +878,34 @@ function EscolhaDoFornecedor({
   );
 }
 
-/** Por onde o pagamento saiu — e o que ainda falta, quando falta. */
+/**
+ * Por onde o pagamento saiu — e o que ainda falta, quando falta.
+ *
+ * As duas formas são conta a pagar no IXC, então é a conta que manda no que
+ * aparece; o selo só diz de onde o dinheiro sai. Sem conta a pagar é um
+ * pagamento em mãos antigo, de quando a saída ia direto para a movimentação
+ * financeira.
+ */
 function SituacaoPagamento({ pagamento }: { pagamento: PagamentoAvulso }) {
-  if (pagamento.forma === 'IXC') {
-    const conta = pagamento.contaPagar;
+  const conta = pagamento.contaPagar;
+  if (conta) {
+    const emMaos = pagamento.forma === 'EM_MAOS';
     return (
       <div className="flex flex-wrap items-center gap-1.5">
-        <Selo pequeno tom="info">
-          IXC
+        <Selo
+          pequeno
+          tom="info"
+          titulo={
+            emMaos
+              ? 'Conta a pagar no IXC, na conta do caixa'
+              : 'Conta a pagar no IXC, na conta do banco'
+          }
+        >
+          {emMaos ? 'caixa' : 'IXC'}
         </Selo>
-        {conta && (
-          <Selo pequeno tom={STATUS_TOM[conta.status]} ponto>
-            {STATUS_LABEL[conta.status]}
-          </Selo>
-        )}
+        <Selo pequeno tom={STATUS_TOM[conta.status]} ponto>
+          {STATUS_LABEL[conta.status]}
+        </Selo>
       </div>
     );
   }
@@ -917,11 +942,13 @@ function SituacaoPagamento({ pagamento }: { pagamento: PagamentoAvulso }) {
 
 /** O que dizer depois de pagar (ou de tentar lançar no caixa de novo). */
 function resumoDoPagamento(p: PagamentoAvulso): string {
-  if (p.forma === 'IXC') {
-    if (p.contaPagar?.status === 'ERRO') {
+  if (p.contaPagar) {
+    if (p.contaPagar.status === 'ERRO') {
       return `O IXC recusou: ${p.contaPagar.erro ?? 'erro desconhecido'} — corrija e reenvie em Contas a Pagar.`;
     }
-    return 'Pagamento lançado como conta a pagar no IXC — aprove em Contas a Pagar.';
+    return p.forma === 'EM_MAOS'
+      ? 'Pagamento lançado como conta a pagar no IXC, saindo do caixa — aprove em Contas a Pagar.'
+      : 'Pagamento lançado como conta a pagar no IXC — aprove em Contas a Pagar.';
   }
   if (p.erroIxc) return p.erroIxc;
   if (p.idLancamentoIxc) {
@@ -1095,7 +1122,7 @@ function FormularioPagamento({
       <p className="mt-4 text-xs leading-relaxed text-tinta-500">
         {forma === 'IXC'
           ? 'Vai virar uma conta a pagar só no IXC: a pessoa é cadastrada como fornecedor e o pagamento passa pela auditoria, como o da folha. A chave e o tipo ficam gravados no cadastro para a próxima vez.'
-          : 'O dinheiro já saiu da sua mão: o pagamento é registrado e a saída é lançada no caixa configurado em Configurações.'}
+          : 'Vira a mesma conta a pagar no IXC, mudando só de onde o dinheiro sai: a conta do caixa em vez da do banco, em dinheiro. Sem chave PIX, e passando pela auditoria como as outras.'}
       </p>
 
       <div className="mt-5 flex flex-wrap items-center gap-4 border-t border-tinta-100 pt-4">

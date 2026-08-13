@@ -27,6 +27,7 @@ import {
   calcularTotalPagamento,
   montarHistoricoCaixa,
   montarObservacaoPagamento,
+  TIPO_PAGAMENTO_EM_MAOS,
   type PartesDoPagamento,
 } from './pagamento.calc';
 
@@ -287,8 +288,8 @@ export class AvulsosService {
   /**
    * Paga alguém de fora da folha: o serviço contratado, a comissão das vendas
    * que a pessoa fechou e o extra do trabalho por fora, somados num pagamento
-   * só. Pelo IXC vira conta a pagar como qualquer beneficiário; em mãos, o
-   * dinheiro já saiu da gaveta e o app lança a saída no caixa configurado.
+   * só. Das duas formas vira conta a pagar no IXC — o que muda é de onde o
+   * dinheiro sai: do banco por PIX, ou do caixa em dinheiro.
    */
   async pagar(
     beneficiarioId: string,
@@ -341,9 +342,7 @@ export class AvulsosService {
       criadoPor: usuarioId ?? null,
     };
 
-    return forma === FormaPagamento.IXC
-      ? this.pagarPeloIxc(base, partes, usuarioId)
-      : this.pagarEmMaos(beneficiario, base);
+    return this.pagarPeloIxc(base, partes, cfg, usuarioId);
   }
 
   /**
@@ -371,12 +370,21 @@ export class AvulsosService {
     });
   }
 
-  /** Conta a pagar no IXC (o caminho já usado pela folha e pelas diárias). */
+  /**
+   * Conta a pagar no IXC (o caminho já usado pela folha e pelas diárias).
+   *
+   * Em mãos é a mesma conta a pagar, mudando só de onde o dinheiro sai: a
+   * conta de pagamento do caixa em vez da do banco, e em dinheiro em vez de
+   * PIX — quem entrega na mão não precisa de chave, e o `enviarIxc` já deixa a
+   * chave de fora quando o tipo não é PIX.
+   */
   private async pagarPeloIxc(
     base: Prisma.PagamentoAvulsoUncheckedCreateInput,
     partes: PartesDoPagamento,
+    cfg: { contaPagamentoCaixaId: number },
     usuarioId?: string,
   ): Promise<PagamentoAvulso> {
+    const emMaos = base.forma === FormaPagamento.EM_MAOS;
     const [conta] = await this.contasPagar.criar(
       {
         itens: [
@@ -385,6 +393,12 @@ export class AvulsosService {
             tipo: TipoLancamento.AVULSO,
             valor: Number(base.valor),
             contaContabil: base.contaContabil,
+            ...(emMaos
+              ? {
+                  contaPagamento: cfg.contaPagamentoCaixaId,
+                  tipoPagamentoIxc: TIPO_PAGAMENTO_EM_MAOS,
+                }
+              : {}),
             observacao: montarObservacaoPagamento({
               ...partes,
               descricao: base.descricao,
@@ -415,41 +429,24 @@ export class AvulsosService {
   }
 
   /**
-   * Dinheiro entregue na mão: o pagamento nasce pago e a saída é lançada no
-   * caixa do IXC. Se o lançamento não sair, o registro **não** se perde — fica
-   * com o motivo guardado, para tentar de novo ou lançar à mão.
-   */
-  private async pagarEmMaos(
-    beneficiario: BeneficiarioAvulso,
-    base: Prisma.PagamentoAvulsoUncheckedCreateInput,
-  ): Promise<PagamentoAvulso> {
-    const cfg = await this.config.obter();
-    const caixaId = await this.caixa.resolverCaixa(cfg);
-
-    const pagamento = await this.prisma.pagamentoAvulso.create({
-      data: {
-        ...base,
-        caixaIxc: caixaId,
-        erroIxc: caixaId
-          ? null
-          : `Não achei o caixa "${cfg.caixaEmMaosNome}" no IXC. ` +
-            'Informe o código dele em Configurações e lance de novo.',
-      },
-    });
-
-    return caixaId ? this.lancarNoCaixa(pagamento.id) : pagamento;
-  }
-
-  /**
-   * Lança (ou tenta de novo) a saída no caixa do IXC. É o botão de "tentar de
-   * novo" da tela: erro de rede, tabela recém-configurada, caixa que acabou de
-   * ser informado.
+   * Lança (ou tenta de novo) a saída no caixa do IXC.
+   *
+   * Só serve aos pagamentos antigos, feitos quando "em mãos" escrevia direto na
+   * movimentação financeira em vez de virar conta a pagar no caixa. Eles ficam
+   * pendentes até alguém fechá-los, e fechar exige este botão — ou o "já lancei
+   * à mão". Pagamento novo nenhum chega aqui.
    */
   async lancarNoCaixa(pagamentoId: string): Promise<PagamentoAvulso> {
     const pagamento = await this.buscarPagamento(pagamentoId);
     if (pagamento.forma !== FormaPagamento.EM_MAOS) {
       throw new BadRequestException(
         'Só pagamento em mãos sai do caixa — este foi pelo IXC.',
+      );
+    }
+    if (pagamento.contaPagarId) {
+      throw new BadRequestException(
+        'Este pagamento já sai do caixa pela própria conta a pagar no IXC. ' +
+          'Lançar de novo na movimentação financeira tiraria o dinheiro duas vezes.',
       );
     }
     if (pagamento.idLancamentoIxc) {
@@ -517,6 +514,12 @@ export class AvulsosService {
     if (pagamento.forma !== FormaPagamento.EM_MAOS) {
       throw new BadRequestException('Só pagamento em mãos sai do caixa.');
     }
+    if (pagamento.contaPagarId) {
+      throw new BadRequestException(
+        'Este pagamento sai do caixa pela conta a pagar no IXC — não há nada ' +
+          'para lançar à mão.',
+      );
+    }
     return this.prisma.pagamentoAvulso.update({
       where: { id: pagamento.id },
       data: { lancadoManual: true, lancadoEm: new Date(), erroIxc: null },
@@ -565,18 +568,20 @@ interface PagamentoResumido {
 }
 
 /**
- * Dinheiro que de fato saiu. Em mãos saiu no ato — o lançamento no caixa é
- * escrituração, não pagamento. Pelo IXC, só quando o banco confirmou.
+ * Dinheiro que de fato saiu: quando o IXC deu a conta por paga. Vale para as
+ * duas formas — em mãos também é conta a pagar, só que na conta do caixa.
+ *
+ * Os pagamentos em mãos antigos não têm conta a pagar nenhuma: o dinheiro saiu
+ * da gaveta no ato e nunca houve nada para o IXC confirmar. Esses continuam
+ * contando como pagos, que é o que sempre foram.
  */
 function saiu(p: PagamentoResumido): boolean {
-  return p.forma === FormaPagamento.EM_MAOS
-    ? true
-    : p.contaPagar?.status === StatusContaPagar.PAGO;
+  if (!p.contaPagar) return p.forma === FormaPagamento.EM_MAOS;
+  return p.contaPagar.status === StatusContaPagar.PAGO;
 }
 
 /** Lançado no IXC e ainda a caminho: nem pago, nem recusado. */
 function aCaminho(p: PagamentoResumido): boolean {
-  if (p.forma === FormaPagamento.EM_MAOS) return false;
   const status = p.contaPagar?.status;
   return (
     status !== undefined &&
@@ -591,14 +596,21 @@ function somar(itens: Array<{ valor: Prisma.Decimal }>): number {
   return itens.reduce((s, i) => s + Number(i.valor), 0);
 }
 
-/** Pago em mãos que ainda não virou lançamento no caixa do IXC. */
+/**
+ * Pago em mãos que ainda não virou lançamento no caixa do IXC — e que também
+ * não virou conta a pagar, ou seja, um pagamento do tempo em que "em mãos"
+ * escrevia direto na movimentação financeira. É o que ainda precisa ser
+ * fechado à mão; os novos saem pelo caixa na própria conta a pagar.
+ */
 function pendenteNoCaixa(p: {
   forma: FormaPagamento;
+  contaPagar: unknown | null;
   idLancamentoIxc: number | null;
   lancadoManual: boolean;
 }): boolean {
   return (
     p.forma === FormaPagamento.EM_MAOS &&
+    !p.contaPagar &&
     p.idLancamentoIxc === null &&
     !p.lancadoManual
   );

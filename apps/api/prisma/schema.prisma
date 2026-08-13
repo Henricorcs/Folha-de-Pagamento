@@ -192,6 +192,9 @@ model ConfiguracaoFinanceira {
 
   // Conta de pagamento (fn_apagar.id_contas)
   contaPagamentoId Int @default(18) @map("conta_pagamento_id")
+  /// A mesma coisa para quem recebe em mãos: o dinheiro sai do caixa (23), não
+  /// do banco (18). É só esta conta que muda entre as duas formas de pagar.
+  contaPagamentoCaixaId Int @default(23) @map("conta_pagamento_caixa_id")
   // Filial (fn_apagar.filial_id)
   filialId         Int @default(1) @map("filial_id")
 

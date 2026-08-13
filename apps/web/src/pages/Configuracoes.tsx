@@ -68,9 +68,14 @@ export function Configuracoes() {
         <Bloco titulo="IDs da integração" className="surgir surgir-1">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <CampoNum
-              label="Conta de pagamento (id_contas)"
+              label="Conta de pagamento — banco (id_contas)"
               valor={form.contaPagamentoId}
               onChange={(v) => num('contaPagamentoId', v)}
+            />
+            <CampoNum
+              label="Conta de pagamento — caixa (em mãos)"
+              valor={form.contaPagamentoCaixaId}
+              onChange={(v) => num('contaPagamentoCaixaId', v)}
             />
             <CampoNum
               label="Filial (filial_id)"
@@ -306,13 +311,13 @@ export function Configuracoes() {
 }
 
 /**
- * De onde sai o dinheiro pago em mãos (diaristas). O código do caixa pode ser
- * digitado, mas o normal é o app achar pelo nome — o botão lista os caixas do
- * IXC para conferir qual é qual sem sair da tela.
+ * O caminho antigo do dinheiro pago em mãos: escrever a saída direto na
+ * movimentação financeira do IXC. Hoje quem recebe em mãos vira conta a pagar
+ * na conta do caixa (o campo lá em cima), e nada disto é usado para pagar.
  *
- * As duas tabelas existem porque o webservice do IXC não documenta a
- * movimentação financeira: os nomes são descobertos por tentativa e só
- * precisam ser preenchidos se a descoberta falhar.
+ * Continua aqui porque as diárias e os pagamentos em mãos de antes ficaram
+ * pendentes "fora do caixa", e fechá-los pelo botão "Lançar no caixa" ainda
+ * passa por estes campos.
  */
 function CaixaEmMaos({
   form,
@@ -332,11 +337,16 @@ function CaixaEmMaos({
   });
 
   return (
-    <Bloco titulo="Caixa do pagamento em mãos" className="surgir surgir-3">
+    <Bloco
+      titulo="Caixa dos pagamentos em mãos antigos"
+      className="surgir surgir-3"
+    >
       <p className="mb-4 text-xs leading-relaxed text-tinta-500">
-        Diária paga em dinheiro é descontada deste caixa na movimentação
-        financeira do IXC. Deixe o código em <span className="num">0</span> para
-        o app procurar pelo nome.
+        Só para fechar o que ficou pendente: pagamento em mãos hoje vira conta a
+        pagar na conta do caixa, lá em cima. Estes campos servem ao botão
+        “Lançar no caixa” das diárias e dos avulsos que ficaram “fora do caixa”.
+        Deixe o código em <span className="num">0</span> para o app procurar pelo
+        nome.
       </p>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <CampoNum

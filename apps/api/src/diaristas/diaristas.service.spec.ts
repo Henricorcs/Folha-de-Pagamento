@@ -26,6 +26,7 @@ const DIARISTA = {
 };
 
 const CFG = {
+  contaPagamentoCaixaId: 23,
   caixaEmMaosId: 0,
   caixaEmMaosNome: 'CX - Werick',
   caixaTabelaContas: '',
@@ -101,11 +102,39 @@ function montarServico(
     lancarSaida,
   } as any;
 
+  /**
+   * Uma diária do tempo em que "em mãos" escrevia direto na movimentação
+   * financeira: sem conta a pagar, pendente no caixa. É o que ainda existe no
+   * banco e precisa continuar sendo fechável.
+   */
+  async function diariaAntigaEmMaos(): Promise<string> {
+    const { id } = await prisma.diaria.create({
+      data: {
+        diaristaId: 'd1',
+        data: new Date(Date.UTC(2026, 7, 10)),
+        quantidade: 1,
+        valorDiaria: 120,
+        valor: 120,
+        vendas: 0,
+        valorPorVenda: null,
+        comissaoVendas: 0,
+        valorExtra: 0,
+        descricaoExtra: null,
+        descricao: 'Roçada',
+        forma: FormaPagamento.EM_MAOS,
+        caixaIxc: 27,
+        erroIxc: 'tabela não encontrada',
+      },
+    });
+    return id as string;
+  }
+
   return {
     service: new DiaristasService(prisma, config, contasPagar, caixa),
     contasPagar,
     lancarSaida,
     prisma,
+    diariaAntigaEmMaos,
   };
 }
 
@@ -220,126 +249,111 @@ describe('pagar pelo IXC', () => {
   });
 });
 
+/**
+ * Pagar em mãos é a mesma conta a pagar de sempre: muda a conta de onde o
+ * dinheiro sai (o caixa, 23, em vez do banco, 18) e o tipo de pagamento.
+ *
+ * O caminho antigo — escrever direto na movimentação financeira do IXC —
+ * dependia de uma tabela que não está na documentação do webservice e não
+ * existe nesta base. Diária nova nenhuma passa por ele.
+ */
 describe('pagar em mãos', () => {
-  it('desconta do caixa e guarda o lançamento do IXC', async () => {
-    const { service, lancarSaida } = montarServico();
+  it('vira conta a pagar na conta do caixa, em dinheiro', async () => {
+    const { service, contasPagar, lancarSaida } = montarServico();
 
     const diaria = await service.pagar('d1', {
       descricao: 'Roçada',
       forma: FormaPagamento.EM_MAOS,
     });
 
-    expect(lancarSaida).toHaveBeenCalledWith(
-      expect.objectContaining({
-        caixaId: 27,
-        valor: 120,
-        historico: 'Diária João da Silva — 1 diária de R$ 120,00 — Roçada',
-      }),
-      CFG,
-    );
-    expect(diaria).toMatchObject({
-      caixaIxc: 27,
-      idLancamentoIxc: 900,
-      erroIxc: null,
+    expect(contasPagar.criar.mock.calls[0][0].itens[0]).toMatchObject({
+      diaristaId: 'd1',
+      valor: 120,
+      contaPagamento: 23,
+      tipoPagamentoIxc: 'Dinheiro',
+      observacao: 'Roçada (1 diária de R$ 120,00)',
     });
-    expect(diaria.lancadoEm).toBeInstanceOf(Date);
-  });
-
-  it('IXC recusando o lançamento: a diária fica registrada com o motivo', async () => {
-    const { service } = montarServico({
-      erroLancamento: 'tabela sem lançamento modelo',
-    });
-
-    const diaria = await service.pagar('d1', {
-      descricao: 'Roçada',
-      forma: FormaPagamento.EM_MAOS,
-    });
-
-    expect(diaria.id).toBeTruthy();
-    expect(diaria.idLancamentoIxc).toBeUndefined();
-    expect(diaria.erroIxc).toMatch(/lançamento modelo/);
-  });
-
-  it('caixa não encontrado: registra e explica, sem tentar lançar', async () => {
-    const { service, lancarSaida } = montarServico({ caixaId: null });
-
-    const diaria = await service.pagar('d1', {
-      descricao: 'Roçada',
-      forma: FormaPagamento.EM_MAOS,
-    });
-
+    expect(diaria).toMatchObject({ contaPagarId: 'conta-1' });
     expect(lancarSaida).not.toHaveBeenCalled();
-    expect(diaria.erroIxc).toMatch(/CX - Werick/);
   });
 
-  it('lançou mas algo não conferiu: guarda o aviso para alguém olhar', async () => {
-    const { service } = montarServico({
-      avisoLancamento: 'Lançamento 900 criado, mas o valor gravado não é o do pagamento.',
-    });
-    const diaria = await service.pagar('d1', {
-      descricao: 'Roçada',
-      forma: FormaPagamento.EM_MAOS,
-    });
-    expect(diaria).toMatchObject({ idLancamentoIxc: 900 });
-    expect(diaria.erroIxc).toMatch(/Confira|conferiu|valor gravado/i);
+  /** Pelo banco continua na conta de pagamento padrão, sem tipo próprio. */
+  it('pelo IXC não mexe na conta de pagamento', async () => {
+    const { service, contasPagar } = montarServico();
+
+    await service.pagar('d1', { descricao: 'Capina', forma: FormaPagamento.IXC });
+
+    const item = contasPagar.criar.mock.calls[0][0].itens[0];
+    expect(item.contaPagamento).toBeUndefined();
+    expect(item.tipoPagamentoIxc).toBeUndefined();
   });
 
   it('usa a forma habitual do cadastro quando a tela não escolhe', async () => {
     const { service, contasPagar } = montarServico();
     // O cadastro do João é IXC: sem escolha na tela, vai por lá.
     await service.pagar('d1', { descricao: 'Capina' });
-    expect(contasPagar.criar).toHaveBeenCalled();
+    expect(contasPagar.criar.mock.calls[0][0].itens[0].contaPagamento).toBeUndefined();
   });
-});
 
-describe('tentar de novo e fechar à mão', () => {
-  it('não lança duas vezes a mesma diária', async () => {
+  /**
+   * Se a conta a pagar já sai do caixa, lançar de novo na movimentação
+   * financeira tiraria o mesmo dinheiro duas vezes.
+   */
+  it('não lança no caixa o que já é conta a pagar', async () => {
     const { service } = montarServico();
     const diaria = await service.pagar('d1', {
       descricao: 'Roçada',
       forma: FormaPagamento.EM_MAOS,
     });
-    await expect(service.lancarNoCaixa(diaria.id)).rejects.toThrow(/já saiu do caixa/i);
+
+    await expect(service.lancarNoCaixa(diaria.id)).rejects.toThrow(/duas vezes/);
+    await expect(service.marcarLancadoManual(diaria.id)).rejects.toThrow(
+      /não há nada/,
+    );
   });
+});
 
+/**
+ * As diárias em mãos antigas ficaram penduradas fora do caixa. Elas não somem
+ * com a mudança — continuam precisando de um jeito de fechar.
+ */
+describe('diárias antigas: tentar de novo e fechar à mão', () => {
   it('tentar de novo depois de configurar o caixa resolve a pendência', async () => {
-    const { service, lancarSaida } = montarServico({
-      erroLancamento: 'tabela não encontrada',
-    });
-    const diaria = await service.pagar('d1', {
-      descricao: 'Roçada',
-      forma: FormaPagamento.EM_MAOS,
-    });
-    expect(diaria.erroIxc).toBeTruthy();
+    const { service, lancarSaida, diariaAntigaEmMaos } = montarServico();
+    const id = await diariaAntigaEmMaos();
 
-    // O usuário informou a tabela em Configurações: agora o IXC aceita.
     lancarSaida.mockImplementation(async () => ({
       tabela: 'fn_lancamento_caixa',
       id: 901,
       aviso: undefined,
     }));
-    const resolvida = await service.lancarNoCaixa(diaria.id);
+    const resolvida = await service.lancarNoCaixa(id);
     expect(resolvida).toMatchObject({ idLancamentoIxc: 901, erroIxc: null });
   });
 
   it('lançado à mão no IXC fecha a pendência sem inventar id', async () => {
-    const { service } = montarServico({ erroLancamento: 'sem tabela' });
-    const diaria = await service.pagar('d1', {
-      descricao: 'Roçada',
-      forma: FormaPagamento.EM_MAOS,
-    });
-    const fechada = await service.marcarLancadoManual(diaria.id);
+    const { service, diariaAntigaEmMaos } = montarServico();
+    const id = await diariaAntigaEmMaos();
+
+    const fechada = await service.marcarLancadoManual(id);
     expect(fechada).toMatchObject({ lancadoManual: true, erroIxc: null });
     expect(fechada.idLancamentoIxc).toBeUndefined();
   });
 
+  it('não lança duas vezes a mesma diária', async () => {
+    const { service, diariaAntigaEmMaos } = montarServico();
+    const id = await diariaAntigaEmMaos();
+
+    await service.lancarNoCaixa(id);
+    await expect(service.lancarNoCaixa(id)).rejects.toThrow(/já saiu do caixa/i);
+  });
+
   it('diária já lançada no caixa não é apagada daqui às escondidas', async () => {
-    const { service, prisma } = montarServico();
-    const diaria = await service.pagar('d1', {
-      descricao: 'Roçada',
-      forma: FormaPagamento.EM_MAOS,
-    });
-    await expect(service.removerDiaria(diaria.id)).rejects.toThrow(
+    const { service, prisma, diariaAntigaEmMaos } = montarServico();
+    const id = await diariaAntigaEmMaos();
+
+    await service.lancarNoCaixa(id);
+    await expect(service.removerDiaria(id)).rejects.toThrow(
       /Apague por lá primeiro/i,
     );
     expect(prisma.diaria.delete).not.toHaveBeenCalled();

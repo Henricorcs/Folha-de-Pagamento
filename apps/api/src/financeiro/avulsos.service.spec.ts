@@ -31,6 +31,7 @@ const BENEFICIARIO = {
 
 const CFG = {
   contaContabilAvulso: 324,
+  contaPagamentoCaixaId: 23,
   caixaEmMaosId: 0,
   caixaEmMaosNome: 'CX - Werick',
   caixaTabelaContas: '',
@@ -272,7 +273,9 @@ describe('pagamento pelo IXC', () => {
 
   /** Em mãos não passa pelo banco: a falta de chave não pode barrar. */
   it('pagar em mãos não exige chave PIX', async () => {
-    const { service } = montarServico({ beneficiario: { chavePix: null } });
+    const { service, contasPagar } = montarServico({
+      beneficiario: { chavePix: null },
+    });
 
     const pago = await service.pagar('b1', {
       valorServico: 200,
@@ -280,12 +283,59 @@ describe('pagamento pelo IXC', () => {
       forma: FormaPagamento.EM_MAOS,
     });
 
-    expect(pago).toMatchObject({ idLancamentoIxc: 555, erroIxc: null });
+    expect(pago).toMatchObject({ contaPagarId: 'cp1' });
+    // "Dinheiro" é o que faz o fn_apagar não cobrar chave de quem recebeu
+    // dinheiro vivo — o payload sai sem chave nenhuma.
+    expect(contasPagar.criar.mock.calls[0][0].itens[0]).toMatchObject({
+      tipoPagamentoIxc: 'Dinheiro',
+    });
   });
 });
 
+/**
+ * Pagar em mãos é a mesma conta a pagar de sempre: muda a conta de onde o
+ * dinheiro sai (o caixa, 23, em vez do banco, 18) e o tipo de pagamento.
+ *
+ * O caminho antigo — escrever direto na movimentação financeira do IXC —
+ * dependia de uma tabela que não está na documentação do webservice e não
+ * existe nesta base. Ninguém mais passa por ele.
+ */
 describe('pagamento em mãos', () => {
-  it('desconta do caixa configurado e guarda o lançamento', async () => {
+  it('vira conta a pagar na conta do caixa, em dinheiro', async () => {
+    const { service, contasPagar } = montarServico();
+
+    const pago = await service.pagar('b1', {
+      valorServico: 350,
+      descricao: 'carreto',
+      forma: FormaPagamento.EM_MAOS,
+    });
+
+    expect(contasPagar.criar.mock.calls[0][0].itens[0]).toMatchObject({
+      beneficiarioAvulsoId: 'b1',
+      valor: 350,
+      contaPagamento: 23,
+      tipoPagamentoIxc: 'Dinheiro',
+      observacao: 'carreto (serviço R$ 350,00)',
+    });
+    expect(pago).toMatchObject({ contaPagarId: 'cp1' });
+  });
+
+  /** Pelo banco continua na conta de pagamento padrão, sem tipo próprio. */
+  it('pelo IXC não mexe na conta de pagamento', async () => {
+    const { service, contasPagar } = montarServico();
+
+    await service.pagar('b1', { valorServico: 350, descricao: 'carreto' });
+
+    const item = contasPagar.criar.mock.calls[0][0].itens[0];
+    expect(item.contaPagamento).toBeUndefined();
+    expect(item.tipoPagamentoIxc).toBeUndefined();
+  });
+
+  /**
+   * Se a conta a pagar já sai do caixa, lançar de novo na movimentação
+   * financeira tiraria o mesmo dinheiro duas vezes.
+   */
+  it('não lança no caixa o que já é conta a pagar', async () => {
     const { service, caixa } = montarServico();
 
     const pago = await service.pagar('b1', {
@@ -294,46 +344,13 @@ describe('pagamento em mãos', () => {
       forma: FormaPagamento.EM_MAOS,
     });
 
-    expect(caixa.lancarSaida).toHaveBeenCalledWith(
-      expect.objectContaining({
-        caixaId: 7,
-        valor: 350,
-        historico: 'Pagamento Deda Pedreiro — serviço R$ 350,00 — carreto',
-      }),
-      CFG,
-    );
-    expect(pago).toMatchObject({ caixaIxc: 7, idLancamentoIxc: 555 });
-  });
-
-  /**
-   * O dinheiro saiu da gaveta antes de o IXC ser consultado. Perder o registro
-   * porque o lançamento falhou seria esconder dinheiro que já saiu.
-   */
-  it('o registro fica com o motivo quando o caixa não é encontrado', async () => {
-    const { service, caixa } = montarServico({ caixaId: null });
-
-    const pago = await service.pagar('b1', {
-      valorServico: 350,
-      descricao: 'carreto',
-      forma: FormaPagamento.EM_MAOS,
-    });
-
     expect(caixa.lancarSaida).not.toHaveBeenCalled();
-    expect(String((pago as { erroIxc?: string }).erroIxc)).toMatch(
-      /CX - Werick/,
-    );
-  });
-
-  it('o registro fica com o motivo quando o IXC recusa o lançamento', async () => {
-    const { service } = montarServico({ erroLancamento: 'tabela sem modelo' });
-
-    const pago = await service.pagar('b1', {
-      valorServico: 350,
-      descricao: 'carreto',
-      forma: FormaPagamento.EM_MAOS,
-    });
-
-    expect(pago).toMatchObject({ erroIxc: 'tabela sem modelo' });
+    await expect(
+      service.lancarNoCaixa((pago as { id: string }).id),
+    ).rejects.toThrow(/duas vezes/);
+    await expect(
+      service.marcarLancadoManual((pago as { id: string }).id),
+    ).rejects.toThrow(/não há nada/);
   });
 });
 

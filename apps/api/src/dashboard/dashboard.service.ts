@@ -346,17 +346,22 @@ type SituacaoDoPagamento = 'SAIU' | 'A_CAMINHO' | 'TRAVADO';
 
 /**
  * A mesma régua das telas de diarista e avulso, para todas contarem a mesma
- * história: em mãos o dinheiro saiu da gaveta na hora (o lançamento no caixa do
- * IXC é escrituração, não pagamento); pelo IXC, só quando o banco confirmou.
+ * história: o dinheiro saiu quando o IXC deu a conta a pagar por paga. Vale
+ * para as duas formas — em mãos também é conta a pagar, só que na conta do
+ * caixa em vez da do banco.
  */
 function situacaoDoPagamento(p: PagamentoDaSerie): SituacaoDoPagamento {
-  if (p.forma === FormaPagamento.EM_MAOS) return 'SAIU';
   const status = p.contaPagar?.status;
+  // Sem conta nenhuma: ou é um pagamento em mãos antigo, de quando a saída ia
+  // direto para a movimentação financeira — e aí o dinheiro saiu da gaveta na
+  // hora, sem nada para o IXC confirmar —, ou é um pagamento pelo IXC que
+  // perdeu o fn_apagar (apagado lá) e não vai sair sozinho.
+  if (!status) {
+    return p.forma === FormaPagamento.EM_MAOS ? 'SAIU' : 'TRAVADO';
+  }
   if (status === StatusContaPagar.PAGO) return 'SAIU';
-  if (status && EM_ABERTO.includes(status)) return 'A_CAMINHO';
-  // Reprovada, cancelada, recusada pelo IXC — ou sem conta nenhuma, que é como
-  // fica o pagamento quando o fn_apagar dele é apagado lá. Nenhum deles vai
-  // sair sozinho, e é o último que ficava para sempre em "ainda não saiu".
+  if (EM_ABERTO.includes(status)) return 'A_CAMINHO';
+  // Reprovada, cancelada, recusada pelo IXC: nenhuma vai sair sozinha.
   return 'TRAVADO';
 }
 

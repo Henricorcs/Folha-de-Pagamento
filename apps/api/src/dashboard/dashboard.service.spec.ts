@@ -304,6 +304,37 @@ describe('diaristas', () => {
     ]);
   });
 
+  /**
+   * A diária em mãos virou conta a pagar na conta do caixa: enquanto ela
+   * espera aprovação o dinheiro ainda não saiu do caixa, e contá-la como paga
+   * faria a dashboard dizer que o mês custou o que ainda não custou.
+   *
+   * Só as antigas — as que nunca tiveram conta a pagar — continuam saindo na
+   * hora: ali o dinheiro saiu da gaveta e nunca houve nada para o IXC
+   * confirmar.
+   */
+  it('em mãos esperando aprovação ainda está a caminho', async () => {
+    const { service } = montarServico({
+      diarias: [
+        diaria('2026-07-05', 150, FormaPagamento.EM_MAOS),
+        diaria(
+          '2026-07-06',
+          200,
+          FormaPagamento.EM_MAOS,
+          StatusContaPagar.AGUARDANDO_APROVACAO,
+        ),
+        diaria('2026-07-07', 300, FormaPagamento.EM_MAOS, StatusContaPagar.PAGO),
+      ],
+    });
+
+    const r = await service.resumo(COMP, 1);
+    expect(r.diaristas.serie[0]).toMatchObject({
+      pago: 450,
+      aCaminho: 200,
+      travado: 0,
+    });
+  });
+
   /** Em mãos o dinheiro já saiu; pelo IXC, só quando o banco confirmou. */
   it('separa o que já saiu do que ainda está a caminho', async () => {
     const { service } = montarServico({

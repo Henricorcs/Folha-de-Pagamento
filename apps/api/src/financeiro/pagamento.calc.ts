@@ -15,6 +15,14 @@
 
 import { formatValorBR } from './folha.calc';
 
+/**
+ * `fn_apagar.tipo_pagamento` de quem recebe em mãos. Pagar em mãos é a mesma
+ * conta a pagar de sempre — muda a conta de onde o dinheiro sai (o caixa) e
+ * muda isto, que é o que faz o IXC não cobrar chave PIX de quem recebeu
+ * dinheiro vivo.
+ */
+export const TIPO_PAGAMENTO_EM_MAOS = 'Dinheiro';
+
 export interface PartesDoPagamento {
   /** Dias trabalhados (diarista); zero quando o pagamento não é por dia */
   quantidade?: number;

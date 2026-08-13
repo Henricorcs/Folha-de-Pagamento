@@ -19,6 +19,7 @@ import {
   calcularTotalPagamento,
   montarHistoricoCaixa,
   montarObservacaoPagamento,
+  TIPO_PAGAMENTO_EM_MAOS,
   type PartesDoPagamento,
 } from '../financeiro/pagamento.calc';
 import { CaixaService } from '../ixc/caixa.service';
@@ -279,10 +280,9 @@ export class DiaristasService {
 
   /**
    * Paga um diarista: os dias trabalhados, a comissão das vendas que ele fechou
-   * e o serviço por fora, somados num pagamento só. Pelo IXC vira conta a pagar
-   * como qualquer beneficiário (fornecedor, auditoria, banco). Em mãos, o
-   * dinheiro já saiu da gaveta: o pagamento nasce pago e o app lança a saída no
-   * caixa configurado.
+   * e o serviço por fora, somados num pagamento só. Das duas formas vira conta
+   * a pagar no IXC (fornecedor, auditoria) — o que muda é de onde o dinheiro
+   * sai: do banco por PIX, ou do caixa em dinheiro.
    */
   async pagar(
     diaristaId: string,
@@ -331,9 +331,7 @@ export class DiaristasService {
       criadoPor: usuarioId ?? null,
     };
 
-    return forma === FormaPagamento.IXC
-      ? this.pagarPeloIxc(diarista, base, partes, usuarioId)
-      : this.pagarEmMaos(base);
+    return this.pagarPeloIxc(diarista, base, partes, usuarioId);
   }
 
   /**
@@ -362,13 +360,22 @@ export class DiaristasService {
     });
   }
 
-  /** Conta a pagar no IXC (o caminho já usado pela folha e pelos avulsos). */
+  /**
+   * Conta a pagar no IXC (o caminho já usado pela folha e pelos avulsos).
+   *
+   * Em mãos é a mesma conta a pagar, mudando só de onde o dinheiro sai: a
+   * conta de pagamento do caixa em vez da do banco, e em dinheiro em vez de
+   * PIX — quem entrega na mão não precisa de chave, e o `enviarIxc` já deixa a
+   * chave de fora quando o tipo não é PIX.
+   */
   private async pagarPeloIxc(
     diarista: Diarista,
     base: Prisma.DiariaUncheckedCreateInput,
     partes: PartesDoPagamento,
     usuarioId?: string,
   ): Promise<Diaria> {
+    const cfg = await this.config.obter();
+    const emMaos = base.forma === FormaPagamento.EM_MAOS;
     const [conta] = await this.contasPagar.criar(
       {
         itens: [
@@ -376,6 +383,12 @@ export class DiaristasService {
             diaristaId: diarista.id,
             tipo: TipoLancamento.DIARIA,
             valor: Number(base.valor),
+            ...(emMaos
+              ? {
+                  contaPagamento: cfg.contaPagamentoCaixaId,
+                  tipoPagamentoIxc: TIPO_PAGAMENTO_EM_MAOS,
+                }
+              : {}),
             observacao: montarObservacaoPagamento({
               ...partes,
               descricao: base.descricao,
@@ -397,41 +410,24 @@ export class DiaristasService {
   }
 
   /**
-   * Dinheiro entregue na mão: a diária nasce paga e a saída é lançada no caixa
-   * do IXC. Se o lançamento não sair, o registro **não** se perde — fica com o
-   * motivo guardado, para tentar de novo ou lançar à mão. Dinheiro que saiu da
-   * gaveta tem de estar escrito em algum lugar.
-   */
-  private async pagarEmMaos(
-    base: Prisma.DiariaUncheckedCreateInput,
-  ): Promise<Diaria> {
-    const cfg = await this.config.obter();
-    const caixaId = await this.caixa.resolverCaixa(cfg);
-
-    const diaria = await this.prisma.diaria.create({
-      data: {
-        ...base,
-        caixaIxc: caixaId,
-        erroIxc: caixaId
-          ? null
-          : `Não achei o caixa "${cfg.caixaEmMaosNome}" no IXC. ` +
-            'Informe o código dele em Configurações e lance de novo.',
-      },
-    });
-
-    return caixaId ? this.lancarNoCaixa(diaria.id) : diaria;
-  }
-
-  /**
-   * Lança (ou tenta de novo) a saída da diária no caixa do IXC. É o botão de
-   * "tentar de novo" da tela: erro de rede, tabela recém-configurada, caixa que
-   * acabou de ser informado.
+   * Lança (ou tenta de novo) a saída da diária no caixa do IXC.
+   *
+   * Só serve às diárias antigas, pagas quando "em mãos" escrevia direto na
+   * movimentação financeira em vez de virar conta a pagar no caixa. Elas ficam
+   * pendentes até alguém fechá-las, e fechar exige este botão — ou o "já lancei
+   * à mão". Diária nova nenhuma chega aqui.
    */
   async lancarNoCaixa(diariaId: string): Promise<Diaria> {
     const diaria = await this.buscarDiaria(diariaId);
     if (diaria.forma !== FormaPagamento.EM_MAOS) {
       throw new BadRequestException(
         'Só diária paga em mãos sai do caixa — esta foi paga pelo IXC.',
+      );
+    }
+    if (diaria.contaPagarId) {
+      throw new BadRequestException(
+        'Esta diária já sai do caixa pela própria conta a pagar no IXC. ' +
+          'Lançar de novo na movimentação financeira tiraria o dinheiro duas vezes.',
       );
     }
     if (diaria.idLancamentoIxc) {
@@ -498,6 +494,12 @@ export class DiaristasService {
     if (diaria.forma !== FormaPagamento.EM_MAOS) {
       throw new BadRequestException('Só diária paga em mãos sai do caixa.');
     }
+    if (diaria.contaPagarId) {
+      throw new BadRequestException(
+        'Esta diária sai do caixa pela conta a pagar no IXC — não há nada ' +
+          'para lançar à mão.',
+      );
+    }
     return this.prisma.diaria.update({
       where: { id: diaria.id },
       data: { lancadoManual: true, lancadoEm: new Date(), erroIxc: null },
@@ -544,22 +546,22 @@ interface DiariaResumida {
 }
 
 /**
- * Dinheiro que de fato saiu.
+ * Dinheiro que de fato saiu: quando o IXC deu a conta por paga. Vale para as
+ * duas formas — em mãos também é conta a pagar, só que na conta do caixa.
+ * Enquanto a conta espera aprovação (ou foi recusada) o diarista ainda não
+ * recebeu nada, e mostrar isso como pago faria a tela mentir.
  *
- * Em mãos já saiu no ato — o lançamento no caixa do IXC é escrituração, não
- * pagamento. Pelo IXC, só quando o banco confirmou: enquanto a conta espera
- * aprovação (ou foi recusada) o diarista ainda não recebeu nada, e mostrar
- * isso como pago faria a tela mentir.
+ * As diárias em mãos antigas não têm conta a pagar nenhuma: o dinheiro saiu da
+ * gaveta no ato e nunca houve nada para o IXC confirmar. Essas continuam
+ * contando como pagas, que é o que sempre foram.
  */
 function diariaPaga(d: DiariaResumida): boolean {
-  return d.forma === FormaPagamento.EM_MAOS
-    ? true
-    : d.contaPagar?.status === StatusContaPagar.PAGO;
+  if (!d.contaPagar) return d.forma === FormaPagamento.EM_MAOS;
+  return d.contaPagar.status === StatusContaPagar.PAGO;
 }
 
 /** Lançada no IXC e ainda a caminho: nem paga, nem recusada. */
 function diariaAguardando(d: DiariaResumida): boolean {
-  if (d.forma === FormaPagamento.EM_MAOS) return false;
   const status = d.contaPagar?.status;
   return (
     status !== undefined &&
@@ -574,14 +576,21 @@ function somar(diarias: Array<{ valor: Prisma.Decimal }>): number {
   return diarias.reduce((s, d) => s + Number(d.valor), 0);
 }
 
-/** Diária em mãos que ainda não virou lançamento no caixa do IXC. */
+/**
+ * Diária em mãos que ainda não virou lançamento no caixa do IXC — e que também
+ * não virou conta a pagar, ou seja, uma diária do tempo em que "em mãos"
+ * escrevia direto na movimentação financeira. É o que ainda precisa ser fechado
+ * à mão; as novas saem do caixa pela própria conta a pagar.
+ */
 function pendenteNoCaixa(d: {
   forma: FormaPagamento;
+  contaPagar: unknown | null;
   idLancamentoIxc: number | null;
   lancadoManual: boolean;
 }): boolean {
   return (
     d.forma === FormaPagamento.EM_MAOS &&
+    !d.contaPagar &&
     d.idLancamentoIxc === null &&
     !d.lancadoManual
   );

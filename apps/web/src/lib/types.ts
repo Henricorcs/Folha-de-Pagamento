@@ -280,6 +280,8 @@ export interface PreviewFuncionario {
 
 export interface ConfigFinanceira {
   contaPagamentoId: number;
+  /** Conta de pagamento de quem recebe em mãos: o caixa, não o banco */
+  contaPagamentoCaixaId: number;
   filialId: number;
   contaContabilSalario: number;
   contaContabilAdiantamento: number;
@@ -342,15 +344,15 @@ export interface BeneficiarioAvulso {
 export interface BeneficiarioComResumo {
   beneficiario: BeneficiarioAvulso;
   quantidadePagamentos: number;
-  /** Só o dinheiro que saiu: em mãos, ou conta a pagar já PAGA */
+  /** Só o dinheiro que saiu: conta a pagar que o IXC deu por paga */
   totalPago: number;
   quantidadePagas: number;
-  /** No IXC, ainda a caminho do banco */
+  /** Lançado no IXC, esperando aprovação ou o pagamento */
   totalAguardando: number;
   quantidadeAguardando: number;
   quantidadeComErro: number;
   ultimoPagamento: string | null;
-  /** Pagos em mãos que ainda não viraram lançamento no caixa do IXC */
+  /** Pagos em mãos antigos, que nunca viraram lançamento no caixa do IXC */
   pendentesNoCaixa: number;
 }
 
@@ -421,7 +423,10 @@ export interface ConsultaCpfCnpj {
 }
 
 // --- Diaristas: quem trabalha por dia e recebe por diária ---
-/** IXC = conta a pagar (banco). EM_MAOS = dinheiro, sai do caixa. */
+/**
+ * De onde o dinheiro sai. As duas viram conta a pagar no IXC: IXC paga pela
+ * conta do banco, por PIX; EM_MAOS paga pela conta do caixa, em dinheiro.
+ */
 export type FormaPagamento = 'IXC' | 'EM_MAOS';
 
 export interface Diarista {
@@ -452,16 +457,16 @@ export interface DiaristaComResumo {
   diarista: Diarista;
   /** Diárias no histórico, pagas ou não */
   quantidadeDiarias: number;
-  /** Só o dinheiro que saiu: em mãos, ou conta a pagar já PAGA */
+  /** Só o dinheiro que saiu: conta a pagar que o IXC deu por paga */
   totalPago: number;
   quantidadePagas: number;
-  /** No IXC, ainda a caminho do banco */
+  /** Lançado no IXC, esperando aprovação ou o pagamento */
   totalAguardando: number;
   quantidadeAguardando: number;
   /** Contas a pagar recusadas pelo IXC */
   quantidadeComErro: number;
   ultimaDiaria: string | null;
-  /** Diárias em mãos que ainda não viraram lançamento no caixa do IXC */
+  /** Diárias em mãos antigas, que nunca viraram lançamento no caixa do IXC */
   pendentesNoCaixa: number;
 }
 
@@ -543,14 +548,14 @@ export interface Resumo {
 /**
  * Gasto mês a mês com quem não é da folha — diarista ou avulso. Os dois entram
  * pela data em que o dinheiro saiu, porque a conta a pagar deles nasce sem
- * competência (e a paga em mãos nem vira conta).
+ * competência.
  */
 export interface SerieDeGasto {
   serie: {
     competencia: string;
     /** Gasto do mês: o que saiu mais o que ainda está a caminho */
     valor: number;
-    /** Já saiu: em mãos, ou conta a pagar que o banco confirmou */
+    /** Já saiu: conta a pagar que o IXC deu por paga */
     pago: number;
     /** Lançado no IXC, esperando aprovação ou o banco */
     aCaminho: number;
