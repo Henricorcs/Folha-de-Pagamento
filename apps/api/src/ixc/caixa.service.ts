@@ -13,6 +13,17 @@ import {
   type LancamentoCaixaInput,
 } from './ixc.caixa';
 
+/**
+ * Quanto tempo um "não achei" continua valendo. Achar vale para sempre — nome
+ * de tabela não muda sozinho. Não achar quase nunca é definitivo: o IXC estava
+ * fora do ar, a tabela acabou de ganhar o primeiro lançamento, o suporte
+ * liberou a permissão agora. Guardar o fracasso pelo resto da vida do processo
+ * transformaria o "Lançar no caixa" da tela em enfeite — ele repetiria o mesmo
+ * erro sem sequer falar com o IXC. Um minuto absorve a rajada de um pagamento
+ * só e já passou quando alguém vai ao IXC e volta.
+ */
+const FRACASSO_VALE_MS = 60_000;
+
 /** Onde o dinheiro em mãos saiu — ou por que não deu para lançar. */
 export interface ResultadoLancamentoCaixa {
   /** Tabela do IXC que recebeu o lançamento. */
@@ -42,6 +53,10 @@ export class CaixaService {
   private tabelaContas: string | null | undefined;
   private tabelaMovimento: string | null | undefined;
   private campos: CamposMovimento | null | undefined;
+  /** Quando cada "não achei" foi guardado, para saber quando está velho. */
+  private naoAchei = { contas: 0, movimento: 0, campos: 0 };
+  /** O que o IXC respondeu na última busca que não achou nada. */
+  private ultimaFalha: string | null = null;
 
   constructor(private readonly ixc: IxcClient) {}
 
@@ -50,6 +65,8 @@ export class CaixaService {
     this.tabelaContas = undefined;
     this.tabelaMovimento = undefined;
     this.campos = undefined;
+    this.naoAchei = { contas: 0, movimento: 0, campos: 0 };
+    this.ultimaFalha = null;
   }
 
   /** Nomes de tabela em uso, para a tela de configuração mostrar. */
@@ -130,7 +147,13 @@ export class CaixaService {
       throw new Error(
         'Não encontrei a tabela da movimentação financeira no seu IXC. ' +
           'Peça o nome dela ao suporte do IXC e informe em Configurações — ' +
-          'até lá, lance a saída na mão.',
+          'até lá, lance a saída na mão.' +
+          // Sem isto, "não achei a tabela" engole "não consegui falar com o
+          // IXC", e a pessoa liga para o suporte perguntando o nome de uma
+          // tabela quando o problema era o host, o token ou a rede.
+          (this.ultimaFalha
+            ? ` (última resposta do IXC: ${this.ultimaFalha})`
+            : ''),
       );
     }
 
@@ -177,12 +200,15 @@ export class CaixaService {
   ): Promise<string | null> {
     const fixa = (configurada ?? '').trim();
     if (fixa && fixa !== this.tabelaContas) this.tabelaContas = undefined;
-    if (this.tabelaContas !== undefined) return this.tabelaContas;
+
+    const lembrado = this.lembrado(this.tabelaContas, this.naoAchei.contas);
+    if (lembrado !== undefined) return lembrado;
 
     this.tabelaContas = await this.primeiraQueResponde(
       fixa ? [fixa] : TABELAS_CONTAS_CAIXA,
       'contas/caixas',
     );
+    if (this.tabelaContas === null) this.naoAchei.contas = Date.now();
     return this.tabelaContas;
   }
 
@@ -194,13 +220,31 @@ export class CaixaService {
       this.tabelaMovimento = undefined;
       this.campos = undefined;
     }
-    if (this.tabelaMovimento !== undefined) return this.tabelaMovimento;
+
+    const lembrado = this.lembrado(
+      this.tabelaMovimento,
+      this.naoAchei.movimento,
+    );
+    if (lembrado !== undefined) return lembrado;
 
     this.tabelaMovimento = await this.primeiraQueResponde(
       fixa ? [fixa] : TABELAS_MOVIMENTO_CAIXA,
       'movimentação financeira',
     );
+    if (this.tabelaMovimento === null) this.naoAchei.movimento = Date.now();
     return this.tabelaMovimento;
+  }
+
+  /**
+   * O que está lembrado — ou `undefined`, "vá procurar de novo", quando o que
+   * está lembrado é um "não achei" que já passou da validade.
+   */
+  private lembrado<T>(
+    valor: T | null | undefined,
+    desde: number,
+  ): T | null | undefined {
+    if (valor !== null) return valor;
+    return Date.now() - desde < FRACASSO_VALE_MS ? null : undefined;
   }
 
   /** Tabela que respondeu a uma consulta simples (existe nesta base). */
@@ -208,6 +252,7 @@ export class CaixaService {
     candidatas: string[],
     oQue: string,
   ): Promise<string | null> {
+    let ultimoErro: string | null = null;
     for (const tabela of candidatas) {
       try {
         await this.ixc.list<Record<string, unknown>>(tabela, {
@@ -217,13 +262,20 @@ export class CaixaService {
           rp: 1,
         });
         this.logger.log(`Tabela de ${oQue} no IXC: "${tabela}"`);
+        this.ultimaFalha = null;
         return tabela;
-      } catch {
-        // Não existe nesta base: tenta a próxima.
+      } catch (err) {
+        // Não existe nesta base — ou o IXC não respondeu. Guarda o motivo: a
+        // diferença entre "essa tabela não existe" e "não falei com o IXC" é
+        // toda a diferença para quem vai ler o erro na tela, e as duas chegam
+        // aqui do mesmo jeito.
+        ultimoErro = mensagem(err);
       }
     }
+    this.ultimaFalha = ultimoErro;
     this.logger.warn(
-      `Tabela de ${oQue} não encontrada. Tentadas: ${candidatas.join(', ')}.`,
+      `Tabela de ${oQue} não encontrada. Tentadas: ${candidatas.join(', ')}. ` +
+        `Última resposta do IXC: ${ultimoErro ?? '—'}`,
     );
     return null;
   }
@@ -232,7 +284,8 @@ export class CaixaService {
   private async resolverCampos(
     tabela: string,
   ): Promise<CamposMovimento | null> {
-    if (this.campos !== undefined) return this.campos;
+    const lembrado = this.lembrado(this.campos, this.naoAchei.campos);
+    if (lembrado !== undefined) return lembrado;
     try {
       const res = await this.ixc.list<Record<string, unknown>>(tabela, {
         qtype: `${tabela}.id`,
@@ -249,6 +302,7 @@ export class CaixaService {
           `Lançamento no caixa usará as colunas ${JSON.stringify(this.campos)}`,
         );
       } else {
+        this.naoAchei.campos = Date.now();
         this.logger.warn(
           `Não consegui deduzir as colunas do lançamento em "${tabela}"`,
         );
@@ -257,6 +311,7 @@ export class CaixaService {
     } catch (err) {
       this.logger.warn(`Falha ao ler o modelo de lançamento: ${mensagem(err)}`);
       this.campos = null;
+      this.naoAchei.campos = Date.now();
       return null;
     }
   }
