@@ -42,6 +42,10 @@ model Funcionario {
   ixcId Int? @unique @map("ixc_id")
 
   nome     String
+  /// Como a pessoa é chamada no dia a dia ("Dão", "Neguinho"). O IXC não tem
+  /// esse campo para funcionário: é preenchido aqui e serve para achar quem
+  /// ninguém procura pelo nome de batismo. Espelha o `nomeFantasia` do diarista.
+  apelido  String?
   cpfCnpj  String? @map("cpf_cnpj")
   email    String?
   telefone String?
@@ -116,6 +120,7 @@ model Funcionario {
 
   @@index([ativo])
   @@index([nome])
+  @@index([apelido])
   @@index([isentoIcms])
   @@map("funcionarios")
 }

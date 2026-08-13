@@ -65,17 +65,18 @@ export function Layout() {
           menuAberto ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="flex items-center gap-2.5 px-6 pb-7 pt-7">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500 font-display text-sm font-bold text-tinta-900">
-            F
-          </span>
-          <div className="leading-tight">
-            <div className="font-display text-[15px] font-semibold tracking-tight text-white">
-              Folha
-            </div>
-            <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-tinta-400">
-              Pagamentos
-            </div>
+        <div className="px-6 pb-7 pt-7">
+          {/* A logo tem fundo transparente e vive bem sobre a tinta escura —
+              o azul dela é claro o bastante para se ler aqui. */}
+          <img
+            src="/logo-ilnet.png"
+            alt="ilnet"
+            width={120}
+            height={74}
+            className="h-auto w-[104px]"
+          />
+          <div className="mt-2.5 text-[10px] font-medium uppercase tracking-[0.18em] text-tinta-400">
+            Folha de pagamento
           </div>
         </div>
 

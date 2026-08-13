@@ -78,6 +78,8 @@ const SERIES_IMPOSTO: SerieGrafico[] = [
 export function Dashboard() {
   const [competencia, setCompetencia] = useState(mesTrabalhadoInicial());
   const [meses, setMeses] = useState(12);
+  /** Cartão cujo detalhamento está aberto (null = nenhum). */
+  const [aberto, setAberto] = useState<string | null>(null);
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['dashboard', competencia, meses],
@@ -113,6 +115,126 @@ export function Dashboard() {
     (i) => i.competencia === competencia,
   );
   const semGuia = (data?.impostos.guias.length ?? 0) === 0;
+
+  /**
+   * Os seis números do topo, cada um com o que o explica por dentro.
+   *
+   * O detalhe sai da letra miúda embaixo do valor e vira painel: cabia uma
+   * linha, e o que responde "de onde vem esse número" nunca cabia em uma.
+   */
+  const cartoes: Cartao[] = [
+    {
+      chave: 'custo',
+      rotulo: `Custo com pessoal em ${formatComp(competencia)}`,
+      valor: custoDoMes?.total ?? 0,
+      acento: true,
+      nota: 'Tudo que a empresa gastou com gente neste mês trabalhado — é a soma dos outros cartões. O INSS descontado do trabalhador fica fora: é dinheiro dele passando pela conta da empresa.',
+      linhas: [
+        { rotulo: 'Salário', valor: tiposDoMes?.salario ?? 0 },
+        { rotulo: 'Adiantamento do dia 25', valor: tiposDoMes?.adiantamento ?? 0 },
+        { rotulo: 'Bônus', valor: tiposDoMes?.bonus ?? 0 },
+        { rotulo: 'Pagamentos avulsos', valor: tiposDoMes?.avulso ?? 0 },
+        { rotulo: 'Diárias', valor: diariasDoMes?.valor ?? 0 },
+        { rotulo: 'Encargos patronais', valor: impostoDoMes?.folhaPatronal ?? 0 },
+      ],
+    },
+    {
+      chave: 'diaristas',
+      rotulo: 'Gasto com diaristas',
+      valor: diariasDoMes?.valor ?? 0,
+      alerta:
+        diariasDoMes && diariasDoMes.aCaminho > 0
+          ? `${formatBRL(diariasDoMes.aCaminho)} lançado, esperando o banco`
+          : undefined,
+      nota: 'Quem trabalha por dia, pelo dia em que trabalhou.',
+      linhas: [
+        { rotulo: 'Já saiu do caixa', valor: diariasDoMes?.pago ?? 0 },
+        { rotulo: 'Lançado, esperando o banco', valor: diariasDoMes?.aCaminho ?? 0 },
+        {
+          rotulo: 'Travado no IXC (fora do gasto)',
+          valor: diariasDoMes?.travado ?? 0,
+          nota: diariasDoMes?.travadas
+            ? `${diariasDoMes.travadas} diária(s) com a conta reprovada, recusada ou apagada`
+            : undefined,
+        },
+        {
+          rotulo: 'Diárias trabalhadas',
+          contagem: `${diariasDoMes?.quantidade ?? 0} diária(s) · ${diariasDoMes?.pessoas ?? 0} pessoa(s)`,
+        },
+      ],
+    },
+    {
+      chave: 'vendas',
+      rotulo: 'Gasto com vendas',
+      valor: vendasDoMes?.total ?? 0,
+      nota: 'Comissão de quem vende: funcionário (dentro do salário), diarista e avulso (junto do pagamento). Só conta o que ficou gravado no pagamento.',
+      linhas: [
+        { rotulo: 'Dentro da folha', valor: vendasDoMes?.funcionarios ?? 0 },
+        { rotulo: 'A diaristas e avulsos', valor: vendasDoMes?.foraDaFolha ?? 0 },
+        {
+          rotulo: 'Vendas no mês',
+          contagem: `${vendasDoMes?.vendas ?? 0} venda(s)`,
+        },
+      ],
+    },
+    {
+      chave: 'avulsos',
+      rotulo: 'Pagamentos avulsos',
+      valor: avulsosDoMes?.valor ?? 0,
+      alerta:
+        avulsosDoMes && avulsosDoMes.aCaminho > 0
+          ? `${formatBRL(avulsosDoMes.aCaminho)} lançado, esperando o banco`
+          : undefined,
+      nota: 'Quem recebe sem estar na folha nem ser diarista — serviço pontual, patrocínio, ajuda de custo.',
+      linhas: [
+        { rotulo: 'Já saiu do caixa', valor: avulsosDoMes?.pago ?? 0 },
+        { rotulo: 'Lançado, esperando o banco', valor: avulsosDoMes?.aCaminho ?? 0 },
+        { rotulo: 'Travado no IXC (fora do gasto)', valor: avulsosDoMes?.travado ?? 0 },
+        {
+          rotulo: 'Pagamentos',
+          contagem: `${avulsosDoMes?.quantidade ?? 0} pagamento(s) · ${avulsosDoMes?.pessoas ?? 0} pessoa(s)`,
+        },
+      ],
+    },
+    {
+      chave: 'bonus',
+      rotulo: 'Bônus pago',
+      valor: tiposDoMes?.bonus ?? 0,
+      nota: 'O bônus é um pagamento à parte do salário, e na empresa também conta como salário.',
+      linhas: [
+        { rotulo: 'Pago neste mês', valor: tiposDoMes?.bonus ?? 0 },
+        {
+          rotulo: 'Bônus fixos no cadastro',
+          valor: f?.bonusFixoMensal ?? 0,
+          nota:
+            (f?.bonusFixoMensal ?? 0) > 0
+              ? 'entram em toda folha, sem precisar lançar'
+              : 'ninguém tem bônus fixo cadastrado',
+        },
+      ],
+    },
+    {
+      chave: 'encargos',
+      rotulo: 'Encargos patronais',
+      valor: impostoDoMes?.folhaPatronal ?? 0,
+      alerta: semGuia ? 'nenhuma guia lançada' : undefined,
+      nota: 'Só o patronal é custo da empresa: FGTS e a parte patronal do INSS. O retido é do trabalhador, e o de faturamento não tem a ver com gente.',
+      linhas: [
+        { rotulo: 'Patronal (custo da empresa)', valor: impostoDoMes?.folhaPatronal ?? 0 },
+        {
+          rotulo: 'Retido do trabalhador (repasse)',
+          valor: impostoDoMes?.folhaRetido ?? 0,
+          nota: 'fica fora do custo com pessoal de propósito',
+        },
+        { rotulo: 'Sobre faturamento', valor: impostoDoMes?.faturamento ?? 0 },
+        {
+          rotulo: 'Guias lançadas no período',
+          contagem: `${data?.impostos.guias.length ?? 0} guia(s)`,
+        },
+      ],
+    },
+  ];
+  const cartaoAberto = cartoes.find((c) => c.chave === aberto);
 
   return (
     <Pagina>
@@ -170,86 +292,27 @@ export function Dashboard() {
       {data && (
         <div className="space-y-6">
           <div className="surgir surgir-1 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            <Indicador
-              acento
-              rotulo={`Custo com pessoal em ${formatComp(competencia)}`}
-              valor={formatBRL(custoDoMes?.total)}
-              detalhe={
-                <PartesDoCusto
-                  tipos={tiposDoMes}
-                  diarias={diariasDoMes?.valor ?? 0}
-                  encargos={impostoDoMes?.folhaPatronal ?? 0}
-                />
-              }
-            />
-            <Indicador
-              rotulo="Gasto com diaristas"
-              valor={formatBRL(diariasDoMes?.valor)}
-              detalhe={
-                <>
-                  {`${diariasDoMes?.quantidade ?? 0} diária(s) · ${diariasDoMes?.pessoas ?? 0} pessoa(s)`}
-                  {!!diariasDoMes?.travadas && (
-                    <>
-                      <br />
-                      {formatBRL(diariasDoMes.travado)} em{' '}
-                      {diariasDoMes.travadas} diária(s) travadas no IXC ficaram
-                      de fora
-                    </>
-                  )}
-                </>
-              }
-              alerta={
-                diariasDoMes && diariasDoMes.aCaminho > 0
-                  ? `${formatBRL(diariasDoMes.aCaminho)} lançado, esperando o banco`
-                  : undefined
-              }
-            />
-            <Indicador
-              rotulo="Gasto com vendas"
-              valor={formatBRL(vendasDoMes?.total)}
-              detalhe={
-                vendasDoMes && vendasDoMes.vendas > 0 ? (
-                  <>
-                    {vendasDoMes.vendas} venda(s) no mês
-                    <br />
-                    {formatBRL(vendasDoMes.funcionarios)} na folha +{' '}
-                    {formatBRL(vendasDoMes.foraDaFolha)} a diaristas e avulsos
-                  </>
-                ) : (
-                  'nenhuma comissão de venda neste mês'
-                )
-              }
-            />
-            <Indicador
-              rotulo="Pagamentos avulsos"
-              valor={formatBRL(avulsosDoMes?.valor)}
-              detalhe={`${avulsosDoMes?.quantidade ?? 0} pagamento(s) · ${avulsosDoMes?.pessoas ?? 0} pessoa(s)`}
-              alerta={
-                avulsosDoMes && avulsosDoMes.aCaminho > 0
-                  ? `${formatBRL(avulsosDoMes.aCaminho)} lançado, esperando o banco`
-                  : undefined
-              }
-            />
-            <Indicador
-              rotulo="Bônus pago"
-              valor={formatBRL(tiposDoMes?.bonus)}
-              detalhe={
-                f && f.bonusFixoMensal > 0
-                  ? `${formatBRL(f.bonusFixoMensal)} de bônus fixos no cadastro`
-                  : 'sem bônus fixo no cadastro'
-              }
-            />
-            <Indicador
-              rotulo="Encargos patronais"
-              valor={formatBRL(impostoDoMes?.folhaPatronal)}
-              detalhe={
-                impostoDoMes && impostoDoMes.folhaRetido > 0
-                  ? `+ ${formatBRL(impostoDoMes.folhaRetido)} retido do trabalhador`
-                  : 'FGTS e a parte patronal do INSS'
-              }
-              alerta={semGuia ? 'nenhuma guia lançada' : undefined}
-            />
+            {cartoes.map((c) => (
+              <Indicador
+                key={c.chave}
+                acento={c.acento}
+                rotulo={c.rotulo}
+                valor={formatBRL(c.valor)}
+                alerta={c.alerta}
+                aberto={aberto === c.chave}
+                onClick={() =>
+                  setAberto(aberto === c.chave ? null : c.chave)
+                }
+              />
+            ))}
           </div>
+
+          {cartaoAberto && (
+            <DetalheDoCartao
+              cartao={cartaoAberto}
+              onFechar={() => setAberto(null)}
+            />
+          )}
 
           <div className="surgir surgir-2 grid grid-cols-1 gap-6 lg:grid-cols-3">
             <Bloco
@@ -538,42 +601,84 @@ export function Dashboard() {
   );
 }
 
-/**
- * O custo com pessoal aberto parte a parte — é a soma de tudo que os outros
- * cartões mostram, e sem a lista ninguém sabe o que entrou nele.
- *
- * Só o que teve valor aparece: "R$ 0,00 de diárias" ocupa a linha sem dizer
- * nada, e o cartão de diaristas ao lado já mostra o zero para quem procura.
- */
-function PartesDoCusto({
-  tipos,
-  diarias,
-  encargos,
-}: {
-  tipos?: { salario: number; adiantamento: number; bonus: number; avulso: number };
-  diarias: number;
-  encargos: number;
-}) {
-  const partes = [
-    { rotulo: 'salário', valor: tipos?.salario ?? 0 },
-    { rotulo: 'adiantamento', valor: tipos?.adiantamento ?? 0 },
-    { rotulo: 'bônus', valor: tipos?.bonus ?? 0 },
-    { rotulo: 'avulsos', valor: tipos?.avulso ?? 0 },
-    { rotulo: 'diárias', valor: diarias },
-    { rotulo: 'encargos', valor: encargos },
-  ].filter((p) => p.valor > 0);
+/** Uma linha do detalhamento: ou um valor em reais, ou uma contagem. */
+interface LinhaDetalhe {
+  rotulo: string;
+  valor?: number;
+  /** Texto no lugar do valor, para o que não é dinheiro (quantidades). */
+  contagem?: string;
+  nota?: string;
+}
 
-  if (partes.length === 0) return <>nada lançado neste mês</>;
+interface Cartao {
+  chave: string;
+  rotulo: string;
+  valor: number;
+  acento?: boolean;
+  alerta?: string;
+  /** Uma frase dizendo o que aquele número é. */
+  nota: string;
+  linhas: LinhaDetalhe[];
+}
+
+/**
+ * O que há dentro de um número do topo.
+ *
+ * Cada linha some quando é zero e não tem o que explicar — a lista completa de
+ * zeros diria menos do que o cartão já diz. Sobrando nenhuma, a frase do topo
+ * responde sozinha.
+ */
+function DetalheDoCartao({
+  cartao,
+  onFechar,
+}: {
+  cartao: Cartao;
+  onFechar: () => void;
+}) {
+  const linhas = cartao.linhas.filter(
+    (l) => l.contagem !== undefined || (l.valor ?? 0) !== 0 || l.nota,
+  );
 
   return (
-    <>
-      {partes.map((p, i) => (
-        <span key={p.rotulo}>
-          {i > 0 && ' + '}
-          {formatBRL(p.valor)} de {p.rotulo}
+    <Bloco
+      titulo={cartao.rotulo}
+      className="surgir"
+      acao={
+        <button onClick={onFechar} className="btn btn-sutil btn-p">
+          Fechar
+        </button>
+      }
+    >
+      <p className="mb-4 text-sm leading-relaxed text-tinta-500">{cartao.nota}</p>
+
+      {linhas.length > 0 && (
+        <div className="divide-y divide-tinta-100">
+          {linhas.map((l) => (
+            <div
+              key={l.rotulo}
+              className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5"
+            >
+              <div>
+                <span className="text-sm text-tinta-700">{l.rotulo}</span>
+                {l.nota && (
+                  <div className="text-xs text-tinta-400">{l.nota}</div>
+                )}
+              </div>
+              <span className="valor text-[15px]">
+                {l.contagem ?? formatBRL(l.valor ?? 0)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-4 flex items-baseline justify-between gap-4 border-t-2 border-tinta-200 pt-3">
+        <span className="text-sm font-semibold text-tinta-800">Total</span>
+        <span className="valor font-display text-xl">
+          {formatBRL(cartao.valor)}
         </span>
-      ))}
-    </>
+      </div>
+    </Bloco>
   );
 }
 

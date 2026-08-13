@@ -34,16 +34,20 @@ export function Login() {
           className="pointer-events-none absolute -left-32 top-1/4 h-[520px] w-[520px] rounded-full opacity-40 blur-3xl"
           style={{
             background:
-              'radial-gradient(circle, rgba(51,188,173,0.55) 0%, rgba(10,16,32,0) 70%)',
+              'radial-gradient(circle, rgba(58,159,243,0.55) 0%, rgba(10,16,32,0) 70%)',
           }}
         />
-        <div className="relative flex items-center gap-2.5 px-12 pt-12">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500 font-display text-sm font-bold text-tinta-900">
-            F
-          </span>
-          <span className="font-display text-[15px] font-semibold tracking-tight text-white">
-            Folha de Pagamento
-          </span>
+        <div className="relative px-12 pt-12">
+          <img
+            src="/logo-ilnet.png"
+            alt="ilnet"
+            width={132}
+            height={81}
+            className="h-auto w-[116px]"
+          />
+          <div className="mt-2.5 text-[10px] font-medium uppercase tracking-[0.18em] text-tinta-400">
+            Folha de pagamento
+          </div>
         </div>
 
         <div className="relative px-12 pb-16">
@@ -77,13 +81,17 @@ export function Login() {
       {/* Formulário */}
       <div className="flex flex-1 items-center justify-center bg-tinta-50 px-6 py-12">
         <form onSubmit={onSubmit} className="surgir w-full max-w-[380px]">
-          <div className="mb-8 flex items-center gap-2.5 lg:hidden">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 font-display text-sm font-bold text-white">
-              F
-            </span>
-            <span className="font-display text-[15px] font-semibold tracking-tight text-tinta-900">
-              Folha de Pagamento
-            </span>
+          <div className="mb-8 lg:hidden">
+            <img
+              src="/logo-ilnet.png"
+              alt="ilnet"
+              width={112}
+              height={69}
+              className="h-auto w-[98px]"
+            />
+            <div className="mt-2 text-[10px] font-medium uppercase tracking-[0.18em] text-tinta-400">
+              Folha de pagamento
+            </div>
           </div>
 
           <p className="eyebrow mb-2">Acesso</p>

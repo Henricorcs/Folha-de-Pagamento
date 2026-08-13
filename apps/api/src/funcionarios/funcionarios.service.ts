@@ -18,8 +18,12 @@ export class FuncionariosService {
     if (q.todos !== 'true') where.isentoIcms = true;
 
     if (q.busca) {
+      // O apelido entra na busca porque é por ele que a pessoa é conhecida:
+      // procura-se "Dão", não "Adailton Vieira Pereira". Mesma régua da
+      // fantasia do diarista.
       where.OR = [
         { nome: { contains: q.busca, mode: 'insensitive' } },
+        { apelido: { contains: q.busca, mode: 'insensitive' } },
         { cpfCnpj: { contains: q.busca, mode: 'insensitive' } },
         { email: { contains: q.busca, mode: 'insensitive' } },
       ];
@@ -65,6 +69,10 @@ export class FuncionariosService {
       where: { id },
       data: {
         observacoes: dto.observacoes,
+        // Vazio limpa: quem não tem apelido não fica com um em branco gravado.
+        ...(dto.apelido === undefined
+          ? {}
+          : { apelido: dto.apelido.trim() || null }),
         chavePix: dto.chavePix,
         // Vazio limpa: volta a valer a dedução pelo formato da chave.
         ...(dto.tipoChavePix !== undefined

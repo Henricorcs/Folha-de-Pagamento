@@ -201,6 +201,8 @@ export function Indicador({
   detalhe,
   alerta,
   acento = false,
+  onClick,
+  aberto = false,
 }: {
   rotulo: string;
   valor: ReactNode;
@@ -209,13 +211,16 @@ export function Indicador({
   alerta?: string;
   /** Destaca o indicador principal da tela. */
   acento?: boolean;
+  /**
+   * Abre o detalhamento deste número. Com ele o cartão vira botão: o valor
+   * fica limpo e o que explica sai da letra miúda para um painel legível.
+   */
+  onClick?: () => void;
+  /** Este é o cartão cujo detalhe está aberto. */
+  aberto?: boolean;
 }) {
-  return (
-    <div
-      className={`card card-hover relative overflow-hidden p-5 ${
-        acento ? 'ring-1 ring-brand-200' : ''
-      }`}
-    >
+  const conteudo = (
+    <>
       {acento && (
         <span className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-brand-500 to-brand-300" />
       )}
@@ -223,11 +228,43 @@ export function Indicador({
       <p className="mt-2 font-display text-[26px] font-semibold leading-none tracking-tight text-tinta-900 num">
         {valor}
       </p>
-      {detalhe && <p className="mt-2 text-xs leading-snug text-tinta-400">{detalhe}</p>}
+      {detalhe && (
+        <p className="mt-2 text-xs leading-snug text-tinta-400">{detalhe}</p>
+      )}
       {alerta && (
         <p className="mt-1.5 text-xs font-semibold text-rose-600">{alerta}</p>
       )}
-    </div>
+      {onClick && (
+        <span
+          className={`mt-3 flex items-center gap-1 text-xs font-semibold transition ${
+            aberto ? 'text-brand-700' : 'text-tinta-400'
+          }`}
+        >
+          {aberto ? 'Fechar' : 'Ver detalhe'}
+          <span className={`transition-transform ${aberto ? 'rotate-90' : ''}`}>
+            ▸
+          </span>
+        </span>
+      )}
+    </>
+  );
+
+  const estilo = `card relative overflow-hidden p-5 ${
+    acento ? 'ring-1 ring-brand-200' : ''
+  } ${aberto ? 'ring-2 ring-brand-400' : ''}`;
+
+  if (!onClick) {
+    return <div className={`${estilo} card-hover`}>{conteudo}</div>;
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={aberto}
+      className={`${estilo} card-hover w-full cursor-pointer text-left`}
+    >
+      {conteudo}
+    </button>
   );
 }
 

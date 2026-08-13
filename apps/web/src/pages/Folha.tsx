@@ -28,6 +28,7 @@ import type {
 interface ItemGerar extends LancamentoCalculado {
   funcionarioId: string;
   nome: string;
+  apelido: string | null;
   selecionado: boolean;
   /** Carteira assinada: a contabilidade já desconta o dia 25 lá. */
   carteiraAssinada: boolean;
@@ -122,6 +123,7 @@ function vaiGerar(it: ItemGerar): boolean {
 interface Grupo {
   funcionarioId: string;
   nome: string;
+  apelido: string | null;
   /** Índices em `itens` dos lançamentos desta pessoa. */
   indices: number[];
   adiantamento: SituacaoAdiantamento | null;
@@ -520,6 +522,8 @@ export function Folha() {
   );
   const competencia = mesDoPagamento(mesTrabalhado, modo);
   const [itens, setItens] = useState<ItemGerar[]>([]);
+  /** Filtra as linhas da prévia por nome ou apelido. */
+  const [buscaPessoa, setBuscaPessoa] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
   /** Funcionários com o detalhamento aberto. */
   const [abertos, setAbertos] = useState<Record<string, boolean>>({});
@@ -564,6 +568,7 @@ export function Folha() {
             ...l,
             funcionarioId: f.funcionarioId,
             nome: f.nome,
+            apelido: f.apelido,
             selecionado: !jaGerado,
             carteiraAssinada: f.carteiraAssinada,
             adiantamento: f.adiantamento,
@@ -630,6 +635,7 @@ export function Folha() {
       const grupo = porFuncionario.get(it.funcionarioId) ?? {
         funcionarioId: it.funcionarioId,
         nome: it.nome,
+        apelido: it.apelido,
         indices: [],
         adiantamento: it.adiantamento,
         composicao: it.composicao,
@@ -660,6 +666,26 @@ export function Folha() {
 
   /** Pessoas em que dá para escolher descontar o dia 25 ou não. */
   const comOpcaoDia25 = grupos.filter((g) => g.temOpcaoDia25);
+
+  // A busca só esconde linhas; nada sai da seleção por não estar à vista. Quem
+  // procurou "Dão" para conferir um valor não quer que os outros 53 pagamentos
+  // se desmarquem sozinhos.
+  const procurado = buscaPessoa.trim().toLowerCase();
+  const gruposVisiveis = procurado
+    ? grupos.filter((g) =>
+        `${g.nome} ${g.apelido ?? ''}`.toLowerCase().includes(procurado),
+      )
+    : grupos;
+
+  /** Marca (ou desmarca) tudo que está à vista agora. */
+  function marcarVisiveis(marcar: boolean) {
+    const alvo = new Set(gruposVisiveis.flatMap((g) => g.indices));
+    setItens((prev) =>
+      prev.map((it, i) =>
+        alvo.has(i) && it.valor > 0 ? { ...it, selecionado: marcar } : it,
+      ),
+    );
+  }
 
   function toggle(idx: number) {
     setItens((prev) =>
@@ -703,6 +729,7 @@ export function Folha() {
     setItens([]);
     setAbertos({});
     setFeedback(null);
+    setBuscaPessoa('');
   }
   /** Trocar de pagamento invalida a prévia anterior. */
   function trocarModo(novo: ModoPagamento) {
@@ -827,6 +854,39 @@ export function Folha() {
       )}
 
       {itens.length > 0 && (
+        <div className="surgir mb-4 flex flex-wrap items-center gap-3">
+          <input
+            value={buscaPessoa}
+            onChange={(e) => setBuscaPessoa(e.target.value)}
+            placeholder="Buscar por nome ou apelido…"
+            className="campo max-w-xs"
+          />
+          <button
+            onClick={() => marcarVisiveis(true)}
+            className="btn btn-neutro btn-p"
+          >
+            {procurado
+              ? `Marcar ${gruposVisiveis.length} encontrado(s)`
+              : 'Marcar todos'}
+          </button>
+          <button
+            onClick={() => marcarVisiveis(false)}
+            className="btn btn-neutro btn-p"
+          >
+            {procurado
+              ? `Desmarcar ${gruposVisiveis.length} encontrado(s)`
+              : 'Desmarcar todos'}
+          </button>
+          {procurado && (
+            <span className="text-xs text-tinta-400">
+              A busca só esconde linhas — quem está fora dela continua marcado
+              como estava, e vai ser gerado do mesmo jeito.
+            </span>
+          )}
+        </div>
+      )}
+
+      {itens.length > 0 && (
         <div className="surgir surgir-2 card overflow-hidden">
           <div className="overflow-x-auto rolagem-fina">
             <table className="w-full text-sm">
@@ -837,7 +897,7 @@ export function Folha() {
                   <th className="th text-right">Total a pagar</th>
                 </tr>
               </thead>
-              {grupos.map((g) => {
+              {gruposVisiveis.map((g) => {
                 // Linha zerada pelo dia 25 não conta: não há o que gerar nela.
                 const geraveis = g.indices.filter((i) => itens[i].valor > 0);
                 const marcadosGrupo = geraveis.filter(
@@ -888,6 +948,11 @@ export function Folha() {
                           <span className="font-medium text-tinta-900">
                             {g.nome}
                           </span>
+                          {g.apelido && (
+                            <span className="text-xs text-tinta-400">
+                              {g.apelido}
+                            </span>
+                          )}
                           <span className="text-[11px] uppercase tracking-wider text-tinta-400">
                             {g.indices
                               .map((i) => TIPO_LABEL[itens[i].tipo])

@@ -19,6 +19,14 @@ export class UpdateFuncionarioDto {
   @IsString()
   observacoes?: string;
 
+  /**
+   * Como a pessoa é chamada no dia a dia. Não vem do IXC — é daqui, e é por ele
+   * que a busca encontra quem ninguém procura pelo nome de batismo.
+   */
+  @IsOptional()
+  @IsString()
+  apelido?: string;
+
   @IsOptional()
   @IsString()
   chavePix?: string;

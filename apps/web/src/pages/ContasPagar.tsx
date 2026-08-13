@@ -99,12 +99,16 @@ export function ContasPagar() {
   const [status, setStatus] = useState<StatusContaPagar | 'todos'>('todos');
   const [feedback, setFeedback] = useState<string | null>(null);
   const [selecao, setSelecao] = useState<string[]>([]);
+  /** O que está digitado, e o que já foi buscado — a busca é no Enter. */
+  const [busca, setBusca] = useState('');
+  const [buscaAtiva, setBuscaAtiva] = useState('');
 
   const lista = useQuery({
-    queryKey: ['contas-pagar', status],
+    queryKey: ['contas-pagar', status, buscaAtiva],
     queryFn: async () => {
       const params: Record<string, string> = {};
       if (status !== 'todos') params.status = status;
+      if (buscaAtiva) params.busca = buscaAtiva;
       return (await api.get<Paginado<ContaPagar>>('/contas-pagar', { params }))
         .data;
     },
@@ -329,6 +333,47 @@ export function ContasPagar() {
           ))}
         </ol>
       </Bloco>
+
+      <div className="surgir surgir-2 mb-4 flex flex-wrap items-center gap-2">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setBuscaAtiva(busca.trim());
+            setSelecao([]);
+          }}
+          className="flex w-full max-w-md gap-2"
+        >
+          <input
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            placeholder="Buscar por nome, apelido ou CPF…"
+            className="campo"
+          />
+          <button type="submit" className="btn btn-neutro shrink-0">
+            Buscar
+          </button>
+          {buscaAtiva && (
+            <button
+              type="button"
+              onClick={() => {
+                setBusca('');
+                setBuscaAtiva('');
+                setSelecao([]);
+              }}
+              className="btn btn-sutil shrink-0"
+            >
+              Limpar
+            </button>
+          )}
+        </form>
+      </div>
+
+      {buscaAtiva && (
+        <p className="surgir mb-3 text-sm text-tinta-500">
+          Pagamentos de <strong className="text-tinta-800">{buscaAtiva}</strong>
+          {lista.data ? ` — ${lista.data.total} encontrado(s)` : ''}
+        </p>
+      )}
 
       <div className="surgir surgir-2 mb-4 flex flex-wrap gap-2">
         {STATUS_FILTROS.map((s) => (

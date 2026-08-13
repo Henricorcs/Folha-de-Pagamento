@@ -26,6 +26,7 @@ export function FuncionarioDetalhe() {
   const { id } = useParams<{ id: string }>();
   const qc = useQueryClient();
   const [observacoes, setObservacoes] = useState('');
+  const [apelido, setApelido] = useState('');
   const [chavePix, setChavePix] = useState('');
   const [tipoChavePix, setTipoChavePix] = useState('');
   const [salvo, setSalvo] = useState(false);
@@ -39,6 +40,7 @@ export function FuncionarioDetalhe() {
   useEffect(() => {
     if (data) {
       setObservacoes(data.observacoes ?? '');
+      setApelido(data.apelido ?? '');
       setChavePix(data.chavePix ?? '');
       setTipoChavePix(data.tipoChavePix ?? '');
     }
@@ -49,6 +51,7 @@ export function FuncionarioDetalhe() {
       (
         await api.patch(`/funcionarios/${id}`, {
           observacoes,
+          apelido,
           chavePix,
           tipoChavePix,
         })
@@ -87,6 +90,9 @@ export function FuncionarioDetalhe() {
         </Link>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <h1 className="titulo-pagina">{data.nome}</h1>
+          {data.apelido && (
+            <span className="text-lg text-tinta-400">“{data.apelido}”</span>
+          )}
           <Selo tom={data.ativo ? 'pago' : 'neutro'} ponto>
             {data.ativo ? 'Ativo' : 'Inativo'}
           </Selo>
@@ -178,6 +184,20 @@ export function FuncionarioDetalhe() {
 
         <section className="space-y-6">
           <Bloco titulo="Notas internas" className="surgir surgir-2">
+            <label className="rotulo" htmlFor="apelido">
+              Apelido
+            </label>
+            <input
+              id="apelido"
+              value={apelido}
+              onChange={(e) => setApelido(e.target.value)}
+              className="campo mb-1"
+              placeholder="Como todo mundo chama"
+            />
+            <p className="mb-4 text-xs leading-snug text-tinta-400">
+              É por ele que a busca acha a pessoa — aqui, na folha e nos
+              pagamentos. O IXC não tem esse campo; ele é só daqui.
+            </p>
             <label className="rotulo" htmlFor="pix">
               Chave PIX (complementar)
             </label>

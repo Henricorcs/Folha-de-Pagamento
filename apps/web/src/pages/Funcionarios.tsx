@@ -205,6 +205,11 @@ export function Funcionarios() {
                         IXC {f.ixcId}
                       </span>
                     )}
+                    {f.apelido && (
+                      <div className="mt-0.5 text-xs text-tinta-500">
+                        {f.apelido}
+                      </div>
+                    )}
                   </td>
                   <td className="td num text-tinta-500">{f.cpfCnpj ?? '—'}</td>
                   <td className="td text-tinta-500">

@@ -18,6 +18,9 @@ export class QueryContasPagarDto {
   @IsOptional() @IsEnum(TipoLancamento) tipo?: TipoLancamento;
   @IsOptional() @IsString() funcionarioId?: string;
 
+  /** Nome, apelido ou CPF/CNPJ de quem recebeu — funcionário, diarista ou avulso. */
+  @IsOptional() @IsString() busca?: string;
+
   @IsOptional()
   @Matches(/^\d{4}-\d{2}$/)
   competencia?: string;

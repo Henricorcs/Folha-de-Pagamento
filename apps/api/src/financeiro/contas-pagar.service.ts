@@ -62,6 +62,8 @@ export interface SituacaoAdiantamento {
 export interface PreviewFuncionario {
   funcionarioId: string;
   nome: string;
+  /** Como a pessoa é chamada; é por ele que a busca da tela também acha. */
+  apelido: string | null;
   carteiraAssinada: boolean;
   recebeAdiantamento: boolean;
   /** null para quem não recebe adiantamento no dia 25. */
@@ -254,6 +256,7 @@ export class ContasPagarService {
       return {
         funcionarioId: f.id,
         nome: f.nome,
+        apelido: f.apelido,
         carteiraAssinada: f.carteiraAssinada,
         recebeAdiantamento: f.recebeAdiantamento,
         adiantamento:
@@ -739,6 +742,7 @@ export class ContasPagarService {
     if (q.competencia) where.competencia = q.competencia;
     if (q.funcionarioId) where.funcionarioId = q.funcionarioId;
     if (q.tipo) where.tipo = q.tipo;
+    if (q.busca?.trim()) where.OR = filtroDeBusca(q.busca.trim());
 
     const page = q.page ?? 1;
     const pageSize = q.pageSize ?? 50;
@@ -1088,6 +1092,27 @@ export class ContasPagarService {
     if (!b) throw new NotFoundException('Beneficiário não encontrado');
     return b.nome;
   }
+}
+
+/**
+ * Onde procurar o nome digitado.
+ *
+ * `beneficiarioNome` é uma foto do nome no dia em que a conta nasceu, e é ela
+ * que a lista mostra — mas procurar só nela deixaria de fora quem se busca pelo
+ * apelido ou pelo CPF, que nem sequer estão gravados aqui. Por isso a busca
+ * também desce para o cadastro de cada tipo de beneficiário.
+ *
+ * O diarista guarda o apelido em `nomeFantasia`; o funcionário, em `apelido`. O
+ * avulso não tem apelido: é cadastro de passagem, criado para um pagamento.
+ */
+function filtroDeBusca(busca: string): Prisma.ContaPagarWhereInput[] {
+  const contem = { contains: busca, mode: Prisma.QueryMode.insensitive };
+  return [
+    { beneficiarioNome: contem },
+    { funcionario: { is: { OR: [{ apelido: contem }, { cpfCnpj: contem }] } } },
+    { diarista: { is: { OR: [{ nomeFantasia: contem }, { cpfCnpj: contem }] } } },
+    { beneficiarioAvulso: { is: { cpfCnpj: contem } } },
+  ];
 }
 
 /** Conta a pagar do dia 25 encontrada para um funcionário. */

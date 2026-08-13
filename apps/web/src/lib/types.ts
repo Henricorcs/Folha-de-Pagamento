@@ -18,6 +18,8 @@ export interface Funcionario {
   id: string;
   ixcId: number | null;
   nome: string;
+  /** Como a pessoa é chamada no dia a dia; é por ele que a busca acha. */
+  apelido: string | null;
   cpfCnpj: string | null;
   email: string | null;
   telefone: string | null;
@@ -262,6 +264,7 @@ export interface ContaJaGerada {
 export interface PreviewFuncionario {
   funcionarioId: string;
   nome: string;
+  apelido: string | null;
   carteiraAssinada: boolean;
   recebeAdiantamento: boolean;
   /** null para quem não recebe adiantamento no dia 25 */

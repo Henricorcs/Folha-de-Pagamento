@@ -3,17 +3,21 @@ import { formatBRL } from '../lib/format';
 
 /**
  * Sequência categórica da casa, na ordem fixa em que as fatias são servidas —
- * nunca ciclada, nunca por ranking. Começa no turquesa da marca e segue por
- * matizes que se distinguem em daltonismo (verificado em protanopia,
- * deuteranopia e tritanopia, com contraste ≥ 3:1 sobre o cartão branco).
+ * nunca ciclada, nunca por ranking. Começa no azul da logo e segue por matizes
+ * que se distinguem em daltonismo (protanopia, deuteranopia e tritanopia), com
+ * contraste ≥ 3:1 sobre o cartão branco.
+ *
+ * O turquesa era o primeiro tom quando a marca era turquesa; agora que a marca
+ * é o azul da ilnet, ele desceu para terceiro e o azul genérico que ocupava
+ * essa posição saiu — dois azuis vizinhos numa mesma barra não se separam.
  *
  * Trocar um valor aqui exige revalidar: cor de gráfico é o que separa uma
  * série da outra para quem lê.
  */
 export const PALETA = [
-  '#0E9E91', // turquesa da marca
+  '#1490EE', // azul da marca
   '#D97706', // âmbar
-  '#0284C7', // azul
+  '#0E9E91', // turquesa
   '#E11D48', // vermelho
   '#7C3AED', // violeta
 ] as const;
