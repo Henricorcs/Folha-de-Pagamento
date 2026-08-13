@@ -17,13 +17,20 @@ import {
   Vazio,
 } from '../components/ui';
 import { api, mensagemErro } from '../lib/api';
+import { mesAnterior, mesAtual, mesSeguinte, nomeDoMes } from '../lib/folha';
 import { formatBRL, formatData } from '../lib/format';
 import { STATUS_LABEL, STATUS_TOM, TIPO_LABEL } from '../lib/status';
 import type { Dashboard as TDashboard, TipoLancamento } from '../lib/types';
 
-function competenciaAtual(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+/**
+ * Qual mês de trabalho a tela abre mostrando: o anterior.
+ *
+ * O mês corrente é sempre incompleto aqui — a folha dele só vai ser paga no
+ * começo do mês que vem. Abrir nele mostraria um custo perto de zero todo dia
+ * 1º, e quem olha entenderia que a empresa parou de gastar.
+ */
+function mesTrabalhadoInicial(): string {
+  return mesAnterior(mesAtual());
 }
 
 function formatComp(comp: string): string {
@@ -69,7 +76,7 @@ const SERIES_IMPOSTO: SerieGrafico[] = [
 ];
 
 export function Dashboard() {
-  const [competencia, setCompetencia] = useState(competenciaAtual());
+  const [competencia, setCompetencia] = useState(mesTrabalhadoInicial());
   const [meses, setMeses] = useState(12);
 
   const { data, isLoading, isError, error } = useQuery({
@@ -111,13 +118,13 @@ export function Dashboard() {
     <Pagina>
       <CabecalhoPagina
         secao="Dashboard"
-        titulo={`Folha de ${formatComp(competencia)}`}
-        descricao="Quanto custa a operação, para onde o dinheiro foi e o que ainda está parado esperando alguém."
+        titulo={`Trabalho de ${nomeDoMes(competencia)}`}
+        descricao={`Quanto custou o mês trabalhado. A folha dele sai no começo de ${nomeDoMes(mesSeguinte(competencia))} — os valores aparecem aqui, no mês que eles pagaram. Diárias e pagamentos avulsos entram pelo dia em que saíram.`}
         acoes={
           <div className="flex flex-wrap items-end gap-4">
             <div>
               <label className="rotulo" htmlFor="competencia">
-                Competência
+                Mês trabalhado
               </label>
               <input
                 id="competencia"
@@ -168,9 +175,11 @@ export function Dashboard() {
               rotulo={`Custo com pessoal em ${formatComp(competencia)}`}
               valor={formatBRL(custoDoMes?.total)}
               detalhe={
-                custoDoMes
-                  ? `${formatBRL(custoDoMes.folha)} de folha e avulsos + ${formatBRL(custoDoMes.diaristas)} de diárias + ${formatBRL(custoDoMes.encargos)} de encargos`
-                  : 'nada lançado nesta competência'
+                <PartesDoCusto
+                  tipos={tiposDoMes}
+                  diarias={diariasDoMes?.valor ?? 0}
+                  encargos={impostoDoMes?.folhaPatronal ?? 0}
+                />
               }
             />
             <Indicador
@@ -199,9 +208,16 @@ export function Dashboard() {
               rotulo="Gasto com vendas"
               valor={formatBRL(vendasDoMes?.total)}
               detalhe={
-                vendasDoMes && vendasDoMes.total > 0
-                  ? `${vendasDoMes.vendas} venda(s) · ${formatBRL(vendasDoMes.foraDaFolha)} a diaristas e avulsos + ${formatBRL(vendasDoMes.funcionarios)} dentro da folha`
-                  : 'nenhuma comissão de venda neste mês'
+                vendasDoMes && vendasDoMes.vendas > 0 ? (
+                  <>
+                    {vendasDoMes.vendas} venda(s) no mês
+                    <br />
+                    {formatBRL(vendasDoMes.funcionarios)} na folha +{' '}
+                    {formatBRL(vendasDoMes.foraDaFolha)} a diaristas e avulsos
+                  </>
+                ) : (
+                  'nenhuma comissão de venda neste mês'
+                )
               }
             />
             <Indicador
@@ -519,6 +535,45 @@ export function Dashboard() {
         </div>
       )}
     </Pagina>
+  );
+}
+
+/**
+ * O custo com pessoal aberto parte a parte — é a soma de tudo que os outros
+ * cartões mostram, e sem a lista ninguém sabe o que entrou nele.
+ *
+ * Só o que teve valor aparece: "R$ 0,00 de diárias" ocupa a linha sem dizer
+ * nada, e o cartão de diaristas ao lado já mostra o zero para quem procura.
+ */
+function PartesDoCusto({
+  tipos,
+  diarias,
+  encargos,
+}: {
+  tipos?: { salario: number; adiantamento: number; bonus: number; avulso: number };
+  diarias: number;
+  encargos: number;
+}) {
+  const partes = [
+    { rotulo: 'salário', valor: tipos?.salario ?? 0 },
+    { rotulo: 'adiantamento', valor: tipos?.adiantamento ?? 0 },
+    { rotulo: 'bônus', valor: tipos?.bonus ?? 0 },
+    { rotulo: 'avulsos', valor: tipos?.avulso ?? 0 },
+    { rotulo: 'diárias', valor: diarias },
+    { rotulo: 'encargos', valor: encargos },
+  ].filter((p) => p.valor > 0);
+
+  if (partes.length === 0) return <>nada lançado neste mês</>;
+
+  return (
+    <>
+      {partes.map((p, i) => (
+        <span key={p.rotulo}>
+          {i > 0 && ' + '}
+          {formatBRL(p.valor)} de {p.rotulo}
+        </span>
+      ))}
+    </>
   );
 }
 

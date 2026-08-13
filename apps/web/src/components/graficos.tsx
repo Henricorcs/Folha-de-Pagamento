@@ -25,6 +25,7 @@ export interface SerieGrafico {
   cor: string;
 }
 
+// prettier-ignore
 const MES_CURTO = [
   'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
   'jul', 'ago', 'set', 'out', 'nov', 'dez',
@@ -35,24 +36,13 @@ export function rotuloMes(competencia: string): string {
   return m ? `${MES_CURTO[Number(m[2]) - 1]}/${m[1].slice(2)}` : competencia;
 }
 
-/** Só o mês, sem o ano ("ago"). */
-function mesCurto(competencia: string): string {
-  const m = /^(\d{4})-(\d{2})$/.exec(competencia);
-  return m ? MES_CURTO[Number(m[2]) - 1] : competencia;
-}
-
 /**
- * De quantos em quantos meses o eixo escreve um rótulo.
- *
- * Doze meses num cartão de um terço da tela dão uns 30px por coluna, e
- * "set/25out/25nov/25" vira uma tarja ilegível. Pular rótulos é melhor do que
- * encolher a fonte: o que se lê num eixo é o começo, o fim e o mês em foco.
+ * Altura reservada ao rótulo em pé. Doze meses num cartão de um terço da tela
+ * dão uns 10px por coluna: "ago/26" deitado não cabe de jeito nenhum, e pular
+ * rótulos deixava o eixo mudo em dois terços das barras. Em pé, todo mês tem
+ * nome — o que custa é esta faixa embaixo do gráfico.
  */
-function passoDoRotulo(quantidade: number): number {
-  if (quantidade > 8) return 3;
-  if (quantidade > 5) return 2;
-  return 1;
-}
+const ALTURA_ROTULO = 44;
 
 type LinhaDoMes = { competencia: string } & Record<string, number | string>;
 
@@ -79,7 +69,6 @@ export function BarrasEmpilhadas({
   const totais = meses.map((m) => somar(m, series));
   const maior = Math.max(1, ...totais);
   const vazio = totais.every((t) => t === 0);
-  const passo = passoDoRotulo(meses.length);
 
   // Nada lançado: as barras seriam doze tocos cinzas com um eixo por baixo,
   // ocupando meia tela para dizer "zero". A frase diz o mesmo e se lê de longe.
@@ -103,10 +92,6 @@ export function BarrasEmpilhadas({
         {meses.map((mes, i) => {
           const total = totais[i];
           const eAtual = mes.competencia === atual;
-          // Do fim para o começo: o último mês sempre ganha rótulo, e é dele
-          // que a contagem parte — senão o mês em foco pode ficar mudo.
-          const mostraRotulo =
-            eAtual || (meses.length - 1 - i) % passo === 0;
           return (
             <div
               key={mes.competencia}
@@ -115,56 +100,70 @@ export function BarrasEmpilhadas({
               className="group relative flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-2"
             >
               <span
-                className={`num text-[10px] font-semibold transition ${
+                className={`num shrink-0 text-[10px] font-semibold transition ${
                   eAtual ? 'text-tinta-700' : 'text-tinta-400'
                 }`}
               >
                 {total > 0 ? formatCompacto(total) : ''}
               </span>
 
-              <div
-                className="flex w-full origin-bottom animate-crescer flex-col-reverse justify-start overflow-hidden rounded-t-md"
-                style={{
-                  height: `${Math.max((total / maior) * 100, total > 0 ? 3 : 1)}%`,
-                  animationDelay: `${i * 50}ms`,
-                }}
-              >
-                {total === 0 ? (
-                  <div className="h-full w-full rounded-t-md bg-tinta-100" />
-                ) : (
-                  series.map((s) => {
-                    const valor = Number(mes[s.chave] ?? 0);
-                    if (valor <= 0) return null;
-                    return (
-                      <div
-                        key={s.chave}
-                        // A borda branca é o respiro de 2px entre fatias: sem
-                        // ela, duas cores vizinhas viram uma mancha só. Fica
-                        // embaixo porque a coluna é `flex-col-reverse`: a
-                        // primeira série é a de baixo, e ela não separa nada.
-                        className="w-full border-b-2 border-white first:border-b-0"
-                        style={{
-                          height: `${(valor / total) * 100}%`,
-                          background: s.cor,
-                        }}
-                      />
-                    );
-                  })
-                )}
+              {/* A área das barras fica com o que sobra depois do valor e do
+                  rótulo. Antes a barra media 100% da coluna inteira e o flex
+                  a encolhia para caber — encolhendo mais a barra maior, que é
+                  justamente a que não podia mentir.
+
+                  A barra vai absoluta porque altura em % precisa de um pai com
+                  altura resolvida: aqui quem resolve é o `flex-1`, e o encaixe
+                  pelo `bottom` é o que a faz crescer de baixo para cima. */}
+              <div className="relative w-full min-h-0 flex-1">
+                <div
+                  className="absolute inset-x-0 bottom-0 flex origin-bottom animate-crescer flex-col-reverse justify-start overflow-hidden rounded-t-md"
+                  style={{
+                    height: `${Math.max((total / maior) * 100, total > 0 ? 3 : 1)}%`,
+                    animationDelay: `${i * 50}ms`,
+                  }}
+                >
+                  {total === 0 ? (
+                    <div className="h-full w-full rounded-t-md bg-tinta-100" />
+                  ) : (
+                    series.map((s) => {
+                      const valor = Number(mes[s.chave] ?? 0);
+                      if (valor <= 0) return null;
+                      return (
+                        <div
+                          key={s.chave}
+                          // A borda branca é o respiro de 2px entre fatias: sem
+                          // ela, duas cores vizinhas viram uma mancha só. Fica
+                          // embaixo porque a coluna é `flex-col-reverse`: a
+                          // primeira série é a de baixo, e ela não separa nada.
+                          className="w-full border-b-2 border-white first:border-b-0"
+                          style={{
+                            height: `${(valor / total) * 100}%`,
+                            background: s.cor,
+                          }}
+                        />
+                      );
+                    })
+                  )}
+                </div>
               </div>
 
-              <span
-                className={`text-[11px] leading-none ${
-                  eAtual ? 'font-semibold text-tinta-800' : 'text-tinta-400'
-                }`}
+              {/* Em pé, para todos os meses caberem lado a lado. A caixa tem
+                  altura fixa e o texto gira dentro dela; sem isso o rótulo
+                  girado empurraria a coluna e desalinharia o eixo. */}
+              <div
+                className="flex w-full shrink-0 items-center justify-center"
+                style={{ height: ALTURA_ROTULO }}
               >
-                {/* O ano só no mês em foco e em janeiro, que é onde ele vira. */}
-                {mostraRotulo
-                  ? eAtual || mes.competencia.endsWith('-01')
-                    ? rotuloMes(mes.competencia)
-                    : mesCurto(mes.competencia)
-                  : ''}
-              </span>
+                <span
+                  className={`whitespace-nowrap text-[11px] leading-none ${
+                    eAtual ? 'font-semibold text-tinta-800' : 'text-tinta-400'
+                  }`}
+                  style={{ transform: 'rotate(-90deg)' }}
+                >
+                  {rotuloMes(mes.competencia)}
+                </span>
+              </div>
 
               {total > 0 && (
                 <Balao>
@@ -251,7 +250,10 @@ function Legenda({
   return (
     <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 border-t border-tinta-100 pt-4">
       {series.map((s) => {
-        const total = meses.reduce((soma, m) => soma + Number(m[s.chave] ?? 0), 0);
+        const total = meses.reduce(
+          (soma, m) => soma + Number(m[s.chave] ?? 0),
+          0,
+        );
         return (
           <span key={s.chave} className="flex items-center gap-2 text-xs">
             <span

@@ -4,7 +4,10 @@ import {
   StatusContaPagar,
   TipoLancamento,
 } from '@prisma/client';
-import { competenciaAnterior } from '../financeiro/folha.calc';
+import {
+  competenciaAnterior,
+  competenciaSeguinte,
+} from '../financeiro/folha.calc';
 import { FuncionariosService } from '../funcionarios/funcionarios.service';
 import { ImpostosService } from '../impostos/impostos.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -44,24 +47,16 @@ export class DashboardService {
     const inicio = primeiroDia(meses[0]);
     const fim = depoisDoUltimoDia(comp);
 
-    // Diária e pagamento avulso não têm competência na conta a pagar (ela nasce
-    // sem, e o pago em mãos nem vira conta). Os dois entram pela data do
-    // pagamento — mas a situação do mês lê a conta, e sem esta janela o avulso
-    // pago sumia da tela inteira.
-    const doMes = {
-      OR: [
-        { competencia: comp },
-        { competencia: null, dataEmissao: { gte: primeiroDia(comp), lt: fim } },
-      ],
-    };
+    // O salário do mês trabalhado sai no mês seguinte, então a folha do último
+    // mês da série está gravada na competência seguinte a ele — sem lê-la, o
+    // mês em foco apareceria sempre vazio.
+    const competenciasLidas = [...meses, competenciaSeguinte(comp)];
 
     const [
       funcionarios,
       valesResumo,
       semPix,
-      porStatus,
-      porTipo,
-      serieContas,
+      contas,
       diarias,
       avulsos,
       impostos,
@@ -69,7 +64,7 @@ export class DashboardService {
       ultimoSync,
     ] = await Promise.all([
       this.funcionarios.resumo(),
-      this.vales.resumo(comp),
+      this.vales.resumo(competenciaSeguinte(comp)),
       this.prisma.funcionario.count({
         where: {
           isentoIcms: true,
@@ -77,23 +72,20 @@ export class DashboardService {
           OR: [{ chavePix: null }, { chavePix: '' }],
         },
       }),
-      this.prisma.contaPagar.groupBy({
-        by: ['status'],
-        where: doMes,
-        _count: { _all: true },
-        _sum: { valor: true },
-      }),
-      this.prisma.contaPagar.groupBy({
-        by: ['tipo'],
-        where: doMes,
-        _count: { _all: true },
-        _sum: { valor: true },
-      }),
-      // Uma leitura só para todas as séries: tipo, status e mês por conta.
+      // Uma leitura só para tudo que vem de conta a pagar: as séries, a
+      // repartição do mês e a situação. Diária e avulso não têm competência (a
+      // conta nasce sem, e a paga em mãos nem vira conta), então entram pela
+      // data de emissão.
       this.prisma.contaPagar.findMany({
-        where: { competencia: { in: meses } },
+        where: {
+          OR: [
+            { competencia: { in: competenciasLidas } },
+            { competencia: null, dataEmissao: { gte: inicio, lt: fim } },
+          ],
+        },
         select: {
           competencia: true,
+          dataEmissao: true,
           tipo: true,
           status: true,
           valor: true,
@@ -131,12 +123,19 @@ export class DashboardService {
       this.prisma.syncLog.findFirst({ orderBy: { iniciadoEm: 'desc' } }),
     ]);
 
+    // Cada conta ganha o mês de trabalho a que ela se refere — que não é o mês
+    // em que o dinheiro sai. É essa tradução que faz a folha paga em setembro
+    // aparecer como custo de agosto, que é o mês que ela pagou.
+    const contasDoMes = contas.filter(
+      (c) => mesTrabalhadoDaConta(c) === comp,
+    );
+    const porStatus = agruparPorStatus(contasDoMes);
     const somaStatus = (...alvos: StatusContaPagar[]) =>
       porStatus
         .filter((s) => alvos.includes(s.status))
-        .reduce((soma, s) => soma + Number(s._sum.valor ?? 0), 0);
+        .reduce((soma, s) => soma + s.valor, 0);
 
-    const serie = montarSerieContas(meses, serieContas);
+    const serie = montarSerieContas(meses, contas);
     const diaristas = montarPagamentosPorData(meses, diarias, (d) => d.diaristaId);
     const avulsosSerie = montarPagamentosPorData(
       meses,
@@ -146,7 +145,7 @@ export class DashboardService {
     const diariasDoMes = diaristas.serie.find((d) => d.competencia === comp);
     const avulsosDoMes = avulsosSerie.serie.find((a) => a.competencia === comp);
     const serieTipos = comDiariaEAvulso(serie.porTipo, diaristas, avulsosSerie);
-    const vendas = montarVendas(meses, [...diarias, ...avulsos], serieContas);
+    const vendas = montarVendas(meses, [...diarias, ...avulsos], contas);
 
     return {
       competencia: comp,
@@ -161,27 +160,17 @@ export class DashboardService {
         semPix,
       },
       folha: {
-        total: porStatus.reduce((s, i) => s + Number(i._sum.valor ?? 0), 0),
+        total: porStatus.reduce((s, i) => s + i.valor, 0),
         pago: somaStatus(StatusContaPagar.PAGO),
         emAberto: somaStatus(...EM_ABERTO),
         comErro: somaStatus(StatusContaPagar.ERRO),
-        quantidade: porStatus.reduce((s, i) => s + i._count._all, 0),
-        porStatus: porStatus
-          .map((s) => ({
-            status: s.status,
-            quantidade: s._count._all,
-            valor: Number(s._sum.valor ?? 0),
-          }))
-          .sort((a, b) => b.valor - a.valor),
+        quantidade: porStatus.reduce((s, i) => s + i.quantidade, 0),
+        porStatus,
         porTipo: ordenarTipos(
-          porTipo
-            .map((t) => ({
-              tipo: t.tipo,
-              quantidade: t._count._all,
-              valor: Number(t._sum.valor ?? 0),
-            }))
-            // Diária e avulso não têm competência na conta a pagar; entram pela
-            // data do pagamento, que é o que a série ao lado já sabe contar.
+          agruparPorTipo(contasDoMes)
+            // Diária e avulso não têm competência na conta a pagar, e o pago em
+            // mãos nem vira conta; os dois entram pela data do pagamento, que é
+            // o que a série ao lado já sabe contar.
             .filter(
               (t) =>
                 t.tipo !== TipoLancamento.DIARIA &&
@@ -223,6 +212,7 @@ function linhaDoTipo(
 
 interface ContaDaSerie {
   competencia: string | null;
+  dataEmissao: Date;
   tipo: TipoLancamento;
   status: StatusContaPagar;
   valor: unknown;
@@ -232,18 +222,80 @@ interface ContaDaSerie {
 }
 
 /**
+ * A que mês de **trabalho** aquela conta se refere.
+ *
+ * A empresa paga o mês seguinte ao trabalhado: o salário e o bônus de agosto
+ * saem na folha de setembro. Só o adiantamento fala do próprio mês — ele é pago
+ * no dia 25, no meio do mês que está sendo trabalhado.
+ *
+ * A dashboard agregava pela competência, que é o mês em que o dinheiro sai, e
+ * por isso o custo de agosto aparecia na coluna de setembro. Quem confere a
+ * folha pensa no mês trabalhado ("a folha de agosto"), e é assim que a tela
+ * pergunta desde a mudança na tela de gerar folha.
+ */
+function mesTrabalhadoDaConta(c: {
+  competencia: string | null;
+  dataEmissao: Date;
+  tipo: TipoLancamento;
+}): string {
+  // Diária e avulso não têm competência: valem pelo dia em que saíram.
+  if (!c.competencia) return mesDaData(c.dataEmissao);
+  return c.tipo === TipoLancamento.ADIANTAMENTO
+    ? c.competencia
+    : competenciaAnterior(c.competencia);
+}
+
+/** Soma por situação as contas de um mês, da maior para a menor. */
+function agruparPorStatus(contas: ContaDaSerie[]) {
+  const porStatus = new Map<
+    StatusContaPagar,
+    { status: StatusContaPagar; quantidade: number; valor: number }
+  >();
+  for (const c of contas) {
+    const atual = porStatus.get(c.status) ?? {
+      status: c.status,
+      quantidade: 0,
+      valor: 0,
+    };
+    atual.quantidade++;
+    atual.valor = arredondar(atual.valor + Number(c.valor ?? 0));
+    porStatus.set(c.status, atual);
+  }
+  return [...porStatus.values()].sort((a, b) => b.valor - a.valor);
+}
+
+/** Soma por tipo de lançamento as contas de um mês. */
+function agruparPorTipo(contas: ContaDaSerie[]) {
+  const porTipo = new Map<
+    TipoLancamento,
+    { tipo: TipoLancamento; quantidade: number; valor: number }
+  >();
+  for (const c of contas) {
+    const atual = porTipo.get(c.tipo) ?? {
+      tipo: c.tipo,
+      quantidade: 0,
+      valor: 0,
+    };
+    atual.quantidade++;
+    atual.valor = arredondar(atual.valor + Number(c.valor ?? 0));
+    porTipo.set(c.tipo, atual);
+  }
+  return [...porTipo.values()];
+}
+
+/**
  * Duas leituras da mesma lista de contas: o total × pago de cada mês (a barra
  * do topo) e a repartição por tipo (de onde saem os gráficos de bônus,
- * salário e adiantamento).
+ * salário e adiantamento). Tudo pelo mês trabalhado.
  */
 function montarSerieContas(meses: string[], contas: ContaDaSerie[]) {
   const total = new Map(meses.map((m) => [m, { total: 0, pago: 0 }]));
   const porTipo = new Map(meses.map((m) => [m, zeroPorTipo()]));
 
   for (const conta of contas) {
-    if (!conta.competencia) continue;
-    const mes = total.get(conta.competencia);
-    const tipos = porTipo.get(conta.competencia);
+    const trabalhado = mesTrabalhadoDaConta(conta);
+    const mes = total.get(trabalhado);
+    const tipos = porTipo.get(trabalhado);
     if (!mes || !tipos) continue;
 
     const valor = Number(conta.valor ?? 0);
@@ -435,7 +487,9 @@ function montarVendas(
   }
 
   for (const c of contas) {
-    const mes = c.competencia ? porMes.get(c.competencia) : undefined;
+    // Pelo mês trabalhado: a comissão de agosto sai na folha de setembro, e
+    // quem pergunta "quanto agosto custou em venda" quer vê-la em agosto.
+    const mes = porMes.get(mesTrabalhadoDaConta(c));
     if (!mes || SEM_SAIDA.includes(c.status)) continue;
     mes.folha += Number(c.comissaoVendas ?? 0);
     mes.vendas += c.vendas;

@@ -20,7 +20,9 @@ export function Funcionarios() {
   const qc = useQueryClient();
   const [busca, setBusca] = useState('');
   const [buscaAtiva, setBuscaAtiva] = useState('');
-  const [ativo, setAtivo] = useState<'todos' | 'true' | 'false'>('todos');
+  // Nasce em "Ativos": é quem entra na próxima folha, e é essa a pergunta que
+  // a tela responde. Quem saiu continua a um clique, no seletor.
+  const [ativo, setAtivo] = useState<'todos' | 'true' | 'false'>('true');
   const [page, setPage] = useState(1);
   const [feedback, setFeedback] = useState<string | null>(null);
 
@@ -145,9 +147,9 @@ export function Funcionarios() {
             }}
             className="campo w-auto"
           >
-            <option value="todos">Todos</option>
             <option value="true">Ativos</option>
             <option value="false">Inativos</option>
+            <option value="todos">Todos</option>
           </select>
           <button className="btn btn-neutro">Buscar</button>
         </form>

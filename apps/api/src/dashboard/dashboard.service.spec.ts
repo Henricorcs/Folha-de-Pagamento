@@ -17,7 +17,14 @@ import { DashboardService } from './dashboard.service';
  *  - o gasto com vendas soma quem vende: diarista, avulso e funcionário.
  */
 
+/** O mês **trabalhado** que a dashboard mostra. */
 const COMP = '2026-07';
+/**
+ * Onde a folha de COMP fica gravada: a empresa paga o mês seguinte ao
+ * trabalhado. É essa tradução que a dashboard faz, e por isso as contas dos
+ * testes nascem aqui e são conferidas em COMP.
+ */
+const PAGA_EM = '2026-08';
 
 interface ContaDoTeste {
   competencia: string | null;
@@ -27,6 +34,8 @@ interface ContaDoTeste {
   /** Quanto do valor era comissão de venda, como a folha gravou. */
   comissaoVendas?: number;
   vendas?: number;
+  /** Só usada por quem não tem competência (diária, avulso). */
+  dataEmissao?: Date;
 }
 
 interface PagamentoDoTeste {
@@ -67,7 +76,12 @@ function montarServico(dados: {
       findMany: jest
         .fn()
         .mockResolvedValue(
-          (dados.contas ?? []).map((c) => ({ comissaoVendas: 0, vendas: 0, ...c })),
+          (dados.contas ?? []).map((c) => ({
+            comissaoVendas: 0,
+            vendas: 0,
+            dataEmissao: new Date(`${COMP}-15T00:00:00.000Z`),
+            ...c,
+          })),
         ),
     },
     diaria: {
@@ -109,6 +123,77 @@ function montarServico(dados: {
   };
 }
 
+/**
+ * O eixo da dashboard é o mês **trabalhado**, não o mês em que o dinheiro sai.
+ *
+ * A empresa paga o mês seguinte ao trabalhado: a folha de julho sai em agosto.
+ * Agregar pela competência punha o custo de julho na coluna de agosto — e quem
+ * confere a folha pensa "a folha de julho", como a tela de gerar folha já
+ * pergunta. Só o adiantamento do dia 25 fala do próprio mês: ele é pago no meio
+ * do mês que está sendo trabalhado.
+ */
+describe('mês trabalhado, não mês do pagamento', () => {
+  it('salário e bônus contam no mês anterior ao da competência', async () => {
+    const { service } = montarServico({
+      contas: [
+        {
+          competencia: PAGA_EM,
+          tipo: TipoLancamento.SALARIO,
+          status: StatusContaPagar.PAGO,
+          valor: 5000,
+        },
+      ],
+    });
+
+    const r = await service.resumo(COMP, 2);
+    const [anterior, trabalhado] = r.serieTipos;
+    expect(trabalhado).toMatchObject({ competencia: COMP, salario: 5000 });
+    expect(anterior.salario).toBe(0);
+  });
+
+  it('o adiantamento do dia 25 conta no próprio mês da competência', async () => {
+    const { service } = montarServico({
+      contas: [
+        {
+          competencia: COMP,
+          tipo: TipoLancamento.ADIANTAMENTO,
+          status: StatusContaPagar.PAGO,
+          valor: 800,
+        },
+      ],
+    });
+
+    const r = await service.resumo(COMP, 1);
+    expect(r.serieTipos[0]).toMatchObject({ competencia: COMP, adiantamento: 800 });
+  });
+
+  /**
+   * A situação e a repartição do mês leem a mesma régua das séries — se
+   * divergissem, o cartão diria um número e o bloco ao lado, outro.
+   */
+  it('a situação do mês segue o mesmo mês trabalhado', async () => {
+    const { service } = montarServico({
+      contas: [
+        {
+          competencia: PAGA_EM,
+          tipo: TipoLancamento.SALARIO,
+          status: StatusContaPagar.PAGO,
+          valor: 5000,
+        },
+      ],
+    });
+
+    const r = await service.resumo(COMP, 1);
+    expect(r.folha.pago).toBe(5000);
+    expect(r.folha.porStatus).toEqual([
+      { status: StatusContaPagar.PAGO, quantidade: 1, valor: 5000 },
+    ]);
+    expect(r.folha.porTipo).toEqual([
+      { tipo: TipoLancamento.SALARIO, quantidade: 1, valor: 5000 },
+    ]);
+  });
+});
+
 describe('período das séries', () => {
   it('cobre os meses pedidos, do mais antigo ao mês escolhido', async () => {
     const { service } = montarServico({});
@@ -134,13 +219,13 @@ describe('o que conta como gasto', () => {
     const { service } = montarServico({
       contas: [
         {
-          competencia: COMP,
+          competencia: PAGA_EM,
           tipo: TipoLancamento.SALARIO,
           status: StatusContaPagar.PAGO,
           valor: 5000,
         },
         {
-          competencia: COMP,
+          competencia: PAGA_EM,
           tipo: TipoLancamento.BONUS,
           status: StatusContaPagar.AGUARDANDO_PAGAMENTO,
           valor: 400,
@@ -148,6 +233,7 @@ describe('o que conta como gasto', () => {
       ],
     });
 
+    // Salário e bônus da competência seguinte pagam o trabalho de COMP.
     const r = await service.resumo(COMP, 1);
     expect(r.serieTipos[0]).toMatchObject({ salario: 5000, bonus: 400 });
     expect(r.serie[0]).toMatchObject({ total: 5400, pago: 5000 });
@@ -158,19 +244,19 @@ describe('o que conta como gasto', () => {
     const { service } = montarServico({
       contas: [
         {
-          competencia: COMP,
+          competencia: PAGA_EM,
           tipo: TipoLancamento.SALARIO,
           status: StatusContaPagar.REPROVADO,
           valor: 1000,
         },
         {
-          competencia: COMP,
+          competencia: PAGA_EM,
           tipo: TipoLancamento.BONUS,
           status: StatusContaPagar.CANCELADO,
           valor: 200,
         },
         {
-          competencia: COMP,
+          competencia: PAGA_EM,
           tipo: TipoLancamento.AVULSO,
           status: StatusContaPagar.ERRO,
           valor: 300,
@@ -412,7 +498,7 @@ describe('gasto com vendas', () => {
     const { service } = montarServico({
       contas: [
         {
-          competencia: COMP,
+          competencia: PAGA_EM,
           tipo: TipoLancamento.SALARIO,
           status: StatusContaPagar.PAGO,
           valor: 3000,
@@ -436,7 +522,7 @@ describe('gasto com vendas', () => {
     const { service } = montarServico({
       contas: [
         {
-          competencia: COMP,
+          competencia: PAGA_EM,
           tipo: TipoLancamento.SALARIO,
           status: StatusContaPagar.PAGO,
           valor: 3000,
@@ -453,7 +539,7 @@ describe('gasto com vendas', () => {
     const { service } = montarServico({
       contas: [
         {
-          competencia: COMP,
+          competencia: PAGA_EM,
           tipo: TipoLancamento.SALARIO,
           status: StatusContaPagar.REPROVADO,
           valor: 3000,
@@ -478,7 +564,7 @@ describe('custo com pessoal', () => {
     const { service } = montarServico({
       contas: [
         {
-          competencia: COMP,
+          competencia: PAGA_EM,
           tipo: TipoLancamento.SALARIO,
           status: StatusContaPagar.PAGO,
           valor: 10000,
@@ -520,7 +606,7 @@ describe('custo com pessoal', () => {
     const { service } = montarServico({
       contas: [
         {
-          competencia: COMP,
+          competencia: PAGA_EM,
           tipo: TipoLancamento.SALARIO,
           status: StatusContaPagar.PAGO,
           valor: 1000,
