@@ -522,9 +522,11 @@ export class DiaristasService {
     }
     if (diaria.contaPagarId) {
       // Apaga o fn_apagar no IXC e o registro daqui; se o IXC recusar, nada sai.
+      // Apagar a conta a pagar já leva esta diária junto, então o que sobra
+      // abaixo é a diária em mãos antiga, que nunca teve conta.
       await this.contasPagar.remover(diaria.contaPagarId);
     }
-    await this.prisma.diaria.delete({ where: { id: diaria.id } });
+    await this.prisma.diaria.deleteMany({ where: { id: diaria.id } });
   }
 
   private async buscarDiaria(id: string): Promise<Diaria> {

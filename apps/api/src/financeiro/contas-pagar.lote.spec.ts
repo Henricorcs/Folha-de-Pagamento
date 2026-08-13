@@ -66,6 +66,8 @@ function montarServico() {
       ),
       delete: jest.fn().mockResolvedValue({}),
     },
+    diaria: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    pagamentoAvulso: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
   } as any;
 
   const ixc = {
@@ -151,5 +153,39 @@ describe('removerEmLote', () => {
     expect(r).toMatchObject({ total: 1, sucesso: 0 });
     expect(r.falhas[0].erro).toMatch(/não apagou a conta/i);
     expect(prisma.contaPagar.delete).not.toHaveBeenCalled();
+    // Nem a diária que ela pagava: nada some enquanto a conta continua lá.
+    expect(prisma.diaria.deleteMany).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A diária e o pagamento avulso *são* a conta a pagar deles: é ela que paga a
+ * pessoa. Apagada a conta, o pagamento não aconteceu, e o registro tem de sumir
+ * junto — senão ele fica com a chave estrangeira em null, igualzinho a um
+ * pagamento em mãos antigo, aparecendo "fora do caixa" e oferecendo lançar no
+ * caixa um dinheiro que nunca saiu.
+ */
+describe('apagar a conta a pagar leva junto o que ela pagava', () => {
+  it('apaga a diária e o pagamento avulso ligados à conta', async () => {
+    const { service, prisma } = montarServico();
+
+    await service.remover('ok1');
+
+    expect(prisma.diaria.deleteMany).toHaveBeenCalledWith({
+      where: { contaPagarId: 'ok1' },
+    });
+    expect(prisma.pagamentoAvulso.deleteMany).toHaveBeenCalledWith({
+      where: { contaPagarId: 'ok1' },
+    });
+    expect(prisma.contaPagar.delete).toHaveBeenCalled();
+  });
+
+  /** Conta paga não sai daqui — e nada do que ela pagava pode sair junto. */
+  it('conta já paga não apaga nada', async () => {
+    const { service, prisma } = montarServico();
+
+    await expect(service.remover('paga')).rejects.toThrow(/já foi paga/i);
+    expect(prisma.diaria.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.pagamentoAvulso.deleteMany).not.toHaveBeenCalled();
   });
 });

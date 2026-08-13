@@ -541,9 +541,13 @@ export class AvulsosService {
       );
     }
     if (pagamento.contaPagarId) {
+      // Apagar a conta a pagar já leva este pagamento junto; o que sobra
+      // abaixo é o pagamento em mãos antigo, que nunca teve conta.
       await this.contasPagar.remover(pagamento.contaPagarId);
     }
-    await this.prisma.pagamentoAvulso.delete({ where: { id: pagamento.id } });
+    await this.prisma.pagamentoAvulso.deleteMany({
+      where: { id: pagamento.id },
+    });
   }
 
   private async buscarPagamento(id: string): Promise<PagamentoAvulso> {

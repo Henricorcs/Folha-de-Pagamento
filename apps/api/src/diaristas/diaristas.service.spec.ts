@@ -81,6 +81,10 @@ function montarServico(
       ),
       count: jest.fn().mockResolvedValue(0),
       delete: jest.fn().mockResolvedValue({}),
+      deleteMany: jest.fn(async ({ where }: { where: { id: string } }) => {
+        const existia = diarias.delete(where.id);
+        return { count: existia ? 1 : 0 };
+      }),
     },
   } as any;
 
@@ -359,6 +363,11 @@ describe('diárias antigas: tentar de novo e fechar à mão', () => {
     expect(prisma.diaria.delete).not.toHaveBeenCalled();
   });
 
+  /**
+   * Apagar a conta a pagar já leva a diária junto (é ela que paga a pessoa),
+   * então este caminho passa duas vezes pela mesma exclusão. Não pode estourar
+   * na segunda.
+   */
   it('apagar diária do IXC apaga também a conta a pagar', async () => {
     const { service, contasPagar, prisma } = montarServico();
     const diaria = await service.pagar('d1', {
@@ -367,7 +376,9 @@ describe('diárias antigas: tentar de novo e fechar à mão', () => {
     });
     await service.removerDiaria(diaria.id);
     expect(contasPagar.remover).toHaveBeenCalledWith('conta-1');
-    expect(prisma.diaria.delete).toHaveBeenCalled();
+    expect(prisma.diaria.deleteMany).toHaveBeenCalledWith({
+      where: { id: diaria.id },
+    });
   });
 });
 

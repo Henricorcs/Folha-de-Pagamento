@@ -817,9 +817,30 @@ export class ContasPagarService {
   }
 
   /** Apaga só o registro local, soltando o que dependia dele. */
+  /**
+   * Apaga a conta daqui, e com ela o que só existia por causa dela.
+   *
+   * A diária e o pagamento avulso *são* essa conta a pagar: é ela que paga a
+   * pessoa. Apagada a conta, o pagamento não aconteceu — quem tirou a conta da
+   * tela de contas a pagar decidiu justamente isso, e o registro tem de sumir
+   * junto em vez de virar um pagamento que ninguém consegue explicar.
+   *
+   * Deixá-los para trás era pior do que inútil: a FK virava null, e aí eles
+   * ficavam iguaizinhos a um pagamento em mãos antigo — apareciam "fora do
+   * caixa", oferecendo um lançamento na movimentação financeira que ninguém
+   * deve fazer, de um dinheiro que nunca saiu.
+   *
+   * `deleteMany` porque quase sempre não há nada para apagar (conta de folha),
+   * e porque o caminho contrário — apagar a diária, que apaga a conta — chega
+   * aqui e volta para apagar a diária de novo.
+   */
   private async apagarLocal(id: string): Promise<void> {
     // Antes de apagar: a FK vira null e a parcela ficaria baixada sem dono.
     await this.vales.estornarBaixa(id);
+    await this.prisma.diaria.deleteMany({ where: { contaPagarId: id } });
+    await this.prisma.pagamentoAvulso.deleteMany({
+      where: { contaPagarId: id },
+    });
     await this.prisma.contaPagar.delete({ where: { id } });
   }
 
