@@ -11,12 +11,14 @@ import {
   lerTipoPixPreferencial,
   mapFornecedorParaPessoa,
   mapLinhaDadosBancarios,
+  mascararDocumento,
   montarUpdateDiaristaDoFornecedor,
   montarUpdateDoFornecedor,
   parseValores,
   REGRA_ESTRANGEIRO,
   REGRA_ICMS_ISENTO,
   somenteDigitos,
+  variacoesDocumento,
 } from './ixc.fornecedor';
 import type { IxcFornecedor } from './ixc.types';
 
@@ -514,6 +516,50 @@ describe('somenteDigitos', () => {
   it('normaliza CPF/CNPJ formatado', () => {
     expect(somenteDigitos('082.935.753-01')).toBe('08293575301');
     expect(somenteDigitos(null)).toBe('');
+  });
+});
+
+/**
+ * O IXC guarda o documento com pontos e hífen, e a busca dele compara texto com
+ * texto. Procurar pelos dígitos que a pessoa digitou não acha o cadastro que
+ * existe — foi assim que "Conferir no IXC" respondeu que não havia fornecedor
+ * para quem já era fornecedor, e um cadastro duplicado nasceu no lugar.
+ */
+describe('variacoesDocumento', () => {
+  it('procura primeiro pelo formato que o IXC guarda', () => {
+    expect(variacoesDocumento('11122233344')).toEqual([
+      '111.222.333-44',
+      '11122233344',
+    ]);
+  });
+
+  it('procura pelos dígitos quando o documento vem mascarado', () => {
+    expect(variacoesDocumento('111.222.333-44')).toEqual([
+      '111.222.333-44',
+      '11122233344',
+    ]);
+  });
+
+  it('mascara CNPJ também', () => {
+    expect(variacoesDocumento('12345678000100')[0]).toBe('12.345.678/0001-00');
+  });
+
+  it('sem máscara conhecida, tenta o que foi digitado', () => {
+    expect(variacoesDocumento('123456')).toEqual(['123456']);
+    expect(variacoesDocumento(' 12-34-56 ')).toEqual(['123456', '12-34-56']);
+  });
+
+  it('sem dígito nenhum não gasta chamada', () => {
+    expect(variacoesDocumento('não sei o cpf')).toEqual([]);
+    expect(variacoesDocumento(null)).toEqual([]);
+  });
+});
+
+describe('mascararDocumento', () => {
+  it('formata CPF e CNPJ, e devolve null fora desses tamanhos', () => {
+    expect(mascararDocumento('11122233344')).toBe('111.222.333-44');
+    expect(mascararDocumento('12345678000100')).toBe('12.345.678/0001-00');
+    expect(mascararDocumento('123')).toBeNull();
   });
 });
 

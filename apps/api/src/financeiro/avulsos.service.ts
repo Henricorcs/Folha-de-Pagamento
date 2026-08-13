@@ -13,6 +13,7 @@ import {
   TipoLancamento,
 } from '@prisma/client';
 import { CaixaService } from '../ixc/caixa.service';
+import { variacoesDocumento } from '../ixc/ixc.fornecedor';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConfigFinanceiraService } from './config-financeira.service';
 import { ContasPagarService } from './contas-pagar.service';
@@ -154,9 +155,15 @@ export class AvulsosService {
    */
   async consultarCpfCnpj(cpfCnpj: string): Promise<ConsultaCpfCnpj> {
     const doc = cpfCnpj.trim();
-    const beneficiario = await this.prisma.beneficiarioAvulso.findFirst({
-      where: { cpfCnpj: doc },
-    });
+    // Aqui do lado de cá vale a mesma regra do IXC: o documento foi digitado
+    // com máscara umas vezes e sem outras, e comparar texto com texto acharia
+    // só quem digitou igual das duas vezes.
+    const variacoes = variacoesDocumento(doc);
+    const beneficiario = variacoes.length
+      ? await this.prisma.beneficiarioAvulso.findFirst({
+          where: { OR: variacoes.map((v) => ({ cpfCnpj: v })) },
+        })
+      : null;
 
     let fornecedor: FornecedorNoIxc | null = null;
     let ixcIndisponivel: string | null = null;

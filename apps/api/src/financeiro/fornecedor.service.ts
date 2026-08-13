@@ -7,6 +7,12 @@ import {
   inferirTipoChavePix,
   normalizarTipoChavePix,
 } from '../ixc/ixc.financeiro';
+import {
+  CAMPOS_DOC_FORNECEDOR,
+  mascararDocumento,
+  somenteDigitos,
+  variacoesDocumento,
+} from '../ixc/ixc.fornecedor';
 import { ConfigFinanceiraService } from './config-financeira.service';
 
 /**
@@ -143,16 +149,7 @@ export class FornecedorService {
   async procurarNoIxcPorCpfCnpj(
     cpfCnpj: string,
   ): Promise<FornecedorNoIxc | null> {
-    const doc = cpfCnpj.trim();
-    if (!doc) return null;
-
-    const res = await this.ixc.list<Record<string, unknown>>('fornecedor', {
-      qtype: 'fornecedor.cpf_cnpj',
-      query: doc,
-      oper: '=',
-      rp: 1,
-    });
-    const bruto = res.registros[0];
+    const bruto = await this.procurarFornecedorBruto(cpfCnpj);
     if (!bruto) return null;
 
     const id = Number(bruto.id);
@@ -231,7 +228,16 @@ export class FornecedorService {
     // outros defaults tributários). Como o código válido é específico da base,
     // copia-o de um fornecedor já existente em vez de adivinhar.
     const extrasIss = await this.camposClassificacaoIss();
-    const payload = { ...buildFornecedorPayload(input), ...extrasIss };
+    const payload = {
+      ...buildFornecedorPayload({
+        ...input,
+        // O IXC guarda o documento com pontos e hífen. Gravar só os dígitos
+        // esconde o cadastro da busca de lá — e da nossa, no dia em que essa
+        // pessoa for cadastrada de novo.
+        cpfCnpj: mascararDocumento(input.cpfCnpj) ?? input.cpfCnpj,
+      }),
+      ...extrasIss,
+    };
     const { id } = await this.ixc.create('fornecedor', payload);
     if (!id) {
       throw new Error('IXC não retornou o id do fornecedor criado');
@@ -291,16 +297,9 @@ export class FornecedorService {
   private async buscarPorCpfCnpj(
     cpfCnpj?: string | null,
   ): Promise<number | null> {
-    const doc = (cpfCnpj ?? '').trim();
-    if (!doc) return null;
     try {
-      const res = await this.ixc.list<{ id: string }>('fornecedor', {
-        qtype: 'fornecedor.cpf_cnpj',
-        query: doc,
-        oper: '=',
-        rp: 1,
-      });
-      const id = Number(res.registros[0]?.id);
+      const bruto = await this.procurarFornecedorBruto(cpfCnpj ?? '');
+      const id = Number(bruto?.id);
       return Number.isInteger(id) && id > 0 ? id : null;
     } catch (err) {
       // Falha na busca não deve impedir a criação; loga e segue.
@@ -309,4 +308,63 @@ export class FornecedorService {
       return null;
     }
   }
+
+  /**
+   * O fornecedor daquele documento, procurado em todas as formas em que a base
+   * pode tê-lo guardado: as duas colunas conhecidas (`cpf_cnpj`/`cnpj_cpf`) e o
+   * documento com e sem máscara. Procurar só o que foi digitado é o que fazia
+   * "já cadastrado no IXC" responder que não havia cadastro nenhum.
+   *
+   * O documento do registro devolvido é conferido pelos dígitos: se a base
+   * ignorar um `qtype` que ela não conhece e devolver o primeiro fornecedor da
+   * tabela, o resultado é descartado. Vincular a pessoa errada seria pagar a
+   * pessoa errada — não achar apenas cria um cadastro novo.
+   *
+   * Erro numa tentativa não condena a consulta (a coluna pode não existir aqui);
+   * só quando nenhuma responde é que o IXC é dado como indisponível.
+   */
+  private async procurarFornecedorBruto(
+    cpfCnpj: string,
+  ): Promise<Record<string, unknown> | null> {
+    const variacoes = variacoesDocumento(cpfCnpj);
+    if (variacoes.length === 0) return null;
+    const digitos = somenteDigitos(cpfCnpj);
+
+    let ultimoErro: unknown = null;
+    let algumaRespondeu = false;
+
+    for (const campo of CAMPOS_DOC_FORNECEDOR) {
+      for (const query of variacoes) {
+        let res;
+        try {
+          res = await this.ixc.list<Record<string, unknown>>('fornecedor', {
+            qtype: `fornecedor.${campo}`,
+            query,
+            oper: '=',
+            rp: 1,
+          });
+        } catch (err) {
+          // Coluna que esta base não tem: as outras máscaras dela vão falhar
+          // igual, então passa para a próxima coluna.
+          ultimoErro = err;
+          break;
+        }
+        algumaRespondeu = true;
+        const bruto = res.registros[0];
+        if (bruto && documentoDoFornecedor(bruto) === digitos) return bruto;
+      }
+    }
+
+    if (!algumaRespondeu && ultimoErro) throw ultimoErro;
+    return null;
+  }
+}
+
+/** Dígitos do CPF/CNPJ de um fornecedor cru, seja qual for o nome da coluna. */
+function documentoDoFornecedor(bruto: Record<string, unknown>): string {
+  for (const campo of CAMPOS_DOC_FORNECEDOR) {
+    const doc = somenteDigitos(texto(bruto[campo]));
+    if (doc) return doc;
+  }
+  return '';
 }

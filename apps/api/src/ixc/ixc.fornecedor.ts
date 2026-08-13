@@ -141,6 +141,61 @@ export function somenteDigitos(doc?: string | null): string {
   return String(doc ?? '').replace(/\D/g, '');
 }
 
+/**
+ * Colunas em que o IXC guarda o CPF/CNPJ do fornecedor, na ordem em que valem
+ * a tentativa.
+ *
+ * A documentação da API é explícita: no `fornecedor` (e no `funcionarios`) a
+ * coluna é `cpf_cnpj`; é no `cliente` que ela se chama `cnpj_cpf`. As duas
+ * ficam aqui porque o nome trocado entre tabelas irmãs é justamente o tipo de
+ * coisa que muda de versão para versão — e uma tentativa a mais custa uma
+ * chamada, enquanto errar custa um cadastro duplicado.
+ */
+export const CAMPOS_DOC_FORNECEDOR = ['cpf_cnpj', 'cnpj_cpf'] as const;
+
+/** CPF como "###.###.###-##", CNPJ como "##.###.###/####-##". */
+export function mascararDocumento(doc?: string | null): string | null {
+  const d = somenteDigitos(doc);
+  if (d.length === 11) {
+    return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+  }
+  if (d.length === 14) {
+    return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+  }
+  return null;
+}
+
+/**
+ * O mesmo documento em todas as formas em que a base pode tê-lo guardado, na
+ * ordem de quem acha primeiro.
+ *
+ * A busca do webservice é comparação de texto pura, e o IXC guarda o documento
+ * **com pontos e hífen** (a documentação da API diz isso, e os exemplos dela
+ * procuram por "627.105.245-20"). Quem digita "61769656324" não acha o cadastro
+ * gravado como "617.696.563-24" — e a tela, sem achar, oferece criar um
+ * fornecedor novo para quem já existe. É assim que nasce cadastro duplicado, e
+ * com ele o pagamento que sai por um cadastro sem dados bancários.
+ *
+ * Por isso a máscara vem primeiro; os dígitos limpos continuam na lista porque
+ * cadastros antigos deste app foram gravados lá sem ela.
+ *
+ * Vazio quando não há dígito nenhum: procurar por texto solto no campo de
+ * documento não acha ninguém, só gasta chamada.
+ */
+export function variacoesDocumento(doc?: string | null): string[] {
+  const digitos = somenteDigitos(doc);
+  if (!digitos) return [];
+
+  const mascarado = mascararDocumento(digitos);
+  const out = mascarado ? [mascarado, digitos] : [digitos];
+
+  // Documento fora do tamanho de CPF/CNPJ não tem máscara conhecida; o que foi
+  // digitado ainda pode ser exatamente o que está gravado lá.
+  const digitado = String(doc ?? '').trim();
+  if (digitado && !out.includes(digitado)) out.push(digitado);
+  return out;
+}
+
 /** Nome do fornecedor: razão social e, se faltar, fantasia. */
 export function nomeFornecedor(raw: IxcFornecedor): string {
   return (
