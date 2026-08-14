@@ -44,6 +44,12 @@ export class DiaristasController {
     return this.service.listarTravadas();
   }
 
+  /** Pagamentos em mãos cujo recibo ninguém assinou ainda. */
+  @Get('diarias/aguardando-assinatura')
+  listarAguardandoAssinatura() {
+    return this.service.listarAguardandoAssinatura();
+  }
+
   @Post('diarias/excluir-lote')
   @HttpCode(200)
   excluirLote(@Body() dto: LoteDiariasDto) {

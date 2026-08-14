@@ -532,8 +532,11 @@ export interface Diaria {
     erro: string | null;
     idFnApagarIxc: number | null;
   } | null;
-  /** Recibo em mãos: null = ninguém coletou; assinadoEm null = link de pé. */
-  assinatura?: { assinadoEm: string | null } | null;
+  /**
+   * Recibo em mãos: null = ninguém coletou ainda; `assinadoEm` vazio = o link
+   * existe e está esperando. `expiraEm` só vem na fila de assinaturas.
+   */
+  assinatura?: { assinadoEm: string | null; expiraEm?: string } | null;
 }
 
 /**

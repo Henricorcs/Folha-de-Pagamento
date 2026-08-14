@@ -313,6 +313,50 @@ export class DiaristasService {
   }
 
   /**
+   * A fila de recibos por assinar: todo pagamento em mãos que ainda não tem
+   * assinatura de quem recebeu.
+   *
+   * Ela existe porque o botão de coletar mora dentro do histórico de cada
+   * pessoa, e quem pagou seis diaristas num dia teria de abrir os seis para
+   * lembrar de quais faltam. Aqui a fila é uma só, e uma linha só sai dela por
+   * três motivos: alguém assinou, alguém apagou a diária, ou o pagamento foi
+   * cancelado/reprovado no IXC — aí não há recibo a coletar porque não houve
+   * pagamento.
+   */
+  listarAguardandoAssinatura() {
+    return this.prisma.diaria.findMany({
+      where: {
+        forma: FormaPagamento.EM_MAOS,
+        AND: [
+          {
+            OR: [
+              { assinatura: { is: null } },
+              { assinatura: { assinadoEm: null } },
+            ],
+          },
+          {
+            OR: [
+              // Em mãos antiga, de quando não virava conta a pagar: o dinheiro
+              // saiu da gaveta e o recibo continua fazendo falta.
+              { contaPagarId: null },
+              { contaPagar: { status: { notIn: SEM_SAIDA } } },
+            ],
+          },
+        ],
+      },
+      orderBy: [{ data: 'desc' }, { createdAt: 'desc' }],
+      take: 200,
+      include: {
+        diarista: { select: { nome: true } },
+        contaPagar: {
+          select: { id: true, status: true, erro: true, idFnApagarIxc: true },
+        },
+        assinatura: { select: { assinadoEm: true, expiraEm: true } },
+      },
+    });
+  }
+
+  /**
    * As diárias que ficaram no meio do caminho: pagas pelo IXC, mas com a conta
    * a pagar reprovada, cancelada, recusada — ou apagada de lá, que é o que
    * deixa a diária sem conta nenhuma.

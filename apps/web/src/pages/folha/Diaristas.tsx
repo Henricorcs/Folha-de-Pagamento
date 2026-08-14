@@ -169,6 +169,17 @@ export function Diaristas() {
     enabled: !!aberto,
   });
 
+  /**
+   * A fila de recibos por assinar. Fica fora do histórico de cada pessoa de
+   * propósito: quem pagou seis diaristas num dia não deveria abrir os seis
+   * cadastros para lembrar de quais faltam assinar.
+   */
+  const aguardandoAssinatura = useQuery({
+    queryKey: ['diarias-aguardando-assinatura'],
+    queryFn: async () =>
+      (await api.get<Diaria[]>('/diaristas/diarias/aguardando-assinatura')).data,
+  });
+
   /** As que não vão sair sozinhas — ficam fora do gasto e precisam de decisão. */
   const travadas = useQuery({
     queryKey: ['diarias-travadas'],
@@ -180,6 +191,7 @@ export function Diaristas() {
     qc.invalidateQueries({ queryKey: ['diaristas'] });
     qc.invalidateQueries({ queryKey: ['diarias'] });
     qc.invalidateQueries({ queryKey: ['diarias-travadas'] });
+    qc.invalidateQueries({ queryKey: ['diarias-aguardando-assinatura'] });
     qc.invalidateQueries({ queryKey: ['contas-pagar'] });
     qc.invalidateQueries({ queryKey: ['dashboard'] });
   }
@@ -398,6 +410,13 @@ export function Diaristas() {
           caixa no IXC. Abra a pessoa para tentar de novo ou marcar que você
           lançou à mão. As novas saem do caixa pela própria conta a pagar.
         </Aviso>
+      )}
+
+      {(aguardandoAssinatura.data ?? []).length > 0 && (
+        <AssinaturasPendentes
+          diarias={aguardandoAssinatura.data ?? []}
+          onColetar={setColetando}
+        />
       )}
 
       {(travadas.data ?? []).length > 0 && (
@@ -877,6 +896,119 @@ export function Diaristas() {
         />
       )}
     </Pagina>
+  );
+}
+
+/**
+ * A fila de recibos por assinar.
+ *
+ * Dinheiro entregue na mão não deixa comprovante em banco nenhum, então cada
+ * pagamento em mãos fica aqui até alguém assinar. A linha sai da fila por três
+ * motivos, e só por eles: a pessoa assinou, alguém apagou a diária, ou o
+ * pagamento foi cancelado no IXC — aí não houve pagamento a comprovar.
+ *
+ * O botão de coletar também vive no histórico de cada pessoa, mas achar seis
+ * pagamentos espalhados por seis cadastros é o mesmo que não ter botão nenhum.
+ */
+function AssinaturasPendentes({
+  diarias,
+  onColetar,
+}: {
+  diarias: Diaria[];
+  onColetar: (d: Diaria) => void;
+}) {
+  const total = diarias.reduce((s, d) => s + Number(d.valor), 0);
+
+  return (
+    <Bloco
+      titulo="Recibos a assinar"
+      className="surgir mb-6"
+      acao={
+        <span className="text-xs text-tinta-400">
+          {diarias.length} pagamento(s) em mãos · {formatBRL(total)}
+        </span>
+      }
+      semPadding
+    >
+      <p className="px-5 pb-1 pt-4 text-xs leading-relaxed text-tinta-500 sm:px-6">
+        Dinheiro entregue na mão não deixa comprovante no banco — o comprovante
+        é a assinatura de quem recebeu. Cada linha some daqui quando for
+        assinada, apagada, ou se o pagamento for cancelado no IXC.
+      </p>
+
+      <div className="overflow-x-auto rolagem-fina">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-t border-tinta-100">
+              <th className="th">Data</th>
+              <th className="th">Quem recebeu</th>
+              <th className="th text-right">Valor</th>
+              <th className="th">Situação</th>
+              <th className="th text-right">Ação</th>
+            </tr>
+          </thead>
+          <tbody>
+            {diarias.map((d) => (
+              <tr key={d.id} className="linha">
+                <td className="td num whitespace-nowrap text-tinta-500">
+                  {formatData(d.data)}
+                </td>
+                <td className="td">
+                  <div className="text-tinta-800">
+                    {d.diarista?.nome ?? 'diarista'}
+                  </div>
+                  <div className="mt-0.5 text-xs text-tinta-400">
+                    {d.descricao}
+                  </div>
+                </td>
+                <td className="td text-right">
+                  <span className="valor">{formatBRL(d.valor)}</span>
+                </td>
+                <td className="td">
+                  <SituacaoDaColeta diaria={d} />
+                </td>
+                <td className="td text-right">
+                  <button
+                    onClick={() => onColetar(d)}
+                    className="btn btn-p border border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100"
+                  >
+                    {d.assinatura ? 'Ver o link' : 'Coletar Assinatura'}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Bloco>
+  );
+}
+
+/** Se já há link de pé, se ele venceu, ou se ninguém começou. */
+function SituacaoDaColeta({ diaria }: { diaria: Diaria }) {
+  if (!diaria.assinatura) {
+    return (
+      <Selo pequeno tom="atencao">
+        sem link ainda
+      </Selo>
+    );
+  }
+  const expira = diaria.assinatura.expiraEm;
+  if (expira && new Date(expira) < new Date()) {
+    return (
+      <Selo pequeno tom="erro" titulo="Gere outro link para mandar de novo">
+        link venceu
+      </Selo>
+    );
+  }
+  return (
+    <Selo
+      pequeno
+      tom="info"
+      titulo={expira ? `Vale até ${formatData(expira)}` : undefined}
+    >
+      link enviado
+    </Selo>
   );
 }
 

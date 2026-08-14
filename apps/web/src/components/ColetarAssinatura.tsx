@@ -53,6 +53,10 @@ export function ColetarAssinatura({
       (await api.post<AssinaturaDiaria>(`/diarias/${diaria.id}/assinatura`)).data,
     onSuccess: (nova) => {
       queryClient.setQueryData(['assinatura-diaria', diaria.id], nova);
+      // A fila lá atrás passa a dizer "link enviado" em vez de "sem link".
+      void queryClient.invalidateQueries({
+        queryKey: ['diarias-aguardando-assinatura'],
+      });
       setErro(null);
     },
     onError: (e) => setErro(mensagemErro(e)),
@@ -77,11 +81,14 @@ export function ColetarAssinatura({
     }
   }, [assinatura.isSuccess, atual, gerar]);
 
-  // Assinou: a lista lá atrás precisa saber, para a linha ganhar o selo sem
-  // depender de alguém recarregar a página.
+  // Assinou: as listas lá atrás precisam saber, para a linha ganhar o selo e
+  // sair da fila de recibos sem depender de alguém recarregar a página.
   useEffect(() => {
     if (assinado) {
       void queryClient.invalidateQueries({ queryKey: ['diarias'] });
+      void queryClient.invalidateQueries({
+        queryKey: ['diarias-aguardando-assinatura'],
+      });
     }
   }, [assinado, queryClient]);
 
