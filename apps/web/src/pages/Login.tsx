@@ -17,7 +17,7 @@ export function Login() {
     setCarregando(true);
     try {
       await login(email, senha);
-      navigate('/dashboard');
+      navigate('/modulos');
     } catch (err) {
       setErro(mensagemErro(err));
     } finally {
@@ -46,7 +46,7 @@ export function Login() {
             className="h-auto w-[116px]"
           />
           <div className="mt-2.5 text-[10px] font-medium uppercase tracking-[0.18em] text-tinta-400">
-            Folha de pagamento
+            Finance
           </div>
         </div>
 
@@ -90,7 +90,7 @@ export function Login() {
               className="h-auto w-[98px]"
             />
             <div className="mt-2 text-[10px] font-medium uppercase tracking-[0.18em] text-tinta-400">
-              Folha de pagamento
+              Finance
             </div>
           </div>
 

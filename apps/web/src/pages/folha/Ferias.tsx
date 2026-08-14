@@ -11,15 +11,15 @@ import {
   Selo,
   Vazio,
   type Tom,
-} from '../components/ui';
-import { api, mensagemErro } from '../lib/api';
-import { formatData } from '../lib/format';
+} from '../../components/ui';
+import { api, mensagemErro } from '../../lib/api';
+import { formatData } from '../../lib/format';
 import type {
   FilaDeFerias,
   LeituraDaPrevisao,
   PessoaNaFila,
   SituacaoFerias,
-} from '../lib/types';
+} from '../../lib/types';
 
 const TOM_DA_SITUACAO: Record<SituacaoFerias, Tom> = {
   VENCIDA: 'erro',
@@ -423,7 +423,7 @@ function ProximoDaFila({
           <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight text-tinta-900">
             {pessoa.funcionarioId ? (
               <Link
-                to={`/funcionarios/${pessoa.funcionarioId}`}
+                to={`/folha/funcionarios/${pessoa.funcionarioId}`}
                 className="hover:text-brand-700 hover:underline"
               >
                 {pessoa.nome}
@@ -542,7 +542,7 @@ function TabelaDaFila({
                 <div className="font-medium text-tinta-800">
                   {p.funcionarioId ? (
                     <Link
-                      to={`/funcionarios/${p.funcionarioId}`}
+                      to={`/folha/funcionarios/${p.funcionarioId}`}
                       className="hover:text-brand-700 hover:underline"
                     >
                       {p.nome}

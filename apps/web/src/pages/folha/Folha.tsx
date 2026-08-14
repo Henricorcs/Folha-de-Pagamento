@@ -9,11 +9,11 @@ import {
   Selo,
   Vazio,
   type Tom,
-} from '../components/ui';
-import { api, mensagemErro } from '../lib/api';
-import { mesAnterior, mesAtual, mesSeguinte, nomeDoMes } from '../lib/folha';
-import { formatBRL, formatData } from '../lib/format';
-import { STATUS_LABEL, TIPO_LABEL } from '../lib/status';
+} from '../../components/ui';
+import { api, mensagemErro } from '../../lib/api';
+import { mesAnterior, mesAtual, mesSeguinte, nomeDoMes } from '../../lib/folha';
+import { formatBRL, formatData } from '../../lib/format';
+import { STATUS_LABEL, TIPO_LABEL } from '../../lib/status';
 import type {
   ComposicaoSalario,
   ContaJaGerada,
@@ -23,7 +23,7 @@ import type {
   PreviewFuncionario,
   SituacaoAdiantamento,
   TipoLancamento,
-} from '../lib/types';
+} from '../../lib/types';
 
 interface ItemGerar extends LancamentoCalculado {
   funcionarioId: string;
@@ -618,7 +618,7 @@ export function Folha() {
           comErro ? `, ${comErro} com erro` : ''
         }. Abrindo Contas a Pagar…`,
       );
-      setTimeout(() => navigate('/contas-pagar'), 1200);
+      setTimeout(() => navigate('/folha/pagamentos'), 1200);
     },
     onError: (err) => setFeedback(`Não deu para gerar: ${mensagemErro(err)}`),
   });

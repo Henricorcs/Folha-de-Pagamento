@@ -7,12 +7,12 @@ import {
   Carregando,
   Pagina,
   Selo,
-} from '../components/ui';
-import { api, mensagemErro } from '../lib/api';
-import { useAuth } from '../lib/auth';
-import { formatData } from '../lib/format';
-import { PERFIL_DESCRICAO, PERFIL_LABEL, PERFIL_TOM } from '../lib/status';
-import type { PerfilUsuario, UsuarioAdmin } from '../lib/types';
+} from '../../components/ui';
+import { api, mensagemErro } from '../../lib/api';
+import { useAuth } from '../../lib/auth';
+import { formatData } from '../../lib/format';
+import { PERFIL_DESCRICAO, PERFIL_LABEL, PERFIL_TOM } from '../../lib/status';
+import type { PerfilUsuario, UsuarioAdmin } from '../../lib/types';
 
 const PERFIS: PerfilUsuario[] = ['ADMIN', 'RH', 'VISUALIZADOR'];
 

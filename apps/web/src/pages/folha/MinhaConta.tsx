@@ -1,9 +1,9 @@
 import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Aviso, Bloco, CabecalhoPagina, Pagina, Selo } from '../components/ui';
-import { api, mensagemErro } from '../lib/api';
-import { useAuth } from '../lib/auth';
-import { PERFIL_DESCRICAO, PERFIL_LABEL, PERFIL_TOM } from '../lib/status';
+import { Aviso, Bloco, CabecalhoPagina, Pagina, Selo } from '../../components/ui';
+import { api, mensagemErro } from '../../lib/api';
+import { useAuth } from '../../lib/auth';
+import { PERFIL_DESCRICAO, PERFIL_LABEL, PERFIL_TOM } from '../../lib/status';
 
 export function MinhaConta() {
   const { usuario } = useAuth();

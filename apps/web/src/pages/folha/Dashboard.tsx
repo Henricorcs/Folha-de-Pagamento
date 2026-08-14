@@ -6,7 +6,7 @@ import {
   BarrasEmpilhadas,
   PALETA,
   type SerieGrafico,
-} from '../components/graficos';
+} from '../../components/graficos';
 import {
   Bloco,
   CabecalhoPagina,
@@ -15,12 +15,12 @@ import {
   Pagina,
   Selo,
   Vazio,
-} from '../components/ui';
-import { api, mensagemErro } from '../lib/api';
-import { mesAnterior, mesAtual, mesSeguinte, nomeDoMes } from '../lib/folha';
-import { formatBRL, formatData } from '../lib/format';
-import { STATUS_LABEL, STATUS_TOM, TIPO_LABEL } from '../lib/status';
-import type { Dashboard as TDashboard, TipoLancamento } from '../lib/types';
+} from '../../components/ui';
+import { api, mensagemErro } from '../../lib/api';
+import { mesAnterior, mesAtual, mesSeguinte, nomeDoMes } from '../../lib/folha';
+import { formatBRL, formatData } from '../../lib/format';
+import { STATUS_LABEL, STATUS_TOM, TIPO_LABEL } from '../../lib/status';
+import type { Dashboard as TDashboard, TipoLancamento } from '../../lib/types';
 
 /**
  * Qual mês de trabalho a tela abre mostrando: o anterior.
@@ -351,7 +351,7 @@ export function Dashboard() {
                 <Vazio titulo="Nada gerado nesta competência">
                   Quando você calcular a folha, a repartição aparece aqui.{' '}
                   <Link
-                    to="/folha"
+                    to="/folha/gerar-folha"
                     className="font-semibold text-brand-700 hover:underline"
                   >
                     Gerar folha
@@ -375,7 +375,7 @@ export function Dashboard() {
               titulo="Impostos"
               acao={
                 <Link
-                  to="/impostos"
+                  to="/folha/impostos"
                   className="text-xs font-semibold text-brand-700 hover:underline"
                 >
                   Lançar guia
@@ -387,7 +387,7 @@ export function Dashboard() {
                   Suba o PDF do DARF, do FGTS, do DAS ou do DARE que a
                   contabilidade manda e o imposto entra aqui.{' '}
                   <Link
-                    to="/impostos"
+                    to="/folha/impostos"
                     className="font-semibold text-brand-700 hover:underline"
                   >
                     Lançar a primeira
@@ -453,7 +453,7 @@ export function Dashboard() {
               titulo="Vales e acertos"
               acao={
                 <Link
-                  to="/vales"
+                  to="/folha/vales"
                   className="text-xs font-semibold text-brand-700 hover:underline"
                 >
                   Ver todos

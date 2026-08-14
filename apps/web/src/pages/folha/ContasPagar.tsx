@@ -8,10 +8,10 @@ import {
   Pagina,
   Selo,
   Vazio,
-} from '../components/ui';
-import { api, mensagemErro } from '../lib/api';
-import { formatBRL, formatData } from '../lib/format';
-import { STATUS_LABEL, STATUS_TOM, TIPO_LABEL } from '../lib/status';
+} from '../../components/ui';
+import { api, mensagemErro } from '../../lib/api';
+import { formatBRL, formatData } from '../../lib/format';
+import { STATUS_LABEL, STATUS_TOM, TIPO_LABEL } from '../../lib/status';
 import type {
   ContaPagar,
   Paginado,
@@ -19,7 +19,7 @@ import type {
   ResultadoSincronizacao,
   ResumoSincronizacao,
   StatusContaPagar,
-} from '../lib/types';
+} from '../../lib/types';
 
 const STATUS_FILTROS: (StatusContaPagar | 'todos')[] = [
   'todos',

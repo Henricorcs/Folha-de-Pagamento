@@ -6,9 +6,9 @@ import {
   CabecalhoPagina,
   Carregando,
   Pagina,
-} from '../components/ui';
-import { api, mensagemErro } from '../lib/api';
-import type { CaixasIxc, ConfigFinanceira } from '../lib/types';
+} from '../../components/ui';
+import { api, mensagemErro } from '../../lib/api';
+import type { CaixasIxc, ConfigFinanceira } from '../../lib/types';
 
 export function Configuracoes() {
   const qc = useQueryClient();

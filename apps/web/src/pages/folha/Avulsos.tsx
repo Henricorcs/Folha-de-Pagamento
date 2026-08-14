@@ -10,11 +10,11 @@ import {
   Pagina,
   Selo,
   Vazio,
-} from '../components/ui';
-import { api, mensagemErro } from '../lib/api';
-import { formatBRL, formatData } from '../lib/format';
-import { FORMA_PAGAMENTO_LABEL, STATUS_LABEL, STATUS_TOM } from '../lib/status';
-import { TIPOS_CHAVE_PIX } from '../lib/types';
+} from '../../components/ui';
+import { api, mensagemErro } from '../../lib/api';
+import { formatBRL, formatData } from '../../lib/format';
+import { FORMA_PAGAMENTO_LABEL, STATUS_LABEL, STATUS_TOM } from '../../lib/status';
+import { TIPOS_CHAVE_PIX } from '../../lib/types';
 import type {
   BeneficiarioAvulso,
   BeneficiarioComResumo,
@@ -22,7 +22,7 @@ import type {
   ConsultaCpfCnpj,
   FormaPagamento,
   PagamentoAvulso,
-} from '../lib/types';
+} from '../../lib/types';
 
 /** Cadastro em branco: começa no IXC, que é a forma rastreável. */
 const CADASTRO_VAZIO = {

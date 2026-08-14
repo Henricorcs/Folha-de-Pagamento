@@ -1,20 +1,23 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { useAuth } from './lib/auth';
-import { Avulsos } from './pages/Avulsos';
-import { Configuracoes } from './pages/Configuracoes';
-import { ContasPagar } from './pages/ContasPagar';
-import { Dashboard } from './pages/Dashboard';
-import { Diaristas } from './pages/Diaristas';
-import { Ferias } from './pages/Ferias';
-import { Folha } from './pages/Folha';
-import { FuncionarioDetalhe } from './pages/FuncionarioDetalhe';
-import { Funcionarios } from './pages/Funcionarios';
-import { Impostos } from './pages/Impostos';
+import { MODULO_CONTAS_PAGAR, MODULO_FOLHA } from './lib/modulos';
 import { Login } from './pages/Login';
-import { MinhaConta } from './pages/MinhaConta';
-import { Usuarios } from './pages/Usuarios';
-import { Vales } from './pages/Vales';
+import { Modulos } from './pages/Modulos';
+import { Inicio as ContasPagarInicio } from './pages/contas-pagar/Inicio';
+import { Avulsos } from './pages/folha/Avulsos';
+import { Configuracoes } from './pages/folha/Configuracoes';
+import { ContasPagar } from './pages/folha/ContasPagar';
+import { Dashboard } from './pages/folha/Dashboard';
+import { Diaristas } from './pages/folha/Diaristas';
+import { Ferias } from './pages/folha/Ferias';
+import { Folha } from './pages/folha/Folha';
+import { FuncionarioDetalhe } from './pages/folha/FuncionarioDetalhe';
+import { Funcionarios } from './pages/folha/Funcionarios';
+import { Impostos } from './pages/folha/Impostos';
+import { MinhaConta } from './pages/folha/MinhaConta';
+import { Usuarios } from './pages/folha/Usuarios';
+import { Vales } from './pages/folha/Vales';
 import type { ReactNode } from 'react';
 
 function Protegida({ children }: { children: ReactNode }) {
@@ -38,7 +41,7 @@ function SomenteAdmin({ children }: { children: ReactNode }) {
   return usuario?.role === 'ADMIN' ? (
     <>{children}</>
   ) : (
-    <Navigate to="/dashboard" replace />
+    <Navigate to="/folha/dashboard" replace />
   );
 }
 
@@ -47,22 +50,31 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route
-        path="/"
+        path="/modulos"
         element={
           <Protegida>
-            <Layout />
+            <Modulos />
+          </Protegida>
+        }
+      />
+
+      <Route
+        path="/folha"
+        element={
+          <Protegida>
+            <Layout modulo={MODULO_FOLHA} />
           </Protegida>
         }
       >
-        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="funcionarios" element={<Funcionarios />} />
         <Route path="funcionarios/:id" element={<FuncionarioDetalhe />} />
         <Route path="diaristas" element={<Diaristas />} />
         <Route path="vales" element={<Vales />} />
         <Route path="ferias" element={<Ferias />} />
-        <Route path="folha" element={<Folha />} />
-        <Route path="contas-pagar" element={<ContasPagar />} />
+        <Route path="gerar-folha" element={<Folha />} />
+        <Route path="pagamentos" element={<ContasPagar />} />
         <Route path="avulsos" element={<Avulsos />} />
         <Route path="impostos" element={<Impostos />} />
         <Route path="configuracoes" element={<Configuracoes />} />
@@ -76,7 +88,20 @@ export default function App() {
           }
         />
       </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
+
+      <Route
+        path="/contas-pagar"
+        element={
+          <Protegida>
+            <Layout modulo={MODULO_CONTAS_PAGAR} />
+          </Protegida>
+        }
+      >
+        <Route index element={<Navigate to="inicio" replace />} />
+        <Route path="inicio" element={<ContasPagarInicio />} />
+      </Route>
+
+      <Route path="*" element={<Navigate to="/modulos" replace />} />
     </Routes>
   );
 }

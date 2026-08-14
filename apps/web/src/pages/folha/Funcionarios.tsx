@@ -10,11 +10,11 @@ import {
   Pagina,
   Selo,
   Vazio,
-} from '../components/ui';
-import { api, mensagemErro } from '../lib/api';
-import { baseDaFolha, usaValorAReceber } from '../lib/folha';
-import { formatBRL } from '../lib/format';
-import type { Funcionario, Paginado, Resumo, SyncResult } from '../lib/types';
+} from '../../components/ui';
+import { api, mensagemErro } from '../../lib/api';
+import { baseDaFolha, usaValorAReceber } from '../../lib/folha';
+import { formatBRL } from '../../lib/format';
+import type { Funcionario, Paginado, Resumo, SyncResult } from '../../lib/types';
 
 export function Funcionarios() {
   const qc = useQueryClient();
@@ -195,7 +195,7 @@ export function Funcionarios() {
                 <tr key={f.id} className="linha group">
                   <td className="td">
                     <Link
-                      to={`/funcionarios/${f.id}`}
+                      to={`/folha/funcionarios/${f.id}`}
                       className="font-medium text-tinta-900 decoration-brand-300 underline-offset-4 group-hover:underline"
                     >
                       {f.nome}

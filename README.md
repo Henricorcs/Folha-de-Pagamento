@@ -1,7 +1,15 @@
-# Folha de Pagamento
+# ILNET FINANCE
 
-Aplicação para gestão e armazenamento das informações de pagamento de
-funcionários, **integrada ao IXC Provedor** via API e pensada para escalar.
+Sistema de gestão interna da ilnet, **integrado ao IXC Provedor** via API e
+organizado em módulos. Depois do login você escolhe em qual trabalhar:
+
+| Módulo             | Rota             | O que faz                                                    |
+| ------------------ | ---------------- | ------------------------------------------------------------ |
+| Folha de Pagamento | `/folha`         | Funcionários, diaristas, vales, férias, impostos e a folha    |
+| Contas a Pagar     | `/contas-pagar`  | Todas as saídas da empresa (em construção)                    |
+
+Um módulo novo se declara em `apps/web/src/lib/modulos.ts` — o cartão na tela
+de escolha e a barra lateral saem dali.
 
 > **Status:** Fase 1 (fatia vertical) — integração IXC + cadastro de
 > funcionários funcionando ponta a ponta. Veja o roadmap em [PLANO.md](PLANO.md).
@@ -31,8 +39,9 @@ folha-pagamento/
 | `auth`         | Login JWT; todas as rotas protegidas por padrão             |
 | `prisma`       | Acesso ao PostgreSQL                                         |
 
-**Frontend (React)** — tela de login, lista de funcionários com busca/filtro,
-botão de sincronização com o IXC e página de detalhe do funcionário.
+**Frontend (React)** — `src/pages/Modulos.tsx` é a escolha de módulo; as telas
+de cada módulo ficam em `src/pages/<módulo>/`. O `Layout` recebe o módulo e
+monta a barra lateral a partir do registro em `src/lib/modulos.ts`.
 
 **Integração IXC** — o IXC é a fonte de verdade dos colaboradores. A
 sincronização faz *upsert* por `ixc_id`, então rodar de novo não duplica. O

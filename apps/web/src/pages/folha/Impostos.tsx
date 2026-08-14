@@ -9,9 +9,9 @@ import {
   Pagina,
   Selo,
   Vazio,
-} from '../components/ui';
-import { api, mensagemErro } from '../lib/api';
-import { formatBRL, formatData } from '../lib/format';
+} from '../../components/ui';
+import { api, mensagemErro } from '../../lib/api';
+import { formatBRL, formatData } from '../../lib/format';
 import {
   CLASSE_CURTA,
   CLASSE_LABEL,
@@ -23,7 +23,7 @@ import {
   type ItemGuia,
   type LeituraDaGuia,
   type TipoGuia,
-} from '../lib/types';
+} from '../../lib/types';
 
 const CLASSES: ClasseTributo[] = [
   'FOLHA_PATRONAL',

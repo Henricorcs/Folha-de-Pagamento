@@ -8,19 +8,19 @@ import {
   Pagina,
   Selo,
   Vazio,
-} from '../components/ui';
-import { api, mensagemErro } from '../lib/api';
-import { baseDaFolha, rotuloParcelaAtual, usaValorAReceber } from '../lib/folha';
-import { formatBRL, formatData } from '../lib/format';
-import { SENTIDO_CURTO, SENTIDO_TOM, TIPO_LABEL } from '../lib/status';
-import { TIPOS_CHAVE_PIX } from '../lib/types';
+} from '../../components/ui';
+import { api, mensagemErro } from '../../lib/api';
+import { baseDaFolha, rotuloParcelaAtual, usaValorAReceber } from '../../lib/folha';
+import { formatBRL, formatData } from '../../lib/format';
+import { SENTIDO_CURTO, SENTIDO_TOM, TIPO_LABEL } from '../../lib/status';
+import { TIPOS_CHAVE_PIX } from '../../lib/types';
 import type {
   FuncionarioDetalhe as TFunc,
   Lancamento,
   TipoLancamento,
   ValeComSaldo,
   VariavelMes,
-} from '../lib/types';
+} from '../../lib/types';
 
 export function FuncionarioDetalhe() {
   const { id } = useParams<{ id: string }>();
@@ -83,7 +83,7 @@ export function FuncionarioDetalhe() {
     <Pagina>
       <header className="surgir mb-8">
         <Link
-          to="/funcionarios"
+          to="/folha/funcionarios"
           className="eyebrow inline-flex items-center gap-1.5 transition hover:text-tinta-700"
         >
           ← Funcionários
@@ -704,7 +704,7 @@ function ValesBloco({ funcionarioId }: { funcionarioId: string }) {
       className="surgir surgir-4"
       acao={
         <Link
-          to="/vales"
+          to="/folha/vales"
           className="text-xs font-semibold text-brand-700 hover:underline"
         >
           Registrar

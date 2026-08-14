@@ -11,18 +11,18 @@ import {
   Pagina,
   Selo,
   Vazio,
-} from '../components/ui';
-import { api, mensagemErro } from '../lib/api';
-import { rotuloParcelaAtual } from '../lib/folha';
-import { formatBRL, formatData } from '../lib/format';
-import { SENTIDO_CURTO, SENTIDO_LABEL, SENTIDO_TOM } from '../lib/status';
+} from '../../components/ui';
+import { api, mensagemErro } from '../../lib/api';
+import { rotuloParcelaAtual } from '../../lib/folha';
+import { formatBRL, formatData } from '../../lib/format';
+import { SENTIDO_CURTO, SENTIDO_LABEL, SENTIDO_TOM } from '../../lib/status';
 import type {
   Funcionario,
   Paginado,
   SentidoVale,
   ValeComSaldo,
   ValeParcela,
-} from '../lib/types';
+} from '../../lib/types';
 
 type Situacao = 'ABERTO' | 'QUITADO' | 'CANCELADO' | 'TODOS';
 
@@ -234,7 +234,7 @@ export function Vales() {
                         ▸
                       </span>
                       <Link
-                        to={`/funcionarios/${v.vale.funcionarioId}`}
+                        to={`/folha/funcionarios/${v.vale.funcionarioId}`}
                         onClick={(e) => e.stopPropagation()}
                         className="font-medium text-tinta-900 decoration-brand-300 underline-offset-4 hover:underline"
                       >
