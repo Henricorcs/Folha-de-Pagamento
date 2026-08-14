@@ -1,5 +1,6 @@
 import {
   estaEmAberto,
+  explicarFiltro,
   mapContaAberta,
   motivoDeNaoEstarAberto,
   ordenarPorUrgencia,
@@ -381,5 +382,76 @@ describe('titulo pago com o status parado em A', () => {
     });
     expect(estaEmAberto(emAberto)).toBe(true);
     expect(mapContaAberta(emAberto, HOJE)!.valorAberto).toBe(877.89);
+  });
+});
+
+/**
+ * O titulo 15676, copiado do registro real que veio do IXC.
+ *
+ * Ele aparecia como vencido desde 2023 numa tela que dizia "contas em aberto",
+ * e nao estava na tela de contas a pagar do proprio IXC. Pelos campos de
+ * dinheiro ele esta aberto mesmo -- valor_aberto cheio, nada pago, sem
+ * cancelamento --, e foi por isso que duas correcoes seguidas nao o pegaram: o
+ * problema nunca foi pagamento. Ele nasceu da entrada de uma nota e nunca foi
+ * liberado.
+ */
+describe('titulo que existe mas nunca foi liberado', () => {
+  const T15676: Record<string, unknown> = {
+    id: '15676',
+    liberado: 'N',
+    filial_id: '1',
+    status: 'A',
+    data_emissao: '2023-05-17',
+    data_vencimento: '2023-05-17',
+    valor: '89.00',
+    valor_aberto: '89.00',
+    valor_pago: '0.00',
+    data_pagamento: '',
+    id_fornecedor: '14',
+    valor_total_pago: '0.00',
+    status_auditoria: 'N',
+    estornado: '',
+    documento: '1716022/1',
+    id_entrada: '2846',
+    tipo_pagamento: 'Boleto',
+    previsao: 'N',
+    id_conta: '0',
+    id_contas: '0',
+    valor_cancelado: '',
+    id_mot_cancelamento: '',
+    data_cancelamento: '',
+  };
+
+  it('fica de fora, e diz que foi pela coluna liberado', () => {
+    expect(estaEmAberto(T15676)).toBe(false);
+    expect(motivoDeNaoEstarAberto(T15676)).toEqual({
+      motivo: 'nao-liberado',
+      campo: 'liberado',
+    });
+  });
+
+  /** Nao e caso de pagamento: por dinheiro ele esta aberto, e continua assim. */
+  it('o mesmo titulo, uma vez liberado, e divida de verdade', () => {
+    const liberado = { ...T15676, liberado: 'S' };
+    expect(estaEmAberto(liberado)).toBe(true);
+    expect(mapContaAberta(liberado, HOJE)!.valorAberto).toBe(89);
+  });
+
+  /**
+   * Base sem esse controle nao pode perder as contas dela por causa de um
+   * campo que nao existe la.
+   */
+  it('coluna ausente ou vazia nao exclui ninguem', () => {
+    const semColuna = { ...T15676 };
+    delete semColuna.liberado;
+    expect(estaEmAberto(semColuna)).toBe(true);
+    expect(estaEmAberto({ ...T15676, liberado: '' })).toBe(true);
+  });
+
+  it('a ficha do debito mostra a coluna liberado com o valor lido', () => {
+    const olhado = explicarFiltro(T15676).olhou.find(
+      (c) => c.campo === 'liberado',
+    );
+    expect(olhado?.valor).toBe('N');
   });
 });

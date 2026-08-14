@@ -78,6 +78,14 @@ function explicarExclusoes(
           `devidas, é essa coluna que está sendo lida errado — ela responde ` +
           `por ${parte}% do que o IXC devolveu.`,
       );
+    } else if (motivo === 'nao-liberado') {
+      avisos.push(
+        `${quantidade} de ${totalLido} título(s) ficaram de fora por não terem ` +
+          `sido liberados no IXC (coluna "liberado" = N) — são lançamentos que ` +
+          `a entrada de nota criou e ninguém liberou. Eles também não aparecem ` +
+          `na tela de contas a pagar do IXC. Se esse número crescer muito, é ` +
+          `sinal de que esta regra está pegando conta demais.`,
+      );
     } else if (motivo === 'quitado') {
       avisos.push(
         `${quantidade} título(s) vieram sem saldo a pagar e ficaram de fora.`,

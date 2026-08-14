@@ -98,7 +98,7 @@ export function estaEmAberto(raw: Record<string, unknown>): boolean {
 
 /** Por que um título não entra na lista — e por qual campo se soube disso. */
 export interface MotivoDeExclusao {
-  motivo: 'pago' | 'cancelado' | 'quitado';
+  motivo: 'pago' | 'cancelado' | 'quitado' | 'nao-liberado';
   /** A coluna do IXC que decidiu. Serve para explicar a exclusão na tela. */
   campo: string;
 }
@@ -139,6 +139,28 @@ export function motivoDeNaoEstarAberto(
 
   const cancelamento = campoDeCancelamento(raw);
   if (cancelamento) return { motivo: 'cancelado', campo: cancelamento };
+
+  /*
+   * Título que existe mas nunca foi liberado.
+   *
+   * É o caso dos quatro que apareciam vencidos desde 2023 sem estar na tela do
+   * IXC. O registro deles conta a história: `liberado = N`, `id_entrada`
+   * apontando para uma nota de entrada, `id_conta` e `id_contas` em zero — ou
+   * seja, sem conta contábil e sem conta de pagamento. São os títulos que a
+   * entrada da nota criou e que ninguém liberou; a compra foi refeita e os
+   * títulos bons, esses sim pagos, ficaram com outro código.
+   *
+   * Pelos campos de dinheiro eles estão abertos mesmo (valor_aberto cheio,
+   * nada pago), e é por isso que as tentativas anteriores não os pegavam: não
+   * é uma questão de pagamento, é de o título nunca ter entrado no fluxo.
+   *
+   * Só o "N" explícito exclui. Coluna ausente ou vazia não vira exclusão —
+   * base que não tenha esse controle não pode perder as contas dela por causa
+   * de um campo que não existe lá.
+   */
+  if (String(raw.liberado ?? '').trim().toUpperCase() === 'N') {
+    return { motivo: 'nao-liberado', campo: 'liberado' };
+  }
 
   /*
    * O saldo declarado pelo IXC manda em tudo que vem depois.
@@ -222,6 +244,11 @@ export function explicarFiltro(
       campo: 'status',
       valor: texto('status') || '(vazio)',
       nota: 'A = aberto · P = pago · C = cancelado',
+    },
+    {
+      campo: 'liberado',
+      valor: texto('liberado') || '(vazio)',
+      nota: 'N = título nunca liberado; não é conta a pagar de verdade',
     },
     {
       campo: 'valor',
