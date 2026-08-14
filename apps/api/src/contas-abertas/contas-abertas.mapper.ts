@@ -140,9 +140,57 @@ export function motivoDeNaoEstarAberto(
   const cancelamento = campoDeCancelamento(raw);
   if (cancelamento) return { motivo: 'cancelado', campo: cancelamento };
 
-  // Nada a pagar não é dívida, seja qual for o status.
+  /*
+   * O saldo declarado pelo IXC manda em tudo que vem depois.
+   *
+   * Título com saldo é devido, ponto — inclusive o de pagamento parcial, que
+   * o IXC lista como "Parcial vencido" e que tem data de baixa mesmo estando
+   * em aberto. Por isso a data de baixa só é olhada quando não há saldo: se
+   * fosse olhada antes, todo pagamento parcial sumiria da lista.
+   */
+  if (parseIxcDecimal(raw.valor_aberto) > 0.001) return null;
+
+  /*
+   * Sem saldo declarado, quem responde é a baixa.
+   *
+   * Foi isto que deixou passar os títulos que apareciam vencidos desde 2023:
+   * eles estão pagos no IXC — com "Valor baixado", "Data/hora baixa" e "Data
+   * pagamento" preenchidos —, mas o `status` deles nunca saiu de "A", então
+   * a consulta por status os trazia. E a conferência por valor não os pegava
+   * porque a listagem do webservice não devolve as colunas de valor pago: sem
+   * elas, "valor menos o que já foi pago" dava o título inteiro em aberto.
+   *
+   * A data de baixa é o que o próprio IXC usa para chamar esses títulos de
+   * "Pago em dia" na tela dele. Ela existe ou não existe — não depende de
+   * coluna de valor nenhuma.
+   */
+  const baixa = campoDeBaixa(raw);
+  if (baixa) return { motivo: 'pago', campo: baixa };
+
+  // Sem saldo, sem baixa: sobra a conta de valor menos o que já saiu.
   if (valorEmAberto(raw) <= 0.001) {
-    return { motivo: 'quitado', campo: 'valor_aberto' };
+    return { motivo: 'quitado', campo: 'valor' };
+  }
+  return null;
+}
+
+/**
+ * As colunas que marcam um título como baixado (quitado) no IXC.
+ *
+ * Lista fechada pelo mesmo motivo da de cancelamento: uma regra larga demais
+ * já apagou quatrocentos títulos de dívida real da tela de uma vez.
+ */
+const CAMPOS_DE_BAIXA = [
+  'data_pagamento',
+  'data_baixa',
+  'data_hora_baixa',
+  'dt_baixa',
+] as const;
+
+/** A coluna que diz que este título já foi baixado, se houver. */
+function campoDeBaixa(raw: Record<string, unknown>): string | null {
+  for (const campo of CAMPOS_DE_BAIXA) {
+    if (temValorDeVerdade(raw[campo])) return campo;
   }
   return null;
 }
@@ -195,6 +243,11 @@ export function explicarFiltro(
       valor: texto('valor_total_pago') || '(vazio)',
       nota: 'quanto já foi pago',
     },
+    ...CAMPOS_DE_BAIXA.map((campo) => ({
+      campo,
+      valor: texto(campo) || '(vazio)',
+      nota: 'preenchida = título já baixado (pago)',
+    })),
     ...CAMPOS_DE_CANCELAMENTO.map((campo) => ({
       campo,
       valor: texto(campo) || '(vazio)',
@@ -245,12 +298,21 @@ const CAMPOS_DE_DATA = [
  */
 function campoDeCancelamento(raw: Record<string, unknown>): string | null {
   for (const campo of CAMPOS_DE_CANCELAMENTO) {
-    const s = String(raw[campo] ?? '').trim().toUpperCase();
-    if (!s || s === 'N' || s === '0' || s === 'NULL') continue;
-    if (/^0000-00-00/.test(s) || /^00\/00\/0000/.test(s)) continue;
-    return campo;
+    if (temValorDeVerdade(raw[campo])) return campo;
   }
   return null;
+}
+
+/**
+ * Se a coluna tem conteúdo que significa alguma coisa. Vazio, `N`, zero, nulo
+ * e data zerada são o estado normal de quem nunca cancelou nem baixou nada —
+ * o IXC preenche essas colunas assim quando o evento não aconteceu.
+ */
+function temValorDeVerdade(valor: unknown): boolean {
+  const s = String(valor ?? '').trim().toUpperCase();
+  if (!s || s === 'N' || s === '0' || s === 'NULL') return false;
+  if (/^0000-00-00/.test(s) || /^00\/00\/0000/.test(s)) return false;
+  return true;
 }
 
 /** Um registro cru do `fn_apagar` na forma que as telas usam. */

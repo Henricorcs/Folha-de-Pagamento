@@ -265,7 +265,7 @@ describe('o que parece aberto mas nao e', () => {
       motivoDeNaoEstarAberto(
         bruto({ valor: '100,00', valor_total_pago: '100,00' }),
       ),
-    ).toEqual({ motivo: 'quitado', campo: 'valor_aberto' });
+    ).toEqual({ motivo: 'quitado', campo: 'valor' });
     expect(motivoDeNaoEstarAberto(bruto())).toBeNull();
   });
 
@@ -308,5 +308,78 @@ describe('categoria da despesa', () => {
   it('sem conta nenhuma, fica vazia em vez de inventar', () => {
     const c = mapContaAberta(bruto(), HOJE)!;
     expect(c.categoria).toEqual({ id: null, nome: null });
+  });
+});
+
+/**
+ * Os titulos da Comercial Rofe, reproduzidos do registro real.
+ *
+ * Apareciam como vencidos desde 2023 numa tela que dizia "contas em aberto".
+ * Estao pagos no IXC -- "Valor baixado", "Data/hora baixa" e "Data pagamento"
+ * preenchidos, "Valor aberto" vazio --, mas o `status` deles nunca saiu de
+ * "A", entao a consulta por status os trazia. E a conferencia por valor nao os
+ * pegava: a listagem do webservice nao devolve as colunas de valor pago, e sem
+ * elas "valor menos o que ja foi pago" da o titulo inteiro em aberto.
+ */
+describe('titulo pago com o status parado em A', () => {
+  /** Como o registro chega da listagem: sem as colunas de valor pago. */
+  function rofe(over: Record<string, unknown> = {}) {
+    return bruto({
+      id: '15996',
+      status: 'A',
+      fornecedor: 'Comercial Rofe Ltda',
+      valor: '877,89',
+      valor_aberto: '',
+      data_emissao: '25/04/2022',
+      data_vencimento: '16/06/2023',
+      data_hora_baixa: '16/06/2023 08:47:56',
+      data_pagamento: '16/06/2023',
+      ...over,
+    });
+  }
+
+  it('sai da lista pela data de baixa, mesmo sem coluna de valor pago', () => {
+    expect(estaEmAberto(rofe())).toBe(false);
+    expect(motivoDeNaoEstarAberto(rofe())).toEqual({
+      motivo: 'pago',
+      campo: 'data_pagamento',
+    });
+  });
+
+  it('a data de baixa sozinha ja basta', () => {
+    const so_baixa = rofe({ data_pagamento: '' });
+    expect(motivoDeNaoEstarAberto(so_baixa)).toEqual({
+      motivo: 'pago',
+      campo: 'data_hora_baixa',
+    });
+  });
+
+  it('data de baixa zerada nao e baixa', () => {
+    expect(
+      estaEmAberto(
+        rofe({ data_pagamento: '00/00/0000', data_hora_baixa: '0000-00-00 00:00:00' }),
+      ),
+    ).toBe(true);
+  });
+
+  /**
+   * O contrario disto seria pior que o defeito: pagamento parcial tem data de
+   * baixa e continua devendo o que sobrou. Por isso o saldo declarado pelo IXC
+   * e olhado antes da baixa.
+   */
+  it('pagamento parcial continua na lista mesmo com data de baixa', () => {
+    const parcial = rofe({ valor_aberto: '400,00' });
+    expect(estaEmAberto(parcial)).toBe(true);
+    expect(mapContaAberta(parcial, HOJE)!.valorAberto).toBe(400);
+  });
+
+  it('sem baixa e sem saldo declarado, o titulo continua sendo divida', () => {
+    const emAberto = rofe({
+      data_pagamento: '',
+      data_hora_baixa: '',
+      valor_aberto: '',
+    });
+    expect(estaEmAberto(emAberto)).toBe(true);
+    expect(mapContaAberta(emAberto, HOJE)!.valorAberto).toBe(877.89);
   });
 });
