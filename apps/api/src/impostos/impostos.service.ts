@@ -9,7 +9,7 @@ import { ClasseTributo, Prisma, TipoGuia } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { GravarGuiaDto } from './dto/guia.dto';
 import { conferir, GuiaIlegivelError, GuiaLida, lerGuia } from './guias.parse';
-import { extrairTextoPdf } from './pdf';
+import { extrairTextoPdf } from '../pdf/pdf';
 
 /** O que a tela mostra depois de ler o PDF, antes de alguém confirmar. */
 export interface LeituraDaGuia {

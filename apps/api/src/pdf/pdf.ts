@@ -1,10 +1,15 @@
 /**
- * Extração do texto de um PDF, sem depender de nada nativo.
+ * Extração do conteúdo de um PDF, sem depender de nada nativo.
  *
- * O pdfjs devolve pedaços soltos de texto com a posição de cada um, e não
- * linhas. Remontá-las é o trabalho daqui — e é o que o leitor de guias espera:
- * ele se ancora em rótulos impressos ("Total da Guia:", "Identificador"), que
- * só existem se a linha vier inteira e com os espaços nos lugares certos.
+ * Duas saídas, porque há dois tipos de papel a ler:
+ *
+ * - `extrairTextoPdf` remonta as linhas. É o que as guias de imposto precisam:
+ *   elas se ancoram em rótulos impressos ("Total da Guia:", "Identificador"),
+ *   que só existem se a linha vier inteira e com os espaços nos lugares certos.
+ * - `extrairItensPdf` devolve cada pedaço com a posição em que foi desenhado.
+ *   É o que uma **tabela** precisa: na previsão de férias o nome e o cargo saem
+ *   colados ("MARCUS VINICIUS PIMENTEL BANDEIRATECNICO INSTALADOR") porque as
+ *   colunas se encostam, e só a posição separa uma da outra.
  */
 
 import * as path from 'node:path';
@@ -72,6 +77,23 @@ interface PedacoDeTexto {
 }
 
 /**
+ * Um pedaço de texto e onde ele foi desenhado.
+ *
+ * `linha` e `coluna` são os dois eixos da matriz do PDF, batizados pelo papel
+ * que cumprem: pedaços com a mesma `linha` estão na mesma altura da folha, e
+ * `coluna` cresce ao longo dela. Qual dos dois eixos da matriz é qual depende
+ * da rotação da página — relatório em paisagem, como a previsão de férias, sai
+ * girado —, e é por isso que os nomes não são "x" e "y".
+ */
+export interface ItemDoPdf {
+  texto: string;
+  linha: number;
+  coluna: number;
+  /** Comprimento do pedaço no eixo das colunas. */
+  largura: number;
+}
+
+/**
  * Fontes-padrão do próprio pacote. Não mudam o texto extraído, mas sem elas o
  * pdfjs enche o log de aviso a cada arquivo lido — e log sujo atrapalha
  * justamente quando algo dá errado de verdade.
@@ -83,7 +105,11 @@ function pastaDasFontes(): string {
   return `${path.join(raiz, 'standard_fonts').replace(/\\/g, '/')}/`;
 }
 
-export async function extrairTextoPdf(dados: Uint8Array): Promise<string> {
+/** Abre o PDF e entrega os pedaços de cada página, já em ordem de desenho. */
+async function lerPaginas<T>(
+  dados: Uint8Array,
+  daPagina: (pedacos: PedacoDeTexto[]) => T,
+): Promise<T[]> {
   const { getDocument } = await carregarPdfjs();
 
   const documento = await getDocument({
@@ -96,17 +122,62 @@ export async function extrairTextoPdf(dados: Uint8Array): Promise<string> {
   }).promise;
 
   try {
-    const paginas: string[] = [];
+    const paginas: T[] = [];
     for (let n = 1; n <= documento.numPages; n++) {
       const pagina = await documento.getPage(n);
       const conteudo = await pagina.getTextContent();
-      paginas.push(montarLinhas(conteudo.items as PedacoDeTexto[]));
+      paginas.push(daPagina(conteudo.items as PedacoDeTexto[]));
       pagina.cleanup();
     }
-    return paginas.join('\n');
+    return paginas;
   } finally {
     await documento.destroy();
   }
+}
+
+export async function extrairTextoPdf(dados: Uint8Array): Promise<string> {
+  const paginas = await lerPaginas(dados, montarLinhas);
+  return paginas.join('\n');
+}
+
+/**
+ * Os pedaços de texto com a posição de cada um, de todas as páginas.
+ *
+ * Páginas seguintes entram com a `linha` deslocada, para que a linha 3 da
+ * página 2 não se misture com a linha 3 da página 1 — o relatório de férias
+ * passa de uma página assim que a empresa cresce.
+ */
+export async function extrairItensPdf(
+  dados: Uint8Array,
+): Promise<ItemDoPdf[]> {
+  const porPagina = await lerPaginas(dados, converterItens);
+
+  const todos: ItemDoPdf[] = [];
+  let deslocamento = 0;
+  for (const itens of porPagina) {
+    for (const item of itens) {
+      todos.push({ ...item, linha: item.linha + deslocamento });
+    }
+    const maior = itens.reduce((m, i) => Math.max(m, i.linha), 0);
+    deslocamento += maior + 1000;
+  }
+  return todos;
+}
+
+function converterItens(pedacos: PedacoDeTexto[]): ItemDoPdf[] {
+  const itens: ItemDoPdf[] = [];
+  for (const pedaco of pedacos) {
+    if (typeof pedaco?.str !== 'string') continue;
+    const texto = pedaco.str.trim();
+    if (!texto) continue;
+    itens.push({
+      texto,
+      linha: pedaco.transform?.[4] ?? 0,
+      coluna: pedaco.transform?.[5] ?? 0,
+      largura: pedaco.width ?? 0,
+    });
+  }
+  return itens;
 }
 
 /**

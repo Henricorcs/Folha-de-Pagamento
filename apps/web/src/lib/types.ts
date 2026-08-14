@@ -809,6 +809,88 @@ export interface LeituraDaGuia {
   jaExiste: { id: string; competencia: string; valorTotal: number } | null;
 }
 
+// ---------------------------------------------------------------------------
+// Férias — a previsão que a contabilidade manda todo mês, e a fila que sai dela
+// ---------------------------------------------------------------------------
+
+/** Onde a pessoa está em relação ao próprio prazo. */
+export type SituacaoFerias = 'VENCIDA' | 'LIBERADA' | 'AGUARDANDO';
+
+/** Férias já marcadas para alguém. */
+export interface FeriasMarcada {
+  id: string;
+  inicio: string;
+  fim: string;
+  dias: number;
+  observacao: string | null;
+  /** Está de férias hoje. */
+  emCurso: boolean;
+}
+
+export interface PessoaNaFila {
+  itemId: string;
+  ordem: number;
+  codigo: string;
+  nome: string;
+  cargo: string | null;
+  /** Cadastro daqui, quando o nome casou — dá para abrir a ficha. */
+  funcionarioId: string | null;
+  admissao: string | null;
+  periodoInicio: string;
+  periodoFim: string;
+  dataLimite: string;
+  diasDireito: number;
+  diasAcumulados: number | null;
+  situacao: SituacaoFerias;
+  /** Dias até a data limite; negativo = já passou dela. */
+  diasAteLimite: number;
+  /** Dias até poder sair; 0 = já pode. */
+  diasParaLiberar: number;
+  ferias: FeriasMarcada | null;
+}
+
+export interface FilaDeFerias {
+  previsao: {
+    id: string;
+    dataRelatorio: string;
+    empresa: string | null;
+    arquivoNome: string;
+    diasDesdeORelatorio: number;
+  } | null;
+  fila: PessoaNaFila[];
+  marcadas: PessoaNaFila[];
+}
+
+/** Uma pessoa como o leitor entendeu do PDF. */
+export interface ItemPrevisaoLido {
+  ordem: number;
+  codigo: string;
+  nome: string;
+  cargo: string | null;
+  admissao: string | null;
+  periodoInicio: string;
+  periodoFim: string;
+  dataLimite: string;
+  diasDireito: number;
+  diasAcumulados: number | null;
+  diasRestantes: number | null;
+}
+
+/** O que o leitor entendeu do PDF, antes de alguém confirmar. */
+export interface LeituraDaPrevisao {
+  previsao: {
+    dataRelatorio: string;
+    empresa: string | null;
+    cnpj: string | null;
+    mesesLimite: number | null;
+    itens: ItemPrevisaoLido[];
+    totalDeclarado: number | null;
+  };
+  arquivoNome: string;
+  divergencia: string | null;
+  jaExiste: { id: string; arquivoNome: string; itens: number } | null;
+}
+
 export interface ResumoImpostos {
   serie: {
     competencia: string;

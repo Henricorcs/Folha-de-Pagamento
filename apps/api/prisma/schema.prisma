@@ -117,6 +117,8 @@ model Funcionario {
   contasPagar   ContaPagar[]
   variaveisMes  VariavelMes[]
   vales         Vale[]
+  itensFerias   ItemPrevisaoFerias[]
+  ferias        FeriasMarcada[]
 
   @@index([ativo])
   @@index([nome])
@@ -772,6 +774,107 @@ model Guia {
   @@unique([tipo, competencia, numeroDocumento])
   @@index([competencia])
   @@map("guias")
+}
+
+// ---------------------------------------------------------------------------
+// Férias: a "Previsão de Férias" que a contabilidade manda todo mês, lida do
+// PDF, e o registro de quem já foi mandado para férias.
+// ---------------------------------------------------------------------------
+
+/// Uma remessa da contabilidade. Cada envio é uma foto do dia em que foi
+/// tirada: os dias que faltam são recontados aqui a partir da data limite, mas
+/// o próprio direito (quem fechou 12 meses) vem do que ela apurou.
+model PrevisaoFerias {
+  id String @id @default(uuid())
+
+  /// Dia a que o relatório se refere ("Período: dd/mm/aaaa" no cabeçalho).
+  /// Único: subir o mesmo relatório de novo substitui, não duplica a fila.
+  dataRelatorio DateTime @unique @map("data_relatorio")
+
+  empresa     String?
+  cnpj        String?
+  /// "Nº de Meses Limite" do cabeçalho (11 no relatório da Fortes).
+  mesesLimite Int?    @map("meses_limite")
+
+  arquivoNome String @map("arquivo_nome")
+
+  criadoPor String?  @map("criado_por")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  itens ItemPrevisaoFerias[]
+
+  @@map("previsoes_ferias")
+}
+
+/// Uma pessoa dentro da previsão, com as datas que decidem a vez dela.
+model ItemPrevisaoFerias {
+  id String @id @default(uuid())
+
+  previsao   PrevisaoFerias @relation(fields: [previsaoId], references: [id], onDelete: Cascade)
+  previsaoId String         @map("previsao_id")
+
+  /// Posição no PDF, de cima para baixo
+  ordem  Int
+  /// Matrícula na contabilidade ("000055") — é o que identifica a pessoa entre
+  /// uma remessa e outra, já que o PDF não traz CPF.
+  codigo String
+  nome   String
+  cargo  String?
+
+  admissao      DateTime?
+  /// Os 12 meses trabalhados que dão direito às férias
+  periodoInicio DateTime  @map("periodo_inicio")
+  periodoFim    DateTime  @map("periodo_fim")
+  /// Último dia em que as férias podem começar sem virar dobro (art. 137 CLT)
+  dataLimite    DateTime  @map("data_limite")
+
+  diasDireito    Decimal  @default(30) @map("dias_direito") @db.Decimal(5, 1)
+  /// Dias acumulados na data do relatório (2,5 por mês trabalhado)
+  diasAcumulados Decimal? @map("dias_acumulados") @db.Decimal(5, 1)
+  diasRestantes  Decimal? @map("dias_restantes") @db.Decimal(5, 1)
+
+  /// Cadastro daqui, quando o nome casou. Serve para abrir a ficha da pessoa —
+  /// o PDF vem da contabilidade e nem todo mundo dele está cadastrado aqui.
+  funcionario   Funcionario? @relation(fields: [funcionarioId], references: [id], onDelete: SetNull)
+  funcionarioId String?      @map("funcionario_id")
+
+  @@index([previsaoId])
+  @@index([dataLimite])
+  @@map("itens_previsao_ferias")
+}
+
+/// Alguém mandado para férias. Registra aqui quem está fora e até quando; não
+/// paga nada nem mexe na folha — o pagamento das férias é da contabilidade.
+model FeriasMarcada {
+  id String @id @default(uuid())
+
+  /// Matrícula e nome como vieram do relatório, porque a pessoa pode não ter
+  /// cadastro aqui e o registro não pode depender disso.
+  codigo String
+  nome   String
+
+  funcionario   Funcionario? @relation(fields: [funcionarioId], references: [id], onDelete: SetNull)
+  funcionarioId String?      @map("funcionario_id")
+
+  inicio DateTime
+  fim    DateTime
+  dias   Int      @default(30)
+
+  /// Período aquisitivo que estas férias quitam. É ele que tira a pessoa da
+  /// fila enquanto a contabilidade não manda a previsão nova — o mesmo período
+  /// não é concedido duas vezes.
+  periodoInicio DateTime @map("periodo_inicio")
+  periodoFim    DateTime @map("periodo_fim")
+
+  observacao String?
+
+  criadoPor String?  @map("criado_por")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([codigo, periodoFim])
+  @@index([inicio])
+  @@map("ferias_marcadas")
 }
 
 model GuiaItem {

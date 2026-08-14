@@ -6,6 +6,7 @@ import { Configuracoes } from './pages/Configuracoes';
 import { ContasPagar } from './pages/ContasPagar';
 import { Dashboard } from './pages/Dashboard';
 import { Diaristas } from './pages/Diaristas';
+import { Ferias } from './pages/Ferias';
 import { Folha } from './pages/Folha';
 import { FuncionarioDetalhe } from './pages/FuncionarioDetalhe';
 import { Funcionarios } from './pages/Funcionarios';
@@ -59,6 +60,7 @@ export default function App() {
         <Route path="funcionarios/:id" element={<FuncionarioDetalhe />} />
         <Route path="diaristas" element={<Diaristas />} />
         <Route path="vales" element={<Vales />} />
+        <Route path="ferias" element={<Ferias />} />
         <Route path="folha" element={<Folha />} />
         <Route path="contas-pagar" element={<ContasPagar />} />
         <Route path="avulsos" element={<Avulsos />} />

@@ -11,6 +11,7 @@ const navItems = [
   { to: '/funcionarios', label: 'Funcionários', icone: IconePessoas },
   { to: '/diaristas', label: 'Diaristas', icone: IconeDia },
   { to: '/vales', label: 'Vales e Acertos', icone: IconeMoeda },
+  { to: '/ferias', label: 'Férias', icone: IconeSol },
   { to: '/folha', label: 'Gerar Folha', icone: IconeCalculo },
   { to: '/contas-pagar', label: 'Contas a Pagar', icone: IconeSaida },
   { to: '/avulsos', label: 'Pagamentos Avulsos', icone: IconeRecibo },
@@ -205,6 +206,17 @@ function IconeMoeda({ className }: IconeProps) {
       <circle cx="12" cy="12" r="8.5" />
       <path d="M14.5 9.5a2.6 2.6 0 0 0-2.5-1.5c-1.4 0-2.5.8-2.5 2s1.1 1.8 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2a2.6 2.6 0 0 1-2.5-1.5" />
       <path d="M12 6.2v1.8M12 16v1.8" />
+    </svg>
+  );
+}
+
+/** Sol: o descanso a que a pessoa tem direito. */
+function IconeSol({ className }: IconeProps) {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2" />
+      <path d="M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4" />
     </svg>
   );
 }

@@ -9,6 +9,7 @@ import { FuncionariosModule } from './funcionarios/funcionarios.module';
 import { FinanceiroModule } from './financeiro/financeiro.module';
 import { DiaristasModule } from './diaristas/diaristas.module';
 import { ImpostosModule } from './impostos/impostos.module';
+import { FeriasModule } from './ferias/ferias.module';
 import { ValesModule } from './vales/vales.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { AuthModule } from './auth/auth.module';
@@ -33,6 +34,7 @@ import { HealthController } from './health/health.controller';
     FinanceiroModule,
     DiaristasModule,
     ImpostosModule,
+    FeriasModule,
     ValesModule,
     DashboardModule,
   ],
