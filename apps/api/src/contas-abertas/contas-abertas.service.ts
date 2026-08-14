@@ -187,8 +187,16 @@ export class ContasAbertasService {
       idFnApagar,
     );
     if (!raw) {
+      // A listagem trouxe o título, mas perguntando pelo código o IXC não
+      // devolve nada. Vale dizer isso por extenso: é a diferença entre "a
+      // conta existe e o filtro daqui erra" e "o IXC devolveu na lista algo
+      // que ele mesmo não reconhece" — e são consertos completamente
+      // diferentes.
       throw new NotFoundException(
-        `O IXC não tem mais o título ${idFnApagar}.`,
+        `A lista trouxe o título ${idFnApagar}, mas ao perguntar por ele pelo ` +
+          `código o IXC não devolve nada. Ou seja: ele veio na listagem e não ` +
+          `existe mais no cadastro — o problema está do lado do IXC, não do ` +
+          `filtro desta tela.`,
       );
     }
     return { campos: raw, filtro: explicarFiltro(raw) };

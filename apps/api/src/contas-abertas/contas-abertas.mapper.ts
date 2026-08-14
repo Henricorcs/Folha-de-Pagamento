@@ -200,10 +200,42 @@ export function explicarFiltro(
       valor: texto(campo) || '(vazio)',
       nota: 'marca de conta cancelada',
     })),
+    // As datas não decidem se a conta entra na lista, mas decidem em que
+    // linha do tempo ela aparece — e é por elas que se procura o título no
+    // IXC. Se a data mostrada aqui sair de uma coluna diferente da que o IXC
+    // chama de "Vencimento", procurar por ela lá não acha nada, e o título
+    // parece não existir quando na verdade só está em outro dia.
+    ...CAMPOS_DE_DATA.map((campo) => ({
+      campo,
+      valor: texto(campo) || '(vazio)',
+      nota: 'data como veio do IXC, sem interpretação',
+    })),
+    {
+      campo: 'id_fornecedor',
+      valor: texto('id_fornecedor') || '(vazio)',
+      nota: 'código de quem recebe, para procurar no cadastro do IXC',
+    },
   ];
 
   return { aberta: motivo === null, motivo, olhou };
 }
+
+/**
+ * Toda coluna de data conhecida do `fn_apagar`, mostrada crua. Não é a lista
+ * que o mapeador usa para escolher o vencimento — é maior de propósito: serve
+ * para comparar o que a tela mostra com o que existe no registro.
+ */
+const CAMPOS_DE_DATA = [
+  'data_vencimento',
+  'data_venc',
+  'vencimento',
+  'data_vencimento_original',
+  'data_emissao',
+  'data',
+  'data_pagamento',
+  'data_baixa',
+  'data_hora_baixa',
+] as const;
 
 /**
  * A coluna que diz que esta conta foi cancelada, se houver.
