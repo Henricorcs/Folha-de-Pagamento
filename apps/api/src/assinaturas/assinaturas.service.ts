@@ -5,7 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { AssinaturaDiaria, FormaPagamento } from '@prisma/client';
+import { AssinaturaDiaria, FormaPagamento, ModoAssinatura } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { ConfigFinanceiraService } from '../financeiro/config-financeira.service';
 import { descreverPartes } from '../financeiro/pagamento.calc';
@@ -32,6 +32,8 @@ export interface ReciboPublico {
   assinado: boolean;
   assinadoEm: Date | null;
   assinaturaPng: string | null;
+  /** Desenhada com o dedo, ou gerada a partir do nome */
+  modo: ModoAssinatura;
 }
 
 @Injectable()
@@ -149,6 +151,7 @@ export class AssinaturasService {
       assinado: a.assinadoEm !== null,
       assinadoEm: a.assinadoEm,
       assinaturaPng: a.assinaturaPng,
+      modo: a.modo,
     };
   }
 
@@ -180,6 +183,7 @@ export class AssinaturasService {
       data: {
         assinaturaPng: dto.assinatura,
         assinadoEm: new Date(),
+        modo: dto.modo ?? ModoAssinatura.DESENHADA,
         nomeAssinante: dto.nome?.trim() || a.diaria.diarista.nome,
         ip: origem.ip?.slice(0, 60) ?? null,
         userAgent: origem.userAgent?.slice(0, 300) ?? null,

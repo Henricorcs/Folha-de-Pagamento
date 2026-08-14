@@ -654,6 +654,16 @@ model Diaria {
 /// recebido: se amanhã alguém corrigir o cadastro dela ou o valor da diária, o
 /// papel que ela assinou não pode mudar junto.
 /// ---------------------------------------------------------------------------
+/// Como a assinatura foi feita. Não é detalhe de tela: um recibo que aparenta
+/// punho próprio sem ser não vale mais que um sem assinatura nenhuma — vale
+/// menos, porque engana quem o lê. Por isso o modo é gravado e sai impresso.
+enum ModoAssinatura {
+  /// Desenhada com o dedo por quem recebeu
+  DESENHADA
+  /// Gerada a partir do nome, a pedido de quem não assina de próprio punho
+  DIGITADA
+}
+
 model AssinaturaDiaria {
   id String @id @default(uuid())
 
@@ -665,9 +675,11 @@ model AssinaturaDiaria {
   token    String   @unique
   expiraEm DateTime @map("expira_em")
 
-  /// PNG da assinatura desenhada, em data URL. Vazio até alguém assinar.
+  /// PNG da assinatura, em data URL. Vazio até alguém assinar.
   assinaturaPng String?   @map("assinatura_png")
   assinadoEm    DateTime? @map("assinado_em")
+  /// Desenhada com o dedo, ou gerada a partir do nome de quem não escreve
+  modo          ModoAssinatura @default(DESENHADA)
 
   // --- O retrato do pagamento, congelado na hora de assinar ---
   /// Nome que a pessoa confirmou ser o dela ao assinar

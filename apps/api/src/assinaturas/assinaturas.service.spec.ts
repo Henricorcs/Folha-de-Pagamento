@@ -291,3 +291,59 @@ describe('recibo para imprimir', () => {
     await expect(service.paraRecibo('dia1')).rejects.toThrow(NotFoundException);
   });
 });
+
+/**
+ * Quem não escreve o próprio nome não pode ficar sem receber — mas o recibo
+ * dele também não pode fingir um punho que não houve. O modo é o que separa as
+ * duas coisas, e é por isso que ele é gravado em vez de deduzido depois.
+ */
+describe('modo da assinatura', () => {
+  it('nasce como desenhada quando a tela não diz nada', async () => {
+    const { service, guardado, prisma } = montarServico({
+      assinatura: assinaturaGravada(),
+    });
+    prisma.assinaturaDiaria.findUnique
+      .mockResolvedValueOnce(assinaturaGravada())
+      .mockResolvedValueOnce(assinaturaGravada({ assinadoEm: new Date() }));
+
+    await service.assinar('tok', { assinatura: PNG }, {});
+
+    expect(guardado[0].modo).toBe('DESENHADA');
+  });
+
+  it('guarda que a assinatura foi gerada a partir do nome', async () => {
+    const { service, guardado, prisma } = montarServico({
+      assinatura: assinaturaGravada(),
+    });
+    prisma.assinaturaDiaria.findUnique
+      .mockResolvedValueOnce(assinaturaGravada())
+      .mockResolvedValueOnce(
+        assinaturaGravada({ assinadoEm: new Date(), modo: 'DIGITADA' }),
+      );
+
+    await service.assinar(
+      'tok',
+      { assinatura: PNG, nome: 'Antonio Clebes Alves', modo: 'DIGITADA' },
+      {},
+    );
+
+    expect(guardado[0]).toMatchObject({
+      modo: 'DIGITADA',
+      nomeAssinante: 'Antonio Clebes Alves',
+    });
+  });
+
+  it('o modo acompanha o recibo aberto pelo link', async () => {
+    const { service } = montarServico({
+      assinatura: assinaturaGravada({
+        assinadoEm: new Date(),
+        assinaturaPng: PNG,
+        modo: 'DIGITADA',
+      }),
+    });
+
+    const recibo = await service.abrirPorToken('tok');
+
+    expect(recibo.modo).toBe('DIGITADA');
+  });
+});

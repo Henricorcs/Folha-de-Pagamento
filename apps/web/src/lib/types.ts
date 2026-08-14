@@ -537,6 +537,13 @@ export interface Diaria {
 }
 
 /**
+ * Como a assinatura foi feita. Desenhada com o dedo, ou escrita pelo sistema a
+ * partir do nome, para quem não assina de próprio punho — o recibo diz qual
+ * das duas, porque um papel que aparenta punho sem ser não prova nada.
+ */
+export type ModoAssinatura = 'DESENHADA' | 'DIGITADA';
+
+/**
  * O recibo assinado de uma diária paga em mãos, como a tela de quem paga o vê.
  * `assinadoEm` vazio = o link está de pé, mas ninguém assinou ainda.
  */
@@ -546,6 +553,7 @@ export interface AssinaturaDiaria {
   assinadoEm: string | null;
   nomeAssinante: string | null;
   assinaturaPng: string | null;
+  modo: ModoAssinatura;
 }
 
 /**
@@ -562,6 +570,7 @@ export interface ReciboPublico {
   assinado: boolean;
   assinadoEm: string | null;
   assinaturaPng: string | null;
+  modo: ModoAssinatura;
 }
 
 /** Um caixa/conta do IXC, para configurar de onde sai o dinheiro em mãos. */

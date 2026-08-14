@@ -1,4 +1,12 @@
-import { IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { ModoAssinatura } from '@prisma/client';
+import {
+  IsEnum,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 /**
  * O que a pessoa manda ao assinar. Vem de fora do login — quem tem o link
@@ -19,4 +27,10 @@ export class AssinarDto {
 
   /** Como a pessoa confirma se chamar. Vazio = o nome do cadastro. */
   @IsOptional() @IsString() @MinLength(3) @MaxLength(120) nome?: string;
+
+  /**
+   * Desenhada com o dedo, ou gerada a partir do nome de quem não escreve.
+   * Vazio = desenhada, que é o caminho normal.
+   */
+  @IsOptional() @IsEnum(ModoAssinatura) modo?: ModoAssinatura;
 }

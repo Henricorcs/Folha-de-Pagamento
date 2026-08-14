@@ -65,6 +65,7 @@ export class AssinaturasController {
       assinadoEm: a.assinadoEm,
       nomeAssinante: a.nomeAssinante,
       assinaturaPng: a.assinaturaPng,
+      modo: a.modo,
     };
   }
 
@@ -86,6 +87,7 @@ export class AssinaturasController {
       dataDiaria: a.dataDiaria,
       assinadoEm: a.assinadoEm!,
       assinaturaPng: a.assinaturaPng!,
+      modo: a.modo,
       ip: a.ip,
       userAgent: a.userAgent,
     });

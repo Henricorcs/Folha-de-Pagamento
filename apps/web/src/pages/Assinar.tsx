@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   AssinaturaCanvas,
@@ -7,7 +7,7 @@ import {
 } from '../components/AssinaturaCanvas';
 import { api, mensagemErro } from '../lib/api';
 import { formatBRL, formatData } from '../lib/format';
-import type { ReciboPublico } from '../lib/types';
+import type { ModoAssinatura, ReciboPublico } from '../lib/types';
 
 /**
  * A tela de quem recebeu o dinheiro. É a única do sistema que abre sem login:
@@ -24,6 +24,7 @@ export function Assinar() {
   const controle = useRef<AssinaturaCanvasRef>(null);
   const [nome, setNome] = useState('');
   const [temTraco, setTemTraco] = useState(false);
+  const [modo, setModo] = useState<ModoAssinatura>('DESENHADA');
   const [erro, setErro] = useState<string | null>(null);
 
   const recibo = useQuery({
@@ -40,6 +41,7 @@ export function Assinar() {
       return (
         await api.post<ReciboPublico>(`/assinaturas/${token}`, {
           assinatura,
+          modo,
           ...(nome.trim() ? { nome: nome.trim() } : {}),
         })
       ).data;
@@ -50,6 +52,23 @@ export function Assinar() {
     },
     onError: (e) => setErro(mensagemErro(e)),
   });
+
+  /** O nome que vale: o digitado, ou o do cadastro quando ninguém mexeu. */
+  const nomeParaAssinar = nome.trim() || recibo.data?.quemRecebe.nome || '';
+
+  // No modo gerado, o quadro acompanha o campo de nome: corrigiu uma letra,
+  // a assinatura é reescrita. Ela *é* o nome — deixar os dois diferentes seria
+  // entregar um recibo assinado com um nome que ninguém confirmou.
+  useEffect(() => {
+    if (modo !== 'DIGITADA' || !nomeParaAssinar) return;
+    controle.current?.gerarDoNome(nomeParaAssinar);
+  }, [modo, nomeParaAssinar]);
+
+  function trocarModo(novo: ModoAssinatura) {
+    if (novo === modo) return;
+    controle.current?.limpar();
+    setModo(novo);
+  }
 
   if (recibo.isLoading) {
     return <Moldura><p className="text-center text-tinta-400">Abrindo o recibo…</p></Moldura>;
@@ -104,6 +123,12 @@ export function Assinar() {
             <div className="mt-2 border-t border-tinta-200 pt-2 text-center text-sm font-semibold text-tinta-800">
               {r.quemRecebe.nome}
             </div>
+            {r.modo === 'DIGITADA' && (
+              <p className="mt-2 text-center text-xs italic text-tinta-400">
+                Assinatura gerada a partir do nome, a pedido de quem recebeu,
+                por não assinar de próprio punho.
+              </p>
+            )}
           </div>
         )}
 
@@ -154,8 +179,8 @@ export function Assinar() {
         </p>
       </div>
 
-      <div className="mt-4">
-        <div className="mb-1.5 flex items-center justify-between">
+      <div className="mt-5">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <span className="rotulo mb-0">Assinatura</span>
           <button
             type="button"
@@ -165,11 +190,39 @@ export function Assinar() {
             Limpar
           </button>
         </div>
+
+        {/* Quem não escreve não pode ficar sem receber por causa disso — mas
+            também não pode receber um papel que finge um punho que não houve.
+            A escolha fica à vista, e o recibo guarda qual delas foi. */}
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          <BotaoModo
+            ativo={modo === 'DESENHADA'}
+            onClick={() => trocarModo('DESENHADA')}
+          >
+            Assinar com o dedo
+          </BotaoModo>
+          <BotaoModo
+            ativo={modo === 'DIGITADA'}
+            onClick={() => trocarModo('DIGITADA')}
+          >
+            Não sei assinar
+          </BotaoModo>
+        </div>
+
         <AssinaturaCanvas
           controle={controle}
           onMudou={setTemTraco}
-          disabled={assinar.isPending}
+          disabled={assinar.isPending || modo === 'DIGITADA'}
         />
+
+        {modo === 'DIGITADA' && (
+          <p className="ajuda">
+            A assinatura acima foi escrita pelo sistema com o nome informado. O
+            recibo vai dizer isso — que ela foi gerada a pedido de quem recebeu,
+            por não assinar de próprio punho. Corrija o nome no campo acima se
+            estiver diferente.
+          </p>
+        )}
       </div>
 
       {erro && (
@@ -191,6 +244,32 @@ export function Assinar() {
         {r.quemPaga.nome} pelo serviço acima, dando plena quitação.
       </p>
     </Moldura>
+  );
+}
+
+/** Uma das duas formas de assinar, do tamanho de um dedo. */
+function BotaoModo({
+  ativo,
+  onClick,
+  children,
+}: {
+  ativo: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={ativo}
+      className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
+        ativo
+          ? 'border-brand-300 bg-brand-50 text-brand-700'
+          : 'border-tinta-200 bg-white text-tinta-500 hover:border-tinta-300'
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -226,8 +305,10 @@ function Linha({ rotulo, valor }: { rotulo: string; valor: string }) {
  */
 function Moldura({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-tinta-50 px-4 py-8">
-      <div className="mx-auto w-full max-w-lg">
+    <div className="min-h-screen bg-tinta-50 px-4 py-6 sm:py-8">
+      {/* Deitado, o cartão se alarga: é assim que sobra espaço para a mão
+          correr o nome inteiro sem espremer as letras no fim da linha. */}
+      <div className="mx-auto w-full max-w-lg landscape:max-w-4xl">
         <div className="mb-5 flex justify-center">
           <img
             src="/logo-ilnet.png"

@@ -7,6 +7,7 @@
  * que saiu em março, mesmo que o valor da diária tenha mudado desde então.
  */
 
+import { ModoAssinatura } from '@prisma/client';
 import PDFDocument from 'pdfkit';
 import { formatValorBR } from '../financeiro/folha.calc';
 import { valorPorExtenso } from './recibo.extenso';
@@ -22,6 +23,8 @@ export interface DadosDoRecibo {
   dataDiaria: Date;
   assinadoEm: Date;
   assinaturaPng: string;
+  /** Desenhada com o dedo, ou gerada a partir do nome de quem não escreve */
+  modo: ModoAssinatura;
   ip: string | null;
   userAgent: string | null;
 }
@@ -168,6 +171,23 @@ function desenhar(doc: PDFKit.PDFDocument, d: DadosDoRecibo): void {
       });
   }
 
+  // Assinatura gerada: o papel diz isso embaixo dela, e não em nota de rodapé.
+  // Quem lê o recibo tem de saber o que está olhando no mesmo lugar em que
+  // olha — deixar isso para as letras miúdas seria esconder.
+  if (d.modo === ModoAssinatura.DIGITADA) {
+    doc
+      .font('Helvetica-Oblique')
+      .fontSize(8.5)
+      .fillColor(TINTA_FRACA)
+      .text(
+        'Assinatura gerada a partir do nome, a pedido de quem recebeu, ' +
+          'por não assinar de próprio punho.',
+        esquerda - 40,
+        doc.y + 6,
+        { width: larguraAssinatura + 80, align: 'center' },
+      );
+  }
+
   // --- O rodapé é a prova técnica: de onde veio a assinatura ---
   rodape(doc, d);
 }
@@ -199,8 +219,13 @@ function rodape(doc: PDFKit.PDFDocument, d: DadosDoRecibo): void {
     .strokeColor(LINHA)
     .stroke();
 
+  const comoFoi =
+    d.modo === ModoAssinatura.DIGITADA
+      ? 'Assinatura gerada a partir do nome informado'
+      : 'Assinado de próprio punho na tela';
+
   const linhas = [
-    `Assinado eletronicamente em ${formatarDataHora(d.assinadoEm)}.`,
+    `${comoFoi}, eletronicamente, em ${formatarDataHora(d.assinadoEm)}.`,
     d.ip ? `Origem: ${d.ip}` : null,
     d.userAgent ? `Aparelho: ${encurtar(d.userAgent, 96)}` : null,
     `Recibo ${d.id}`,

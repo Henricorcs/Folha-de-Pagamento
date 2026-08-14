@@ -134,6 +134,12 @@ export function ColetarAssinatura({
                 <div className="mx-auto mt-2 max-w-xs border-t border-tinta-200 pt-2 text-center text-sm font-semibold text-tinta-800">
                   {atual.nomeAssinante}
                 </div>
+                {atual.modo === 'DIGITADA' && (
+                  <p className="mt-2 text-center text-xs italic text-tinta-400">
+                    Gerada a partir do nome — quem recebeu não assina de
+                    próprio punho.
+                  </p>
+                )}
               </div>
             )}
 
