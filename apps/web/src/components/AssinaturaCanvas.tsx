@@ -48,7 +48,7 @@ interface Props {
  */
 function alturaParaTela(): number {
   const janela = typeof window === 'undefined' ? 800 : window.innerHeight;
-  return Math.round(Math.min(340, Math.max(230, janela * 0.45)));
+  return Math.round(Math.min(380, Math.max(260, janela * 0.5)));
 }
 
 /** Como o traço fica: grosso o bastante para o dedo, fino para parecer caneta. */

@@ -193,35 +193,38 @@ export function Assinar() {
 
         {/* Quem não escreve não pode ficar sem receber por causa disso — mas
             também não pode receber um papel que finge um punho que não houve.
-            A escolha fica à vista, e o recibo guarda qual delas foi. */}
-        <div className="mb-3 grid grid-cols-2 gap-2">
-          <BotaoModo
-            ativo={modo === 'DESENHADA'}
-            onClick={() => trocarModo('DESENHADA')}
-          >
-            Assinar com o dedo
-          </BotaoModo>
-          <BotaoModo
-            ativo={modo === 'DIGITADA'}
-            onClick={() => trocarModo('DIGITADA')}
-          >
-            Não sei assinar
-          </BotaoModo>
-        </div>
-
+            A saída fica abaixo do quadro, num link, e o recibo guarda qual
+            das duas foi usada. */}
         <AssinaturaCanvas
           controle={controle}
           onMudou={setTemTraco}
           disabled={assinar.isPending || modo === 'DIGITADA'}
         />
 
-        {modo === 'DIGITADA' && (
-          <p className="ajuda">
-            A assinatura acima foi escrita pelo sistema com o nome informado. O
-            recibo vai dizer isso — que ela foi gerada a pedido de quem recebeu,
-            por não assinar de próprio punho. Corrija o nome no campo acima se
-            estiver diferente.
-          </p>
+        {modo === 'DIGITADA' ? (
+          <>
+            <p className="ajuda">
+              A assinatura acima foi escrita pelo sistema com o nome informado.
+              O recibo vai dizer isso — que ela foi gerada a pedido de quem
+              recebeu, por não assinar de próprio punho. Corrija o nome no campo
+              acima se estiver diferente.
+            </p>
+            <button
+              type="button"
+              onClick={() => trocarModo('DESENHADA')}
+              className="mt-2 text-sm font-semibold text-brand-600 underline underline-offset-2"
+            >
+              Prefiro assinar com o dedo
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => trocarModo('DIGITADA')}
+            className="mt-2.5 text-sm text-tinta-500 underline underline-offset-2"
+          >
+            Não sei assinar — escreva meu nome
+          </button>
         )}
       </div>
 
@@ -244,32 +247,6 @@ export function Assinar() {
         {r.quemPaga.nome} pelo serviço acima, dando plena quitação.
       </p>
     </Moldura>
-  );
-}
-
-/** Uma das duas formas de assinar, do tamanho de um dedo. */
-function BotaoModo({
-  ativo,
-  onClick,
-  children,
-}: {
-  ativo: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={ativo}
-      className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
-        ativo
-          ? 'border-brand-300 bg-brand-50 text-brand-700'
-          : 'border-tinta-200 bg-white text-tinta-500 hover:border-tinta-300'
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 

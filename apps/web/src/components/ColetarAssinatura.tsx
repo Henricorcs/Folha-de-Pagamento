@@ -62,6 +62,48 @@ export function ColetarAssinatura({
     onError: (e) => setErro(mensagemErro(e)),
   });
 
+  /**
+   * Abre o recibo em PDF.
+   *
+   * Não dá para apontar um link direto para a rota: o endereço do PDF pede
+   * login, e o navegador não manda o token numa navegação comum — ele vive no
+   * localStorage e quem o envia é o cliente HTTP daqui. Um `<a href>` levava a
+   * um 401 em tela branca. Então o arquivo é buscado com o token, vira um
+   * endereço temporário na memória do navegador, e é esse que se abre.
+   */
+  const abrirRecibo = useMutation({
+    mutationFn: async () => {
+      try {
+        const res = await api.get(`/diarias/${diaria.id}/recibo.pdf`, {
+          responseType: 'blob',
+        });
+        return URL.createObjectURL(
+          new Blob([res.data as BlobPart], { type: 'application/pdf' }),
+        );
+      } catch (e) {
+        // Pedindo um arquivo, o corpo do erro também vem como arquivo: a
+        // mensagem da API estaria dentro de um Blob, e a tela mostraria um
+        // "Request failed with status code 400" no lugar do motivo.
+        throw new Error(await motivoDoErroEmArquivo(e));
+      }
+    },
+    onSuccess: (endereco) => {
+      setErro(null);
+      const aba = window.open(endereco, '_blank');
+      // Bloqueador de pop-up: em vez de não acontecer nada, o recibo desce
+      // como arquivo. Ver ou salvar, mas nunca clicar e ficar no vazio.
+      if (!aba) {
+        const link = document.createElement('a');
+        link.href = endereco;
+        link.download = `recibo-${diaria.id}.pdf`;
+        link.click();
+      }
+      // O endereço temporário segura o arquivo na memória enquanto existir.
+      setTimeout(() => URL.revokeObjectURL(endereco), 60_000);
+    },
+    onError: (e) => setErro(mensagemErro(e)),
+  });
+
   const atual = assinatura.data;
   const assinado = Boolean(atual?.assinadoEm);
   const vencido = Boolean(
@@ -150,14 +192,13 @@ export function ColetarAssinatura({
               </div>
             )}
 
-            <a
-              href={`/api/diarias/${diaria.id}/recibo.pdf`}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              onClick={() => abrirRecibo.mutate()}
+              disabled={abrirRecibo.isPending}
               className="btn btn-primario mt-5 w-full"
             >
-              Ver o recibo em PDF
-            </a>
+              {abrirRecibo.isPending ? 'Abrindo…' : 'Ver o recibo em PDF'}
+            </button>
             <p className="ajuda text-center">
               O recibo fica guardado aqui — dá para abrir de novo quando
               precisar.
@@ -246,6 +287,21 @@ export function ColetarAssinatura({
       </div>
     </Janela>
   );
+}
+
+/** Abre o Blob de erro para achar a mensagem que a API escreveu lá dentro. */
+async function motivoDoErroEmArquivo(erro: unknown): Promise<string> {
+  const corpo = (erro as { response?: { data?: unknown } })?.response?.data;
+  if (corpo instanceof Blob) {
+    try {
+      const texto = await corpo.text();
+      const json = JSON.parse(texto) as { message?: string };
+      if (json.message) return json.message;
+    } catch {
+      // Não era JSON: cai na mensagem genérica abaixo.
+    }
+  }
+  return mensagemErro(erro);
 }
 
 function formatDataHora(iso: string): string {
