@@ -473,6 +473,26 @@ export interface DiaristaComResumo {
   pendentesNoCaixa: number;
 }
 
+/** Como o cadastro novo se saiu do lado do IXC. */
+export interface ResultadoNoIxc {
+  /** null = não deu para criar; a pessoa está cadastrada só aqui por enquanto */
+  idFornecedor: number | null;
+  /** Ligado a um fornecedor que já existia lá, com o mesmo CPF/CNPJ */
+  reaproveitado: boolean;
+  /** Saiu com a marcação que faz o IXC reconhecê-lo como diarista */
+  marcadoComoDiarista: boolean;
+  /** Por que o fornecedor não foi criado (null = foi) */
+  erro: string | null;
+  /** Por que a chave PIX não foi para a aba "Dados bancários" (null = foi) */
+  avisoPix: string | null;
+}
+
+/** O cadastro recém-criado e o que aconteceu com ele no IXC. */
+export interface DiaristaCriado {
+  diarista: Diarista;
+  ixc: ResultadoNoIxc;
+}
+
 /** O que aconteceu ao apagar várias diárias de uma vez. */
 export interface ResultadoLoteDiarias {
   total: number;

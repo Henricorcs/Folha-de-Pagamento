@@ -40,6 +40,12 @@ function montarServico(
     /** Erro devolvido pelo lançamento no caixa. */
     erroLancamento?: string;
     avisoLancamento?: string;
+    /** O IXC recusou criar o fornecedor do cadastro novo. */
+    erroFornecedor?: string;
+    /** O fornecedor já existia lá com aquele CPF. */
+    fornecedorReaproveitado?: boolean;
+    /** Por que a chave PIX não foi para a aba "Dados bancários". */
+    motivoEspelhoPix?: string;
   } = {},
 ) {
   const diarias = new Map<string, Record<string, unknown>>();
@@ -49,6 +55,10 @@ function montarServico(
     diarista: {
       findUnique: jest.fn().mockResolvedValue(DIARISTA),
       findMany: jest.fn().mockResolvedValue([]),
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        ...DIARISTA,
+        ...data,
+      })),
       update: jest.fn(
         async ({ data }: { data: Record<string, unknown> }) => ({
           ...DIARISTA,
@@ -133,12 +143,33 @@ function montarServico(
     return id as string;
   }
 
+  const vincularDiarista = jest.fn(async () => {
+    if (opts.erroFornecedor) throw new Error(opts.erroFornecedor);
+    return {
+      idFornecedor: 55,
+      reaproveitado: opts.fornecedorReaproveitado ?? false,
+      marcadoComoDiarista: !opts.fornecedorReaproveitado,
+    };
+  });
+  const espelharPixNoIxc = jest.fn(
+    async () => opts.motivoEspelhoPix ?? null,
+  );
+  const fornecedores = { vincularDiarista, espelharPixNoIxc };
+
   return {
-    service: new DiaristasService(prisma, config, contasPagar, caixa),
+    service: new DiaristasService(
+      prisma,
+      config,
+      contasPagar,
+      caixa,
+      fornecedores as never,
+    ),
     contasPagar,
     lancarSaida,
     prisma,
     diariaAntigaEmMaos,
+    vincularDiarista,
+    espelharPixNoIxc,
   };
 }
 
@@ -458,5 +489,73 @@ describe('resumo da listagem', () => {
     expect(r.totalPago).toBe(0);
     expect(r.totalAguardando).toBe(0);
     expect(r.quantidadeAguardando).toBe(0);
+  });
+});
+
+/**
+ * Cadastrar aqui tem de deixar a pessoa pronta para receber, e quem paga é o
+ * IXC. Mas o IXC não é dono do cadastro: quando ele falha, o que alguém acabou
+ * de digitar não pode evaporar junto.
+ */
+describe('cadastrar diarista', () => {
+  const CADASTRO = { nome: 'Antonio Clebes', cpfCnpj: '689.606.330-03' };
+
+  it('cria o fornecedor no IXC, marcado como diarista', async () => {
+    const { service, vincularDiarista } = montarServico();
+
+    const r = await service.criar(CADASTRO);
+
+    expect(vincularDiarista).toHaveBeenCalled();
+    expect(r.ixc).toMatchObject({
+      idFornecedor: 55,
+      reaproveitado: false,
+      marcadoComoDiarista: true,
+      erro: null,
+    });
+  });
+
+  it('espelha a chave PIX na aba de dados bancários do fornecedor', async () => {
+    const { service, espelharPixNoIxc } = montarServico();
+
+    await service.criar(CADASTRO);
+
+    expect(espelharPixNoIxc).toHaveBeenCalledWith(55, 'joao@pix', null);
+  });
+
+  /**
+   * Vincular a um fornecedor que já existia é mexer em cadastro que não é
+   * nosso — pode ser uma empresa fornecedora de verdade. A marcação fica de
+   * fora, e a tela avisa.
+   */
+  it('não marca como diarista o fornecedor que já existia lá', async () => {
+    const { service } = montarServico({ fornecedorReaproveitado: true });
+
+    const r = await service.criar(CADASTRO);
+
+    expect(r.ixc.reaproveitado).toBe(true);
+    expect(r.ixc.marcadoComoDiarista).toBe(false);
+  });
+
+  it('guarda o cadastro mesmo com o IXC fora do ar, e diz por quê', async () => {
+    const { service } = montarServico({ erroFornecedor: 'timeout' });
+
+    const r = await service.criar(CADASTRO);
+
+    expect(r.diarista.nome).toBe('Antonio Clebes');
+    expect(r.ixc.idFornecedor).toBeNull();
+    expect(r.ixc.erro).toBe('timeout');
+  });
+
+  /** A chave também vai em cada conta a pagar: falhar aqui é só comodidade. */
+  it('não derruba o cadastro quando só o espelho do PIX falha', async () => {
+    const { service } = montarServico({
+      motivoEspelhoPix: 'tabela de dados bancários não encontrada',
+    });
+
+    const r = await service.criar(CADASTRO);
+
+    expect(r.ixc.idFornecedor).toBe(55);
+    expect(r.ixc.erro).toBeNull();
+    expect(r.ixc.avisoPix).toBe('tabela de dados bancários não encontrada');
   });
 });

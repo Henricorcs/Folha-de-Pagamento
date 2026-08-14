@@ -15,6 +15,10 @@ import {
 import { ConfigFinanceiraService } from '../financeiro/config-financeira.service';
 import { ContasPagarService } from '../financeiro/contas-pagar.service';
 import {
+  FornecedorService,
+  type VinculoNoIxc,
+} from '../financeiro/fornecedor.service';
+import {
   calcularComissaoVendas,
   calcularTotalPagamento,
   montarHistoricoCaixa,
@@ -46,6 +50,26 @@ export interface DiaristaComResumo {
   pendentesNoCaixa: number;
 }
 
+/** Como o cadastro novo se saiu do lado do IXC. */
+export interface ResultadoNoIxc {
+  /** null = não deu para criar; a pessoa está cadastrada só aqui por enquanto */
+  idFornecedor: number | null;
+  /** Ligado a um fornecedor que já existia lá, com o mesmo CPF/CNPJ */
+  reaproveitado: boolean;
+  /** Saiu com a marcação que faz o IXC reconhecê-lo como diarista */
+  marcadoComoDiarista: boolean;
+  /** Por que o fornecedor não foi criado (null = foi) */
+  erro: string | null;
+  /** Por que a chave PIX não foi para a aba "Dados bancários" (null = foi) */
+  avisoPix: string | null;
+}
+
+/** O cadastro recém-criado e o que aconteceu com ele no IXC. */
+export interface DiaristaCriado {
+  diarista: Diarista;
+  ixc: ResultadoNoIxc;
+}
+
 /** O que aconteceu ao apagar várias diárias de uma vez. */
 export interface ResultadoLoteDiarias {
   total: number;
@@ -72,6 +96,7 @@ export class DiaristasService {
     private readonly config: ConfigFinanceiraService,
     private readonly contasPagar: ContasPagarService,
     private readonly caixa: CaixaService,
+    private readonly fornecedores: FornecedorService,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -136,11 +161,67 @@ export class DiaristasService {
     return d;
   }
 
-  criar(dto: CriarDiaristaDto): Promise<Diarista> {
-    return this.prisma.diarista.create({
+  /**
+   * Cadastra o diarista e já o cria como fornecedor no IXC, marcado como
+   * diarista — é lá que o pagamento vira conta a pagar, então uma pessoa
+   * cadastrada só aqui é uma pessoa que ainda não dá para pagar.
+   *
+   * O IXC não é dono do cadastro: se ele estiver fora do ar ou recusar, a
+   * pessoa fica cadastrada aqui do mesmo jeito e o motivo sobe para a tela. O
+   * primeiro pagamento tenta de novo sozinho (`garantirParaDiarista`), então o
+   * que se perde é a comodidade, nunca o cadastro que alguém acabou de digitar.
+   */
+  async criar(dto: CriarDiaristaDto): Promise<DiaristaCriado> {
+    const diarista = await this.prisma.diarista.create({
       // O nome vai explícito: no cadastro novo ele é obrigatório, na edição não.
       data: { ...this.dadosDoCadastro(dto), nome: dto.nome.trim() },
     });
+
+    const ixc = await this.criarNoIxc(diarista);
+    return {
+      diarista: ixc.idFornecedor
+        ? await this.buscar(diarista.id) // recarrega com o id do fornecedor
+        : diarista,
+      ixc,
+    };
+  }
+
+  /**
+   * O fornecedor no IXC e a chave PIX espelhada na aba "Dados bancários".
+   *
+   * Nada aqui derruba o cadastro: cada passo que falhar vira texto no
+   * resultado. Espelhar o PIX é o mais dispensável dos dois — a chave também
+   * vai no payload de cada conta a pagar —, então ele falha em silêncio, só
+   * com o aviso.
+   */
+  private async criarNoIxc(diarista: Diarista): Promise<ResultadoNoIxc> {
+    let vinculo: VinculoNoIxc;
+    try {
+      vinculo = await this.fornecedores.vincularDiarista(diarista.id);
+    } catch (err) {
+      const erro = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Diarista ${diarista.id} ficou sem fornecedor no IXC: ${erro}`,
+      );
+      return {
+        idFornecedor: null,
+        reaproveitado: false,
+        marcadoComoDiarista: false,
+        erro,
+        avisoPix: null,
+      };
+    }
+
+    let avisoPix: string | null = null;
+    if (diarista.chavePix) {
+      avisoPix = await this.fornecedores.espelharPixNoIxc(
+        vinculo.idFornecedor,
+        diarista.chavePix,
+        diarista.tipoChavePix,
+      );
+    }
+
+    return { ...vinculo, erro: null, avisoPix };
   }
 
   async atualizar(id: string, dto: UpdateDiaristaDto): Promise<Diarista> {

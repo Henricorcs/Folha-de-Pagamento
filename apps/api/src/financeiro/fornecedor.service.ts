@@ -9,10 +9,14 @@ import {
 } from '../ixc/ixc.financeiro';
 import {
   CAMPOS_DOC_FORNECEDOR,
+  filtrarFornecedores,
   mascararDocumento,
+  parseValores,
+  REGRA_ESTRANGEIRO,
   somenteDigitos,
   variacoesDocumento,
 } from '../ixc/ixc.fornecedor';
+import type { IxcFornecedor } from '../ixc/ixc.types';
 import { ConfigFinanceiraService } from './config-financeira.service';
 
 /**
@@ -37,6 +41,15 @@ export interface FornecedorNoIxc {
   conta: string | null;
   chavePix: string | null;
   tipoChavePix: string | null;
+}
+
+/** O que aconteceu ao ligar alguém daqui a um fornecedor do IXC. */
+export interface VinculoNoIxc {
+  idFornecedor: number;
+  /** Ligado a um cadastro que já existia lá (mesmo CPF/CNPJ), não criado agora */
+  reaproveitado: boolean;
+  /** O cadastro novo saiu com a marcação que o identifica como diarista */
+  marcadoComoDiarista: boolean;
 }
 
 /** Campo de texto do IXC: string não vazia, ou null. */
@@ -69,7 +82,7 @@ export class FornecedorService {
     if (func.idFornecedorIxc) return func.idFornecedorIxc;
 
     const cfg = await this.config.obter();
-    const idFornecedor = await this.criarFornecedor({
+    const { id: idFornecedor } = await this.criarFornecedor({
       nome: func.nome,
       cpfCnpj: func.cpfCnpj,
       tipoPessoa: 'F',
@@ -88,27 +101,56 @@ export class FornecedorService {
 
   /** Retorna (criando se preciso) o id_fornecedor do diarista. */
   async garantirParaDiarista(diaristaId: string): Promise<number> {
+    return (await this.vincularDiarista(diaristaId)).idFornecedor;
+  }
+
+  /**
+   * O mesmo, contando o que aconteceu: é o que a tela de cadastro precisa para
+   * dizer se o fornecedor nasceu agora, se foi reaproveitado um que já existia
+   * lá, e se ele saiu marcado como diarista.
+   */
+  async vincularDiarista(diaristaId: string): Promise<VinculoNoIxc> {
     const d = await this.prisma.diarista.findUnique({
       where: { id: diaristaId },
     });
     if (!d) throw new NotFoundException('Diarista não encontrado');
-    if (d.idFornecedorIxc) return d.idFornecedorIxc;
+    if (d.idFornecedorIxc) {
+      return {
+        idFornecedor: d.idFornecedorIxc,
+        reaproveitado: true,
+        marcadoComoDiarista: false,
+      };
+    }
 
     const cfg = await this.config.obter();
-    const idFornecedor = await this.criarFornecedor({
+    // A marcação de "Estrangeiro" é o que faz o IXC — e o Sincronizar daqui —
+    // reconhecer esta pessoa como diarista. Sem ela o fornecedor nasce igual a
+    // qualquer outro, e quem importar do IXC amanhã não o traz de volta.
+    const marcacao = await this.marcacaoDeDiarista(cfg);
+    const criado = await this.criarFornecedor({
       nome: d.nome,
       cpfCnpj: d.cpfCnpj,
       tipoPessoa: 'F',
       cidadeId: d.cidadeIxc ?? cfg.cidadePadraoId,
       celular: d.telefone,
       obs: 'Diarista — pagamento por diária',
+      extras: marcacao,
     });
 
     await this.prisma.diarista.update({
       where: { id: diaristaId },
-      data: { idFornecedorIxc: idFornecedor },
+      data: { idFornecedorIxc: criado.id },
     });
-    return idFornecedor;
+
+    return {
+      idFornecedor: criado.id,
+      reaproveitado: criado.reaproveitado,
+      // Reaproveitar é vincular a um cadastro de outra pessoa que já existia
+      // lá: mudar o tipo de pessoa dele seria mexer num registro que não é
+      // nosso, e que pode ser uma empresa fornecedora de verdade.
+      marcadoComoDiarista:
+        !criado.reaproveitado && Object.keys(marcacao).length > 0,
+    };
   }
 
   /** Retorna (criando se preciso) o id_fornecedor do beneficiário avulso. */
@@ -120,7 +162,7 @@ export class FornecedorService {
     if (ben.idFornecedorIxc) return ben.idFornecedorIxc;
 
     const cfg = await this.config.obter();
-    const idFornecedor = await this.criarFornecedor({
+    const { id: idFornecedor } = await this.criarFornecedor({
       nome: ben.nome,
       cpfCnpj: ben.cpfCnpj,
       tipoPessoa: ben.tipoPessoa,
@@ -210,7 +252,9 @@ export class FornecedorService {
     obs?: string;
     /** Não reaproveitar cadastro existente: quem pediu já foi avisado. */
     semReuso?: boolean;
-  }): Promise<number> {
+    /** Campos a mais no payload (a marcação de diarista, por exemplo). */
+    extras?: Record<string, string>;
+  }): Promise<{ id: number; reaproveitado: boolean }> {
     // Reutiliza fornecedor existente no IXC (por CPF/CNPJ) antes de criar um
     // novo — fornecedores já cadastrados costumam ter dados bancários/PIX que
     // a tela de contas a pagar do IXC preenche automaticamente.
@@ -221,7 +265,7 @@ export class FornecedorService {
       this.logger.log(
         `Fornecedor existente vinculado: #${existente} (${input.nome})`,
       );
-      return existente;
+      return { id: existente, reaproveitado: true };
     }
 
     // O cadastro de fornecedor do IXC exige "Classificação de ISS" (e possíveis
@@ -237,13 +281,79 @@ export class FornecedorService {
         cpfCnpj: mascararDocumento(input.cpfCnpj) ?? input.cpfCnpj,
       }),
       ...extrasIss,
+      // Por último: a marcação de diarista escreve no `tipo_pessoa`, e é ela
+      // que tem de valer sobre o "F" que o payload padrão põe ali.
+      ...(input.extras ?? {}),
     };
     const { id } = await this.ixc.create('fornecedor', payload);
     if (!id) {
       throw new Error('IXC não retornou o id do fornecedor criado');
     }
     this.logger.log(`Fornecedor criado no IXC: #${id} (${input.nome})`);
-    return id;
+    return { id, reaproveitado: false };
+  }
+
+  /**
+   * O campo e o código que marcam alguém como diarista no fornecedor do IXC.
+   *
+   * O código de "Estrangeiro" não está na documentação do webservice e varia de
+   * base para base, então ele é **aprendido com a própria base**: lê os
+   * fornecedores ativos, vê quem o filtro de diarista já pega hoje e copia o
+   * valor cru que eles têm ali. É o mesmo caminho da Classificação de ISS e do
+   * rádio de tipo de chave PIX — copiar do que existe em vez de adivinhar.
+   *
+   * Sem nenhum estrangeiro na base para copiar, cai no que está em
+   * Configurações; sem achar o campo, devolve vazio e o cadastro sai sem marca
+   * (com o aviso subindo para a tela).
+   */
+  private async marcacaoDeDiarista(cfg: {
+    fornecedorCampoTipoPessoa: string;
+    fornecedorTipoEstrangeiro: string;
+  }): Promise<Record<string, string>> {
+    const valores = parseValores(
+      cfg.fornecedorTipoEstrangeiro,
+      REGRA_ESTRANGEIRO,
+    );
+
+    try {
+      const registros = await this.lerFornecedoresAtivos();
+      const { campo, pessoas } = filtrarFornecedores(
+        registros,
+        REGRA_ESTRANGEIRO,
+        { campo: cfg.fornecedorCampoTipoPessoa, valores },
+      );
+      if (!campo) {
+        this.logger.warn(
+          'Não achei no fornecedor do IXC o campo de tipo de pessoa — ' +
+            'o cadastro vai sair sem a marcação de diarista.',
+        );
+        return {};
+      }
+
+      const codigo = pessoas[0]?.valorFiltro?.trim() || valores[0];
+      this.logger.log(
+        `Marcação de diarista: ${campo}=${codigo}` +
+          (pessoas[0] ? ` (copiada do fornecedor #${pessoas[0].idFornecedor})` : ''),
+      );
+      return { [campo]: codigo };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Não deu para descobrir a marcação de diarista: ${message}`);
+      return {};
+    }
+  }
+
+  /** Uma amostra dos fornecedores ativos, para aprender o formato da base. */
+  private async lerFornecedoresAtivos(): Promise<IxcFornecedor[]> {
+    const res = await this.ixc.list<IxcFornecedor>('fornecedor', {
+      qtype: 'fornecedor.ativo',
+      query: 'S',
+      oper: '=',
+      rp: 200,
+      sortname: 'fornecedor.id',
+      sortorder: 'desc',
+    });
+    return res.registros;
   }
 
   /**

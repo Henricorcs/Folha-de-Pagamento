@@ -20,6 +20,7 @@ import type {
   Diaria,
   Diarista,
   DiaristaComResumo,
+  DiaristaCriado,
   FormaPagamento,
   ResultadoLoteDiarias,
   SyncDiaristasResult,
@@ -61,6 +62,45 @@ function pendenteNoCaixa(d: Diaria): boolean {
 }
 
 /**
+ * O que dizer depois de cadastrar. O cadastro daqui é metade do serviço: quem
+ * paga é o IXC, e a pessoa só está pronta para receber quando existe como
+ * fornecedor lá. Então a mensagem conta as duas partes — e quando a segunda não
+ * saiu, diz o que ainda falta em vez de um "cadastrado." que esconde o buraco.
+ */
+function contarOCadastro({
+  diarista,
+  ixc,
+}: DiaristaCriado): { texto: string; ruim: boolean } {
+  if (!ixc.idFornecedor) {
+    return {
+      texto:
+        `${diarista.nome} foi cadastrado aqui, mas o IXC não criou o ` +
+        `fornecedor: ${ixc.erro}. Dá para pagar assim mesmo — o primeiro ` +
+        'pagamento tenta de novo.',
+      ruim: true,
+    };
+  }
+
+  const partes = [`${diarista.nome} cadastrado.`];
+  partes.push(
+    ixc.reaproveitado
+      ? `No IXC ficou ligado ao fornecedor #${ixc.idFornecedor}, que já existia com esse CPF/CNPJ — não mexi na marcação dele, confira se está como “Estrangeiro”.`
+      : `Fornecedor #${ixc.idFornecedor} criado no IXC` +
+          (ixc.marcadoComoDiarista
+            ? ', marcado como diarista.'
+            : ' — mas sem a marcação de diarista: informe o campo de tipo de pessoa em Configurações.'),
+  );
+  if (ixc.avisoPix) {
+    partes.push(`A chave PIX não foi para os dados bancários do IXC: ${ixc.avisoPix}.`);
+  }
+
+  return {
+    texto: partes.join(' '),
+    ruim: (!ixc.reaproveitado && !ixc.marcadoComoDiarista) || !!ixc.avisoPix,
+  };
+}
+
+/**
  * De onde veio o valor daquele pagamento. Sai um pagamento só, então sem esta
  * linha não há como saber se os R$ 510 foram dia trabalhado, venda ou o extra.
  */
@@ -87,8 +127,17 @@ export function Diaristas() {
   const [verInativos, setVerInativos] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [erro, setErro] = useState(false);
-  /** Cadastro aberto no formulário: null = fechado, string = editando. */
-  const [editando, setEditando] = useState<string | null>(null);
+  /**
+   * O formulário de cadastro: null = fechado, `{ id: null }` = cadastro novo,
+   * `{ id }` = editando aquele.
+   *
+   * O "está aberto" e o "qual registro" moram em campos separados de propósito.
+   * Quando eram a mesma variável, o cadastro novo a marcava com o texto "novo"
+   * para dizer que a tela estava aberta — e o Salvar, que só olhava se havia
+   * algo ali, mandava um PATCH em `/diaristas/novo`. Cadastro novo nenhum
+   * salvava: a API respondia "Diarista não encontrado", com razão.
+   */
+  const [cadastro, setCadastro] = useState<{ id: string | null } | null>(null);
   const [form, setForm] = useState<Cadastro>(CADASTRO_VAZIO);
   /** Diarista com o histórico aberto. */
   const [aberto, setAberto] = useState<string | null>(null);
@@ -209,12 +258,16 @@ export function Diaristas() {
         formaPagamento: form.formaPagamento,
         observacoes: form.observacoes || undefined,
       };
-      return editando
-        ? (await api.patch<Diarista>(`/diaristas/${editando}`, body)).data
-        : (await api.post<Diarista>('/diaristas', body)).data;
+      const id = cadastro?.id;
+      if (id) {
+        const d = (await api.patch<Diarista>(`/diaristas/${id}`, body)).data;
+        return { texto: `${d.nome} atualizado.`, ruim: false };
+      }
+      const r = (await api.post<DiaristaCriado>('/diaristas', body)).data;
+      return contarOCadastro(r);
     },
-    onSuccess: (d) => {
-      avisar(editando ? `${d.nome} atualizado.` : `${d.nome} cadastrado.`);
+    onSuccess: ({ texto, ruim }) => {
+      avisar(texto, ruim);
       fecharCadastro();
       invalidar();
     },
@@ -286,9 +339,8 @@ export function Diaristas() {
   });
 
   function abrirNovo() {
-    setEditando(null);
     setForm(CADASTRO_VAZIO);
-    setEditando('novo');
+    setCadastro({ id: null });
   }
   function abrirEdicao(d: Diarista) {
     setForm({
@@ -303,17 +355,17 @@ export function Diaristas() {
       formaPagamento: d.formaPagamento,
       observacoes: d.observacoes ?? '',
     });
-    setEditando(d.id);
+    setCadastro({ id: d.id });
   }
   function fecharCadastro() {
-    setEditando(null);
+    setCadastro(null);
     setForm(CADASTRO_VAZIO);
   }
 
   const itens = lista.data ?? [];
   const pendentes = itens.reduce((s, i) => s + i.pendentesNoCaixa, 0);
   const abertoDiarista = itens.find((i) => i.diarista.id === aberto)?.diarista;
-  const editandoNovo = editando === 'novo';
+  const editandoNovo = cadastro !== null && cadastro.id === null;
   const nomeValido = form.nome.trim().length >= 2;
 
   return (
@@ -356,7 +408,7 @@ export function Diaristas() {
         />
       )}
 
-      {editando && (
+      {cadastro && (
         <Bloco
           titulo={editandoNovo ? 'Novo diarista' : 'Editar cadastro'}
           className="surgir mb-6"
