@@ -15,7 +15,7 @@ import { api, mensagemErro } from '../../lib/api';
 import { formatBRL, formatData } from '../../lib/format';
 import { TIPO_LABEL } from '../../lib/status';
 import type { ContaAberta, ContasAbertas } from '../../lib/types';
-import { DadosDoIxc } from './DadosDoIxc';
+import { DetalheDaConta } from './DetalheDaConta';
 
 /**
  * O que a empresa deve hoje, lido do IXC na hora de abrir.
@@ -201,7 +201,7 @@ export function Inicio() {
       </Bloco>
 
       {detalhando && (
-        <DadosDoIxc
+        <DetalheDaConta
           conta={detalhando}
           onFechar={() => setDetalhando(null)}
         />
@@ -219,7 +219,20 @@ function Linha({
 }) {
   const urgencia = urgenciaDaConta(conta);
   return (
-    <tr className="linha">
+    <tr
+      onClick={onVerDados}
+      // A linha inteira abre o débito. É o gesto que se tenta primeiro numa
+      // lista, e o teclado chega ao mesmo lugar pelo tabindex.
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onVerDados();
+        }
+      }}
+      title="Abrir o detalhe deste débito"
+      className="linha cursor-pointer focus:bg-brand-50 focus:outline-none"
+    >
       <td
         className={`td whitespace-nowrap border-l-4 ${urgencia.barra}`}
       >
@@ -250,16 +263,7 @@ function Linha({
           </div>
         )}
       </td>
-      <td className="td num text-tinta-500">
-        {conta.documento ?? '—'}
-        <button
-          onClick={onVerDados}
-          title="Ver os campos deste título no IXC"
-          className="mt-1 block text-[11px] text-tinta-400 underline underline-offset-2 hover:text-brand-600"
-        >
-          dados do IXC
-        </button>
-      </td>
+      <td className="td num text-tinta-500">{conta.documento ?? '—'}</td>
       <td className="td text-right">
         <span className="valor">{formatBRL(conta.valorAberto)}</span>
         {/* Pagamento parcial: mostrar só o saldo esconderia metade da história. */}

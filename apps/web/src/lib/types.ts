@@ -621,6 +621,23 @@ export interface ResumoContasAbertas {
   semVencimento: FatiaDoResumo;
 }
 
+/**
+ * A leitura que o filtro daqui faz de um título: o que ele olhou, o que achou
+ * em cada campo, e a conclusão. É o que deixa a tela responder "por que esta
+ * conta aparece aqui?" sem depender de adivinhação.
+ */
+export interface AvaliacaoDoFiltro {
+  aberta: boolean;
+  motivo: { motivo: 'pago' | 'cancelado' | 'quitado'; campo: string } | null;
+  olhou: Array<{ campo: string; valor: string; nota: string }>;
+}
+
+/** O título do IXC por inteiro, com a leitura do filtro. */
+export interface DetalheDoTitulo {
+  campos: Record<string, unknown>;
+  filtro: AvaliacaoDoFiltro;
+}
+
 export interface ContasAbertas {
   contas: ContaAberta[];
   resumo: ResumoContasAbertas;

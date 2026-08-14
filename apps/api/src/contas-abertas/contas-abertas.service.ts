@@ -2,13 +2,21 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { IxcClient } from '../ixc/ixc.client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  explicarFiltro,
   mapContaAberta,
   motivoDeNaoEstarAberto,
+  type AvaliacaoDoFiltro,
   ordenarPorUrgencia,
   resumirContasAbertas,
   type ContaAberta,
   type ResumoContasAbertas,
 } from './contas-abertas.mapper';
+
+/** O título do IXC por inteiro, com a leitura que o filtro daqui faz dele. */
+export interface DetalheDoTitulo {
+  campos: Record<string, unknown>;
+  filtro: AvaliacaoDoFiltro;
+}
 
 /** O que a tela recebe de uma vez. */
 export interface ContasAbertasResposta {
@@ -172,7 +180,7 @@ export class ContasAbertasService {
    * fecha a lista — duas vezes o filtro desta tela errou por isso, e nas duas
    * a resposta estava num campo que ninguém conseguia ver. Agora dá para ver.
    */
-  async registroBruto(idFnApagar: number): Promise<Record<string, unknown>> {
+  async registroBruto(idFnApagar: number): Promise<DetalheDoTitulo> {
     const raw = await this.ixc.getById<Record<string, unknown>>(
       'fn_apagar',
       'fn_apagar.id',
@@ -183,7 +191,7 @@ export class ContasAbertasService {
         `O IXC não tem mais o título ${idFnApagar}.`,
       );
     }
-    return raw;
+    return { campos: raw, filtro: explicarFiltro(raw) };
   }
 
   /**

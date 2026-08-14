@@ -148,6 +148,64 @@ export function motivoDeNaoEstarAberto(
 }
 
 /**
+ * A conta explicada: o que a regra olhou, o que encontrou em cada campo, e a
+ * que conclusão chegou.
+ *
+ * Serve à pergunta que ninguém conseguia responder olhando a tela — "por que
+ * esta conta aparece aqui?". Sem isto, discordar do filtro é palavra contra
+ * palavra; com isto, é só ler os valores e ver qual campo está sendo lido
+ * diferente do que o IXC entende.
+ */
+export interface AvaliacaoDoFiltro {
+  aberta: boolean;
+  motivo: MotivoDeExclusao | null;
+  /** Os campos que decidem, com o valor que veio do IXC. */
+  olhou: Array<{ campo: string; valor: string; nota: string }>;
+}
+
+export function explicarFiltro(
+  raw: Record<string, unknown>,
+): AvaliacaoDoFiltro {
+  const motivo = motivoDeNaoEstarAberto(raw);
+  const texto = (campo: string) => String(raw[campo] ?? '').trim();
+
+  const olhou = [
+    {
+      campo: 'status',
+      valor: texto('status') || '(vazio)',
+      nota: 'A = aberto · P = pago · C = cancelado',
+    },
+    {
+      campo: 'valor',
+      valor: texto('valor') || '(vazio)',
+      nota: 'valor do título',
+    },
+    {
+      campo: 'valor_aberto',
+      valor: texto('valor_aberto') || '(vazio)',
+      nota: 'o que o IXC diz que falta pagar',
+    },
+    {
+      campo: 'valor_baixado',
+      valor: texto('valor_baixado') || '(vazio)',
+      nota: 'quanto já foi baixado (quitado)',
+    },
+    {
+      campo: 'valor_total_pago',
+      valor: texto('valor_total_pago') || '(vazio)',
+      nota: 'quanto já foi pago',
+    },
+    ...CAMPOS_DE_CANCELAMENTO.map((campo) => ({
+      campo,
+      valor: texto(campo) || '(vazio)',
+      nota: 'marca de conta cancelada',
+    })),
+  ];
+
+  return { aberta: motivo === null, motivo, olhou };
+}
+
+/**
  * A coluna que diz que esta conta foi cancelada, se houver.
  *
  * Coluna vazia, `N`, zero e data zerada são o estado normal de quem nunca
