@@ -71,12 +71,12 @@ const folha: Modulo = {
 const contasPagar: Modulo = {
   id: 'contas-pagar',
   nome: 'Contas a Pagar',
-  descricao: 'Todas as saídas da empresa, com vencimentos e comprovantes',
+  descricao: 'O que a empresa deve, direto do IXC: vencidas e a vencer',
   base: '/contas-pagar',
   inicio: 'inicio',
   icone: IconeSaida,
   tom: 'bg-emerald-500/15 text-emerald-300',
-  menu: [{ to: 'inicio', label: 'Visão geral', icone: IconePainel }],
+  menu: [{ to: 'inicio', label: 'Em aberto', icone: IconePainel }],
 };
 
 /** A ordem daqui é a ordem dos cartões na tela de módulos. */

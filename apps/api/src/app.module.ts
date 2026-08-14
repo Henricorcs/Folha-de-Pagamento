@@ -13,6 +13,7 @@ import { FeriasModule } from './ferias/ferias.module';
 import { ValesModule } from './vales/vales.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { AssinaturasModule } from './assinaturas/assinaturas.module';
+import { ContasAbertasModule } from './contas-abertas/contas-abertas.module';
 import { AuthModule } from './auth/auth.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
@@ -39,6 +40,7 @@ import { HealthController } from './health/health.controller';
     ValesModule,
     DashboardModule,
     AssinaturasModule,
+    ContasAbertasModule,
   ],
   controllers: [HealthController],
   providers: [

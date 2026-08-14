@@ -573,6 +573,57 @@ export interface ReciboPublico {
   modo: ModoAssinatura;
 }
 
+// ---------------------------------------------------------------------------
+// Contas a pagar em aberto, lidas do IXC na hora (módulo Contas a Pagar)
+// ---------------------------------------------------------------------------
+
+/** Quando a conta nasceu na Folha: é a mesma dívida, não uma a mais. */
+export interface OrigemNaFolha {
+  tipo: TipoLancamento;
+  contaId: string;
+  beneficiario: string | null;
+}
+
+export interface ContaAberta {
+  idFnApagar: number;
+  documento: string | null;
+  fornecedor: { id: number | null; nome: string };
+  /** Valor do título */
+  valor: number;
+  /** O que falta pagar dele — pagamento parcial deixa os dois diferentes */
+  valorAberto: number;
+  emissao: string | null;
+  vencimento: string | null;
+  /** Negativo = venceu há tantos dias; null = sem vencimento no IXC */
+  diasParaVencer: number | null;
+  vencida: boolean;
+  observacao: string | null;
+  statusAuditoria: 'A' | 'R' | 'C' | null;
+  origem: OrigemNaFolha | null;
+}
+
+export interface FatiaDoResumo {
+  quantidade: number;
+  total: number;
+}
+
+export interface ResumoContasAbertas {
+  quantidade: number;
+  total: number;
+  vencidas: FatiaDoResumo;
+  venceEmSeteDias: FatiaDoResumo;
+  demais: FatiaDoResumo;
+  semVencimento: FatiaDoResumo;
+}
+
+export interface ContasAbertas {
+  contas: ContaAberta[];
+  resumo: ResumoContasAbertas;
+  /** Quando a lista foi lida do IXC — ela é de agora, não de um espelho */
+  lidoEm: string;
+  avisos: string[];
+}
+
 /** Um caixa/conta do IXC, para configurar de onde sai o dinheiro em mãos. */
 export interface CaixaIxc {
   id: number;
