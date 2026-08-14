@@ -1,6 +1,7 @@
 import {
   estaEmAberto,
   mapContaAberta,
+  motivoDeNaoEstarAberto,
   ordenarPorUrgencia,
   resumirContasAbertas,
   type ContaAberta,
@@ -237,6 +238,35 @@ describe('o que parece aberto mas nao e', () => {
       estaEmAberto(bruto({ status: 'A', data_cancelamento: '10/08/2023' })),
     ).toBe(false);
     expect(estaEmAberto(bruto({ status: 'A', cancelado: 'S' }))).toBe(false);
+  });
+
+  /**
+   * A licao que custou caro: aceitar qualquer coluna com "cancel" no nome
+   * derrubou a lista de 532 titulos para 65. O `fn_apagar` tem colunas de
+   * configuracao que falam de cancelamento sem cancelar conta nenhuma, e
+   * elas nao podem tirar uma divida da tela.
+   */
+  it('coluna de configuracao com "cancel" no nome nao cancela conta', () => {
+    expect(estaEmAberto(bruto({ cancelamento_automatico: 'S' }))).toBe(true);
+    expect(estaEmAberto(bruto({ dias_para_cancelar: '30' }))).toBe(true);
+    expect(estaEmAberto(bruto({ permite_cancelamento: 'S' }))).toBe(true);
+    expect(estaEmAberto(bruto({ id_usuario_cancelamento: '14' }))).toBe(true);
+  });
+
+  it('diz por qual campo o titulo ficou de fora', () => {
+    expect(motivoDeNaoEstarAberto(bruto({ status: 'P' }))).toEqual({
+      motivo: 'pago',
+      campo: 'status',
+    });
+    expect(
+      motivoDeNaoEstarAberto(bruto({ cancelado: 'S' })),
+    ).toEqual({ motivo: 'cancelado', campo: 'cancelado' });
+    expect(
+      motivoDeNaoEstarAberto(
+        bruto({ valor: '100,00', valor_total_pago: '100,00' }),
+      ),
+    ).toEqual({ motivo: 'quitado', campo: 'valor_aberto' });
+    expect(motivoDeNaoEstarAberto(bruto())).toBeNull();
   });
 
   /** Coluna de cancelamento vazia e o estado normal de quem nunca cancelou. */

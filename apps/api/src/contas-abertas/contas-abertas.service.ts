@@ -1,9 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { IxcClient } from '../ixc/ixc.client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
-  estaEmAberto,
   mapContaAberta,
+  motivoDeNaoEstarAberto,
   ordenarPorUrgencia,
   resumirContasAbertas,
   type ContaAberta,
@@ -43,6 +43,42 @@ const TABELAS_PLANO_DE_CONTAS = [
   'fn_conta',
   'conta_despesa',
 ] as const;
+
+/**
+ * Conta em texto o que ficou de fora, por motivo e por coluna.
+ *
+ * "Pago" não vira aviso: título quitado sair da lista de contas em aberto é o
+ * esperado, e dizer isso a cada leitura seria ruído. Cancelamento e quitação
+ * por saldo viram, porque é neles que um filtro errado se esconde — foi um
+ * deles que engoliu quatrocentos títulos de uma vez sem ninguém perceber.
+ */
+function explicarExclusoes(
+  excluidos: Map<string, number>,
+  totalLido: number,
+): string[] {
+  const avisos: string[] = [];
+
+  for (const [chave, quantidade] of excluidos) {
+    const [motivo, campo] = chave.split('|');
+    if (motivo === 'pago') continue;
+
+    const parte = ((quantidade / Math.max(totalLido, 1)) * 100).toFixed(0);
+    if (motivo === 'cancelado') {
+      avisos.push(
+        `${quantidade} de ${totalLido} título(s) ficaram de fora por estarem ` +
+          `cancelados no IXC (coluna "${campo}"). Se essas contas ainda são ` +
+          `devidas, é essa coluna que está sendo lida errado — ela responde ` +
+          `por ${parte}% do que o IXC devolveu.`,
+      );
+    } else if (motivo === 'quitado') {
+      avisos.push(
+        `${quantidade} título(s) vieram sem saldo a pagar e ficaram de fora.`,
+      );
+    }
+  }
+
+  return avisos;
+}
 
 /**
  * As contas a pagar em aberto da empresa, lidas do IXC na hora.
@@ -95,10 +131,26 @@ export class ContasAbertasService {
     }
 
     const hoje = new Date();
-    const contas = brutos
-      .filter(estaEmAberto)
-      .map((raw) => mapContaAberta(raw, hoje))
-      .filter((c): c is ContaAberta => c !== null);
+
+    // Cada título que fica de fora é contado pelo motivo e pela coluna que
+    // decidiu. É o que faz um filtro errado aparecer na tela em vez de sumir
+    // com a dívida caladamente — foi assim que se descobriu que uma regra
+    // larga demais tinha engolido quatrocentos títulos de verdade.
+    const excluidos = new Map<string, number>();
+    const contas: ContaAberta[] = [];
+
+    for (const raw of brutos) {
+      const fora = motivoDeNaoEstarAberto(raw);
+      if (fora) {
+        const chave = `${fora.motivo}|${fora.campo}`;
+        excluidos.set(chave, (excluidos.get(chave) ?? 0) + 1);
+        continue;
+      }
+      const conta = mapContaAberta(raw, hoje);
+      if (conta) contas.push(conta);
+    }
+
+    avisos.push(...explicarExclusoes(excluidos, brutos.length));
 
     await this.completarNomes(contas, avisos);
     await this.completarCategorias(contas);
@@ -110,6 +162,28 @@ export class ContasAbertasService {
       lidoEm: hoje,
       avisos,
     };
+  }
+
+  /**
+   * O registro do `fn_apagar` como o IXC o devolve, campo por campo.
+   *
+   * Existe para responder "por que esta conta aparece (ou não) aqui?" sem
+   * chute. O nome das colunas do IXC muda entre versões e a documentação não
+   * fecha a lista — duas vezes o filtro desta tela errou por isso, e nas duas
+   * a resposta estava num campo que ninguém conseguia ver. Agora dá para ver.
+   */
+  async registroBruto(idFnApagar: number): Promise<Record<string, unknown>> {
+    const raw = await this.ixc.getById<Record<string, unknown>>(
+      'fn_apagar',
+      'fn_apagar.id',
+      idFnApagar,
+    );
+    if (!raw) {
+      throw new NotFoundException(
+        `O IXC não tem mais o título ${idFnApagar}.`,
+      );
+    }
+    return raw;
   }
 
   /**

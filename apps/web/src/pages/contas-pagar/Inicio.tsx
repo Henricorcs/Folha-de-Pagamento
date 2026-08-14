@@ -15,6 +15,7 @@ import { api, mensagemErro } from '../../lib/api';
 import { formatBRL, formatData } from '../../lib/format';
 import { TIPO_LABEL } from '../../lib/status';
 import type { ContaAberta, ContasAbertas } from '../../lib/types';
+import { DadosDoIxc } from './DadosDoIxc';
 
 /**
  * O que a empresa deve hoje, lido do IXC na hora de abrir.
@@ -31,6 +32,8 @@ type Recorte = 'todas' | 'vencidas' | 'semana' | 'demais' | 'sem-data';
 export function Inicio() {
   const [recorte, setRecorte] = useState<Recorte>('todas');
   const [busca, setBusca] = useState('');
+  /** Título cujos campos crus do IXC estamos olhando. */
+  const [detalhando, setDetalhando] = useState<ContaAberta | null>(null);
 
   const consulta = useQuery({
     queryKey: ['contas-abertas'],
@@ -185,18 +188,35 @@ export function Inicio() {
               </thead>
               <tbody>
                 {contas.map((c) => (
-                  <Linha key={c.idFnApagar} conta={c} />
+                  <Linha
+                    key={c.idFnApagar}
+                    conta={c}
+                    onVerDados={() => setDetalhando(c)}
+                  />
                 ))}
               </tbody>
             </table>
           </div>
         )}
       </Bloco>
+
+      {detalhando && (
+        <DadosDoIxc
+          conta={detalhando}
+          onFechar={() => setDetalhando(null)}
+        />
+      )}
     </Pagina>
   );
 }
 
-function Linha({ conta }: { conta: ContaAberta }) {
+function Linha({
+  conta,
+  onVerDados,
+}: {
+  conta: ContaAberta;
+  onVerDados: () => void;
+}) {
   const urgencia = urgenciaDaConta(conta);
   return (
     <tr className="linha">
@@ -230,7 +250,16 @@ function Linha({ conta }: { conta: ContaAberta }) {
           </div>
         )}
       </td>
-      <td className="td num text-tinta-500">{conta.documento ?? '—'}</td>
+      <td className="td num text-tinta-500">
+        {conta.documento ?? '—'}
+        <button
+          onClick={onVerDados}
+          title="Ver os campos deste título no IXC"
+          className="mt-1 block text-[11px] text-tinta-400 underline underline-offset-2 hover:text-brand-600"
+        >
+          dados do IXC
+        </button>
+      </td>
       <td className="td text-right">
         <span className="valor">{formatBRL(conta.valorAberto)}</span>
         {/* Pagamento parcial: mostrar só o saldo esconderia metade da história. */}

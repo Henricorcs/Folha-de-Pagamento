@@ -93,36 +93,74 @@ export interface FatiaDoResumo {
  * contas em aberto cheia de conta paga mente sobre quanto a empresa deve.
  */
 export function estaEmAberto(raw: Record<string, unknown>): boolean {
-  const status = String(raw.status ?? '').trim().toUpperCase();
-  if (status === 'P' || status === 'C') return false;
-  if (foiCancelada(raw)) return false;
-  // Nada a pagar não é dívida, seja qual for o status.
-  return valorEmAberto(raw) > 0.001;
+  return motivoDeNaoEstarAberto(raw) === null;
+}
+
+/** Por que um título não entra na lista — e por qual campo se soube disso. */
+export interface MotivoDeExclusao {
+  motivo: 'pago' | 'cancelado' | 'quitado';
+  /** A coluna do IXC que decidiu. Serve para explicar a exclusão na tela. */
+  campo: string;
 }
 
 /**
- * Procura marca de cancelamento em qualquer campo que fale disso. O nome da
- * coluna muda entre versões (`data_cancelamento`, `cancelado`, …), então a
- * busca é pelo nome conter "cancel" — o mesmo caminho que o status de
- * auditoria já usa.
+ * As colunas que marcam uma conta cancelada.
  *
- * Só conta o que tem valor de verdade: coluna vazia, `N`, zero e data zerada
- * são o estado normal de uma conta que ninguém cancelou. Um "motivo do
- * cancelamento" em branco não cancela nada.
+ * A lista é fechada de propósito, e isso custou uma quebra para aprender: a
+ * primeira versão aceitava **qualquer** coluna com "cancel" no nome, e o
+ * `fn_apagar` tem colunas de configuração que falam de cancelamento sem
+ * cancelar nada. O resultado foi a lista despencar de 532 títulos para 65 —
+ * quatrocentas e tantas dívidas de verdade sumiram da tela de uma vez.
+ *
+ * Nome novo só entra aqui depois de alguém ver o registro cru e confirmar que
+ * aquela coluna significa mesmo "esta conta foi cancelada".
  */
-export function foiCancelada(raw: Record<string, unknown>): boolean {
-  for (const [chave, valor] of Object.entries(raw)) {
-    if (!/cancel/i.test(chave)) continue;
-    // "Estornar cancelamento" é o nome do botão que desfaz — a coluna que
-    // guarda o estorno não é marca de conta cancelada.
-    if (/estorn/i.test(chave)) continue;
+const CAMPOS_DE_CANCELAMENTO = [
+  'data_cancelamento',
+  'data_hora_cancelamento',
+  'dt_cancelamento',
+  'cancelado',
+  'cancelada',
+  'status_cancelamento',
+] as const;
 
-    const s = String(valor ?? '').trim().toUpperCase();
+/**
+ * A resposta detalhada do `estaEmAberto`: `null` quando a conta é devida, e o
+ * motivo com o nome do campo quando não é. O campo não é curiosidade — é o que
+ * deixa a tela dizer "467 títulos ficaram de fora pela coluna tal", que é como
+ * um filtro errado se denuncia em vez de sumir com a dívida em silêncio.
+ */
+export function motivoDeNaoEstarAberto(
+  raw: Record<string, unknown>,
+): MotivoDeExclusao | null {
+  const status = String(raw.status ?? '').trim().toUpperCase();
+  if (status === 'P') return { motivo: 'pago', campo: 'status' };
+  if (status === 'C') return { motivo: 'cancelado', campo: 'status' };
+
+  const cancelamento = campoDeCancelamento(raw);
+  if (cancelamento) return { motivo: 'cancelado', campo: cancelamento };
+
+  // Nada a pagar não é dívida, seja qual for o status.
+  if (valorEmAberto(raw) <= 0.001) {
+    return { motivo: 'quitado', campo: 'valor_aberto' };
+  }
+  return null;
+}
+
+/**
+ * A coluna que diz que esta conta foi cancelada, se houver.
+ *
+ * Coluna vazia, `N`, zero e data zerada são o estado normal de quem nunca
+ * cancelou nada — só valor de verdade conta.
+ */
+function campoDeCancelamento(raw: Record<string, unknown>): string | null {
+  for (const campo of CAMPOS_DE_CANCELAMENTO) {
+    const s = String(raw[campo] ?? '').trim().toUpperCase();
     if (!s || s === 'N' || s === '0' || s === 'NULL') continue;
     if (/^0000-00-00/.test(s) || /^00\/00\/0000/.test(s)) continue;
-    return true;
+    return campo;
   }
-  return false;
+  return null;
 }
 
 /** Um registro cru do `fn_apagar` na forma que as telas usam. */

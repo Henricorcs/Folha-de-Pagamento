@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Param, ParseIntPipe } from '@nestjs/common';
 import { ContasAbertasService } from './contas-abertas.service';
 
 /**
@@ -15,5 +15,14 @@ export class ContasAbertasController {
   @Get()
   listar() {
     return this.service.listar();
+  }
+
+  /**
+   * Os campos crus do título no IXC. É o que responde "por que esta conta
+   * aparece aqui?" sem depender de adivinhar o nome de coluna.
+   */
+  @Get(':idFnApagar/bruto')
+  bruto(@Param('idFnApagar', ParseIntPipe) idFnApagar: number) {
+    return this.service.registroBruto(idFnApagar);
   }
 }
