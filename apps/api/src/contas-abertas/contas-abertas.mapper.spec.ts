@@ -160,6 +160,7 @@ describe('resumo', () => {
       observacao: null,
       statusAuditoria: null,
       categoria: { id: null, nome: null },
+      classificacao: null,
       origem: null,
     };
   }

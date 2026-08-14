@@ -604,7 +604,22 @@ export interface ContaAberta {
   statusAuditoria: 'A' | 'R' | 'C' | null;
   /** A conta de despesa do IXC: terreno, veículo, equipamento, energia… */
   categoria: { id: number | null; nome: string | null };
+  /**
+   * A que se refere o débito, na classificação desta casa. É o eixo dos
+   * relatórios. Null = ninguém classificou ainda.
+   */
+  classificacao: { id: string; nome: string } | null;
   origem: OrigemNaFolha | null;
+}
+
+/** Uma categoria de despesa do cadastro daqui. */
+export interface CategoriaDespesa {
+  id: string;
+  nome: string;
+  ativa: boolean;
+  ordem: number;
+  /** Quantas contas já foram etiquetadas com ela */
+  emUso: number;
 }
 
 export interface FatiaDoResumo {

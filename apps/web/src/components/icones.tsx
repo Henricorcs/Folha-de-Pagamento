@@ -145,3 +145,13 @@ export function IconeGrade({ className }: IconeProps) {
     </svg>
   );
 }
+
+/** Etiqueta com o furo do barbante: a categoria pendurada num gasto. */
+export function IconeEtiqueta({ className }: IconeProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M20.5 12.4 12.4 20.5a2 2 0 0 1-2.8 0l-6.1-6.1a2 2 0 0 1-.6-1.5l.3-6.2a2 2 0 0 1 1.9-1.9l6.2-.3a2 2 0 0 1 1.5.6l6.1 6.1a2 2 0 0 1 0 2.8z" />
+      <circle cx="8.2" cy="8.2" r="1.4" />
+    </svg>
+  );
+}

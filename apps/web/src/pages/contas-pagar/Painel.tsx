@@ -45,8 +45,7 @@ export function Painel() {
   const contas = useMemo(() => consulta.data?.contas ?? [], [consulta.data]);
 
   const porCategoria = useMemo(
-    () =>
-      agrupar(contas, (c) => c.categoria.nome ?? rotuloDaContaSemNome(c)),
+    () => agrupar(contas.filter((c) => c.classificacao), (c) => c.classificacao!.nome),
     [contas],
   );
   const porFornecedor = useMemo(
@@ -54,8 +53,9 @@ export function Painel() {
     [contas],
   );
   const porMes = useMemo(() => agruparPorMes(contas), [contas]);
-  const semCategoria = useMemo(
-    () => contas.filter((c) => !c.categoria.nome).length,
+  /** O que ainda não foi etiquetado — fica de fora de todo relatório por categoria. */
+  const semClassificar = useMemo(
+    () => contas.filter((c) => !c.classificacao),
     [contas],
   );
 
@@ -107,15 +107,23 @@ export function Painel() {
             <FaixaDeUrgencia contas={contas} />
           </Bloco>
 
-          <Bloco titulo="Por categoria de despesa" className="surgir surgir-2">
-            {semCategoria > 0 && (
-              <p className="mb-4 text-xs leading-relaxed text-tinta-500">
-                {semCategoria === contas.length
-                  ? 'Nenhum título veio com a conta de despesa preenchida no IXC — sem ela, o agrupamento fica pelo código da conta.'
-                  : `${semCategoria} título(s) estão sem conta de despesa no IXC e aparecem agrupados à parte.`}
+          <Bloco titulo="Com o que a empresa está devendo" className="surgir surgir-2">
+            {porCategoria.length === 0 ? (
+              <Vazio titulo="Nada classificado ainda">
+                Este gráfico sai da classificação de cada débito. Abra uma conta
+                na aba "Em aberto" e escolha a que ela se refere — a partir da
+                primeira, o gráfico começa a existir.
+              </Vazio>
+            ) : (
+              <BarrasComparadas itens={paraBarras(porCategoria)} />
+            )}
+            {semClassificar.length > 0 && (
+              <p className="ajuda">
+                {formatBRL(somar(semClassificar))} em {semClassificar.length}{' '}
+                título(s) ainda sem classificação — esse dinheiro não está em
+                nenhuma barra acima.
               </p>
             )}
-            <BarrasComparadas itens={paraBarras(porCategoria)} />
           </Bloco>
 
           <Bloco titulo="Por mês de vencimento" className="surgir surgir-3">
@@ -324,11 +332,6 @@ function mesesSeguintes(inicio: string, quantos: number): string[] {
     }
   }
   return meses;
-}
-
-/** Conta sem nome de categoria: mostra o código, que ao menos é rastreável. */
-function rotuloDaContaSemNome(c: ContaAberta): string {
-  return c.categoria.id === null ? 'Sem categoria' : `Conta ${c.categoria.id}`;
 }
 
 function somar(contas: ContaAberta[]): number {

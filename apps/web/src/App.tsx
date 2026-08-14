@@ -6,6 +6,7 @@ import { Assinar } from './pages/Assinar';
 import { Login } from './pages/Login';
 import { Modulos } from './pages/Modulos';
 import { Inicio as ContasPagarInicio } from './pages/contas-pagar/Inicio';
+import { Categorias as ContasPagarCategorias } from './pages/contas-pagar/Categorias';
 import { Painel as ContasPagarPainel } from './pages/contas-pagar/Painel';
 import { Avulsos } from './pages/folha/Avulsos';
 import { Configuracoes } from './pages/folha/Configuracoes';
@@ -106,6 +107,11 @@ export default function App() {
         <Route index element={<Navigate to="inicio" replace />} />
         <Route path="inicio" element={<ContasPagarInicio />} />
         <Route path="painel" element={<ContasPagarPainel />} />
+        {/* A mesma tela de avulsos da folha: é pagamento da empresa e é
+            lançamento da folha, e obrigar a trocar de módulo no meio do
+            trabalho custaria mais que o caminho repetido. */}
+        <Route path="avulsos" element={<Avulsos />} />
+        <Route path="categorias" element={<ContasPagarCategorias />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/modulos" replace />} />

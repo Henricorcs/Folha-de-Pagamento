@@ -3,6 +3,7 @@ import {
   IconeChave,
   IconeDia,
   IconeEngrenagem,
+  IconeEtiqueta,
   IconeGuia,
   IconeMoeda,
   IconePainel,
@@ -79,6 +80,11 @@ const contasPagar: Modulo = {
   menu: [
     { to: 'inicio', label: 'Em aberto', icone: IconeSaida },
     { to: 'painel', label: 'Painel', icone: IconePainel },
+    // Avulsos vive nos dois módulos, com os mesmos dados: é pagamento da
+    // empresa (daqui) e é lançamento que a folha usa (de lá). Duplicar o
+    // caminho custa menos que obrigar a trocar de módulo no meio do trabalho.
+    { to: 'avulsos', label: 'Pagamentos Avulsos', icone: IconeRecibo },
+    { to: 'categorias', label: 'Categorias', icone: IconeEtiqueta },
   ],
 };
 

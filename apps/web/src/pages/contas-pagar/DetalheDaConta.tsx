@@ -1,10 +1,14 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { Carregando, Janela, Selo } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
 import { formatBRL, formatData } from '../../lib/format';
 import { TIPO_LABEL } from '../../lib/status';
-import type { ContaAberta, DetalheDoTitulo } from '../../lib/types';
+import type {
+  CategoriaDespesa,
+  ContaAberta,
+  DetalheDoTitulo,
+} from '../../lib/types';
 
 /**
  * A ficha de um débito: o que é, de quem, quanto, quando vence — e, no fim,
@@ -24,8 +28,33 @@ export function DetalheDaConta({
   conta: ContaAberta;
   onFechar: () => void;
 }) {
+  const queryClient = useQueryClient();
   const [copiado, setCopiado] = useState(false);
   const [verTudo, setVerTudo] = useState(false);
+  const [categoriaId, setCategoriaId] = useState(conta.classificacao?.id ?? '');
+
+  const categorias = useQuery({
+    queryKey: ['categorias-despesa'],
+    queryFn: async () =>
+      (await api.get<CategoriaDespesa[]>('/categorias-despesa')).data,
+  });
+
+  /**
+   * Etiqueta o débito. A lista inteira é recarregada depois porque é dela que
+   * o painel tira os agrupamentos — deixar as duas telas discordando sobre em
+   * que categoria está um gasto seria pior que não ter categoria.
+   */
+  const classificar = useMutation({
+    mutationFn: async (categoriaId: string | null) => {
+      await api.put(`/contas-abertas/${conta.idFnApagar}/categoria`, {
+        categoriaId,
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['contas-abertas'] });
+      void queryClient.invalidateQueries({ queryKey: ['categorias-despesa'] });
+    },
+  });
 
   const detalhe = useQuery({
     queryKey: ['conta-bruta', conta.idFnApagar],
@@ -97,6 +126,48 @@ export function DetalheDaConta({
                   ? 'cancelada'
                   : 'não auditada'}
           </Dado>
+        </div>
+
+        {/* A etiqueta é nossa e é o eixo dos relatórios — por isso ela fica
+            logo abaixo do essencial, e não perdida no fim da ficha. */}
+        <div className="mt-5 rounded-2xl border border-tinta-100 p-4">
+          <label className="rotulo" htmlFor="categoria">
+            A que se refere este débito
+          </label>
+          {/* A escolha é guardada aqui além de ir para a API: a lista de trás
+              é recarregada depois de salvar, e até ela voltar o `conta` que
+              chegou por prop ainda é o antigo — sem este estado, o campo
+              voltaria sozinho para a opção anterior na frente de quem acabou
+              de escolher. */}
+          <select
+            id="categoria"
+            className="campo"
+            value={categoriaId}
+            disabled={categorias.isLoading || classificar.isPending}
+            onChange={(e) => {
+              setCategoriaId(e.target.value);
+              classificar.mutate(e.target.value || null);
+            }}
+          >
+            <option value="">Sem classificação</option>
+            {(categorias.data ?? []).map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nome}
+              </option>
+            ))}
+          </select>
+          <p className="ajuda">
+            {classificar.isPending
+              ? 'Salvando…'
+              : conta.categoria.nome
+                ? `No IXC este título está na conta de despesa "${conta.categoria.nome}".`
+                : 'É por esta escolha que o painel separa os gastos. Ela fica guardada aqui — o IXC não tem onde recebê-la.'}
+          </p>
+          {classificar.isError && (
+            <p className="mt-2 text-sm text-rose-700">
+              {mensagemErro(classificar.error)}
+            </p>
+          )}
         </div>
 
         {conta.observacao && (

@@ -967,3 +967,58 @@ model GuiaItem {
   @@index([guiaId])
   @@map("guia_itens")
 }
+
+// ---------------------------------------------------------------------------
+// Com o que a empresa gasta: a classificação das contas a pagar do IXC
+// ---------------------------------------------------------------------------
+
+/// A que se refere um débito — "mão de obra", "compra de veículos", "energia".
+///
+/// É cadastro, e não lista fixa no código, porque o que a empresa compra muda
+/// com o tempo e ninguém deveria esperar um deploy para poder classificar um
+/// gasto novo. As quinze primeiras nascem com o banco.
+///
+/// A conta de despesa do próprio IXC não serve para isso aqui: ela vem vazia
+/// na maioria dos títulos (`id_conta = 0`) e segue o plano de contas da
+/// contabilidade, que responde a outra pergunta.
+model CategoriaDespesa {
+  id   String @id @default(uuid())
+  nome String @unique
+
+  /// Desativada some das opções novas, mas não apaga a classificação de quem
+  /// já a usou — relatório de mês fechado não pode mudar porque alguém
+  /// arrumou o cadastro depois.
+  ativa Boolean @default(true)
+  /// Ordem de exibição; empate resolve pelo nome.
+  ordem Int     @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  classificacoes ClassificacaoConta[]
+
+  @@map("categorias_despesa")
+}
+
+/// A classificação de um título do IXC, guardada aqui.
+///
+/// Mora deste lado porque o IXC não tem onde receber isso: o campo dele é o
+/// plano de contas da contabilidade, que é outra coisa. A chave é o id do
+/// `fn_apagar` — o título continua sendo de lá, e daqui só sai a etiqueta.
+model ClassificacaoConta {
+  id String @id @default(uuid())
+
+  /// `fn_apagar.id` no IXC
+  idFnApagar Int @unique @map("id_fn_apagar")
+
+  categoria   CategoriaDespesa @relation(fields: [categoriaId], references: [id], onDelete: Restrict)
+  categoriaId String           @map("categoria_id")
+
+  /// Quem classificou, para o dia em que alguém discordar da etiqueta
+  classificadoPor String?  @map("classificado_por")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([categoriaId])
+  @@map("classificacoes_conta")
+}

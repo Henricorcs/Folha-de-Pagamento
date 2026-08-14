@@ -250,8 +250,21 @@ function Linha({
             {conta.observacao}
           </div>
         )}
-        {conta.origem && (
-          <div className="mt-1">
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          {conta.classificacao ? (
+            <Selo pequeno tom="info">
+              {conta.classificacao.nome}
+            </Selo>
+          ) : (
+            <Selo
+              pequeno
+              tom="atencao"
+              titulo="Sem isto o débito fica de fora dos relatórios por categoria — clique para escolher"
+            >
+              sem classificação
+            </Selo>
+          )}
+          {conta.origem && (
             <Selo
               pequeno
               tom="marca"
@@ -260,8 +273,8 @@ function Linha({
               Folha · {TIPO_LABEL[conta.origem.tipo] ?? conta.origem.tipo}
               {conta.origem.beneficiario ? ` · ${conta.origem.beneficiario}` : ''}
             </Selo>
-          </div>
-        )}
+          )}
+        </div>
       </td>
       <td className="td num text-tinta-500">{conta.documento ?? '—'}</td>
       <td className="td text-right">

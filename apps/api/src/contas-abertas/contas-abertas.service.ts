@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { IxcClient } from '../ixc/ixc.client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CategoriasService } from './categorias.service';
 import {
   explicarFiltro,
   mapContaAberta,
@@ -119,6 +120,7 @@ export class ContasAbertasService {
   constructor(
     private readonly ixc: IxcClient,
     private readonly prisma: PrismaService,
+    private readonly categorias: CategoriasService,
   ) {}
 
   async listar(): Promise<ContasAbertasResposta> {
@@ -170,6 +172,7 @@ export class ContasAbertasService {
 
     await this.completarNomes(contas, avisos);
     await this.completarCategorias(contas);
+    await this.aplicarClassificacoes(contas);
     await this.marcarOrigemNaFolha(contas);
 
     return {
@@ -345,6 +348,22 @@ export class ContasAbertasService {
     this.indiceFornecedores = { em: agora, nomes };
     this.logger.log(`Índice de fornecedores refeito: ${nomes.size} nomes.`);
     return nomes;
+  }
+
+  /**
+   * Cola em cada título a etiqueta de "com o que se gastou", que é nossa e
+   * mora só deste lado — o IXC não tem onde receber isso.
+   */
+  private async aplicarClassificacoes(contas: ContaAberta[]): Promise<void> {
+    const etiquetas = await this.categorias.dosTitulos(
+      contas.map((c) => c.idFnApagar),
+    );
+    for (const conta of contas) {
+      const categoria = etiquetas.get(conta.idFnApagar);
+      if (categoria) {
+        conta.classificacao = { id: categoria.id, nome: categoria.nome };
+      }
+    }
   }
 
   /**
