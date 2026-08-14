@@ -157,6 +157,7 @@ describe('resumo', () => {
       vencida: dias !== null && dias < 0,
       observacao: null,
       statusAuditoria: null,
+      categoria: { id: null, nome: null },
       origem: null,
     };
   }
@@ -204,5 +205,78 @@ describe('resumo', () => {
   it('no mesmo dia, o valor maior vem primeiro', () => {
     const ordenada = ordenarPorUrgencia([conta(3, 100), conta(3, 900)]);
     expect(ordenada.map((c) => c.valorAberto)).toEqual([900, 100]);
+  });
+});
+
+/**
+ * Os quatro titulos fantasma.
+ *
+ * A primeira versao desta tela mostrou quatro contas de 2023 como vencidas que
+ * a tela do proprio IXC nao listava: 532 aqui contra 528 la. Todas com
+ * `status = A`. O status sozinho nao diz se a conta ainda e devida -- e uma
+ * conta que nao e devida aparecendo como vencida faz alguem correr atras de
+ * uma divida que nao existe.
+ */
+describe('o que parece aberto mas nao e', () => {
+  it('titulo baixado por inteiro nao e divida, mesmo com status A', () => {
+    expect(
+      estaEmAberto(
+        bruto({ status: 'A', valor: '877,89', valor_baixado: '877,89' }),
+      ),
+    ).toBe(false);
+  });
+
+  it('baixa parcial continua sendo divida pelo que sobrou', () => {
+    const raw = bruto({ status: 'A', valor: '1.000,00', valor_baixado: '400,00' });
+    expect(estaEmAberto(raw)).toBe(true);
+    expect(mapContaAberta(raw, HOJE)!.valorAberto).toBe(600);
+  });
+
+  it('conta cancelada sai da lista mesmo com saldo em aberto', () => {
+    expect(
+      estaEmAberto(bruto({ status: 'A', data_cancelamento: '10/08/2023' })),
+    ).toBe(false);
+    expect(estaEmAberto(bruto({ status: 'A', cancelado: 'S' }))).toBe(false);
+  });
+
+  /** Coluna de cancelamento vazia e o estado normal de quem nunca cancelou. */
+  it('coluna de cancelamento em branco nao cancela nada', () => {
+    expect(estaEmAberto(bruto({ motivo_cancelamento: '' }))).toBe(true);
+    expect(estaEmAberto(bruto({ cancelado: 'N' }))).toBe(true);
+    expect(estaEmAberto(bruto({ data_cancelamento: '0000-00-00' }))).toBe(true);
+    expect(estaEmAberto(bruto({ data_cancelamento: '00/00/0000' }))).toBe(true);
+  });
+
+  /** O botao "Estornar cancelamento" desfaz -- nao e marca de cancelada. */
+  it('o estorno do cancelamento nao conta como cancelamento', () => {
+    expect(
+      estaEmAberto(bruto({ data_estorno_cancelamento: '12/08/2023' })),
+    ).toBe(true);
+  });
+
+  it('sem nada a pagar nao aparece, ainda que ninguem tenha mudado o status', () => {
+    expect(
+      estaEmAberto(bruto({ status: 'A', valor: '100,00', valor_aberto: '0,00', valor_total_pago: '100,00' })),
+    ).toBe(false);
+  });
+});
+
+describe('categoria da despesa', () => {
+  it('le o codigo da conta de despesa', () => {
+    const c = mapContaAberta(bruto({ id_conta: '2420' }), HOJE)!;
+    expect(c.categoria.id).toBe(2420);
+  });
+
+  it('usa o nome quando o proprio registro o traz', () => {
+    const c = mapContaAberta(
+      bruto({ id_conta: '318', descricao_conta: 'VEICULOS' }),
+      HOJE,
+    )!;
+    expect(c.categoria).toEqual({ id: 318, nome: 'VEICULOS' });
+  });
+
+  it('sem conta nenhuma, fica vazia em vez de inventar', () => {
+    const c = mapContaAberta(bruto(), HOJE)!;
+    expect(c.categoria).toEqual({ id: null, nome: null });
   });
 });

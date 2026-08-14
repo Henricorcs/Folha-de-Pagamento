@@ -34,6 +34,12 @@ export interface ContaAberta {
   vencida: boolean;
   observacao: string | null;
   statusAuditoria: StatusAuditoriaIxc | null;
+  /**
+   * A conta de despesa do IXC — terreno, veículo, equipamento, energia. É o
+   * que responde "com o que a empresa está devendo", e não só "para quem".
+   * O nome pode vir vazio quando o registro só traz o código.
+   */
+  categoria: { id: number | null; nome: string | null };
   /** Preenchido depois, cruzando com o que a folha lançou */
   origem: OrigemNaFolha | null;
 }
@@ -65,20 +71,58 @@ export interface FatiaDoResumo {
 }
 
 /**
- * `fn_apagar.status`: A = aberto, P = pago, C = cancelado.
+ * O que ainda é dívida.
  *
- * O filtro é pedido ao IXC, mas conferido de novo aqui: uma base que ignore o
- * `qtype` que não conhece devolve a tabela inteira, e uma tela de contas em
- * aberto cheia de conta paga é pior que uma tela vazia — ela mente sobre
- * quanto a empresa deve.
+ * `fn_apagar.status` diz A = aberto, P = pago, C = cancelado — mas ele sozinho
+ * não basta, e isso custou caro: a primeira versão desta tela mostrava quatro
+ * títulos de 2023 como vencidos que a própria tela do IXC não listava. Eles
+ * têm `status = A` e mesmo assim não são devidos.
+ *
+ * Então são três perguntas, não uma:
+ *
+ * 1. o status diz que acabou (pago ou cancelado)?
+ * 2. sobrou alguma coisa para pagar? Título baixado por inteiro está quitado,
+ *    mesmo com o status parado em "A" — e a baixa pode estar em `valor_baixado`
+ *    em vez de `valor_pago`, que era o único que se olhava antes;
+ * 3. há marca de cancelamento no registro? O IXC guarda o cancelamento em
+ *    campo próprio (é o que o botão "Estornar cancelamento" desfaz), e uma
+ *    conta cancelada não é dívida ainda que continue com saldo em aberto.
+ *
+ * O filtro também é pedido ao IXC, mas é conferido de novo aqui: base que
+ * ignore um `qtype` que não conhece devolve a tabela inteira, e uma tela de
+ * contas em aberto cheia de conta paga mente sobre quanto a empresa deve.
  */
 export function estaEmAberto(raw: Record<string, unknown>): boolean {
   const status = String(raw.status ?? '').trim().toUpperCase();
   if (status === 'P' || status === 'C') return false;
-  // Sem coluna de status, o desempate é o dinheiro: título já quitado não
-  // tem o que aparecer aqui.
-  if (!status) return valorEmAberto(raw) > 0.001;
-  return true;
+  if (foiCancelada(raw)) return false;
+  // Nada a pagar não é dívida, seja qual for o status.
+  return valorEmAberto(raw) > 0.001;
+}
+
+/**
+ * Procura marca de cancelamento em qualquer campo que fale disso. O nome da
+ * coluna muda entre versões (`data_cancelamento`, `cancelado`, …), então a
+ * busca é pelo nome conter "cancel" — o mesmo caminho que o status de
+ * auditoria já usa.
+ *
+ * Só conta o que tem valor de verdade: coluna vazia, `N`, zero e data zerada
+ * são o estado normal de uma conta que ninguém cancelou. Um "motivo do
+ * cancelamento" em branco não cancela nada.
+ */
+export function foiCancelada(raw: Record<string, unknown>): boolean {
+  for (const [chave, valor] of Object.entries(raw)) {
+    if (!/cancel/i.test(chave)) continue;
+    // "Estornar cancelamento" é o nome do botão que desfaz — a coluna que
+    // guarda o estorno não é marca de conta cancelada.
+    if (/estorn/i.test(chave)) continue;
+
+    const s = String(valor ?? '').trim().toUpperCase();
+    if (!s || s === 'N' || s === '0' || s === 'NULL') continue;
+    if (/^0000-00-00/.test(s) || /^00\/00\/0000/.test(s)) continue;
+    return true;
+  }
+  return false;
 }
 
 /** Um registro cru do `fn_apagar` na forma que as telas usam. */
@@ -126,21 +170,39 @@ export function mapContaAberta(
     vencida: dias !== null && dias < 0,
     observacao: primeiroTexto(raw, ['obs', 'observacao', 'historico']),
     statusAuditoria: lerStatusAuditoria(raw),
+    categoria: {
+      id: parseIxcId(raw.id_conta ?? raw.id_conta_despesa ?? raw.conta_despesa),
+      nome: primeiroTexto(raw, [
+        'conta_despesa_nome',
+        'descricao_conta',
+        'nome_conta',
+        'plano_conta',
+        'classificacao',
+      ]),
+    },
     origem: null,
   };
 }
 
 /**
- * Quanto ainda falta pagar. O IXC guarda o saldo em `valor_aberto` nas bases
- * que trabalham com pagamento parcial; onde não existe, o que falta é o valor
- * do título menos o que já foi pago.
+ * Quanto ainda falta pagar.
+ *
+ * `valor_aberto` é a resposta direta onde a base a tem. Onde não tem, o que
+ * falta é o título menos o que já saiu — e "o que já saiu" mora em mais de uma
+ * coluna: o IXC chama de **baixa** o ato de quitar o título, e a tela dele
+ * mostra "Valor baixado" ao lado de "Valor aberto". Olhar só `valor_pago`
+ * fazia um título já baixado aparecer devendo o valor inteiro.
  */
 function valorEmAberto(raw: Record<string, unknown>): number {
   const aberto = parseIxcDecimal(raw.valor_aberto);
   if (aberto > 0) return aberto;
 
   const valor = parseIxcDecimal(raw.valor ?? raw.valor_documento);
-  const pago = parseIxcDecimal(raw.valor_total_pago ?? raw.valor_pago);
+  const pago = Math.max(
+    parseIxcDecimal(raw.valor_total_pago),
+    parseIxcDecimal(raw.valor_pago),
+    parseIxcDecimal(raw.valor_baixado),
+  );
   return Math.max(0, arredondar(valor - pago));
 }
 

@@ -6,6 +6,7 @@ import { Assinar } from './pages/Assinar';
 import { Login } from './pages/Login';
 import { Modulos } from './pages/Modulos';
 import { Inicio as ContasPagarInicio } from './pages/contas-pagar/Inicio';
+import { Painel as ContasPagarPainel } from './pages/contas-pagar/Painel';
 import { Avulsos } from './pages/folha/Avulsos';
 import { Configuracoes } from './pages/folha/Configuracoes';
 import { ContasPagar } from './pages/folha/ContasPagar';
@@ -104,6 +105,7 @@ export default function App() {
       >
         <Route index element={<Navigate to="inicio" replace />} />
         <Route path="inicio" element={<ContasPagarInicio />} />
+        <Route path="painel" element={<ContasPagarPainel />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/modulos" replace />} />

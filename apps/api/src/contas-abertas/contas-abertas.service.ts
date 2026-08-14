@@ -28,8 +28,21 @@ export interface ContasAbertasResposta {
  */
 const TETO_DE_TITULOS = 3000;
 
-/** De quanto em quanto tempo vale reler o cadastro de fornecedores. */
+/** De quanto em quanto tempo vale reler os cadastros de apoio. */
 const VALIDADE_DO_INDICE_MS = 5 * 60 * 1000;
+
+/**
+ * Onde o plano de contas pode estar. O nome muda entre versões do IXC e a
+ * documentação do webservice não fecha a lista, então testa-se um a um até
+ * algum responder — o mesmo caminho da tabela de dados bancários.
+ */
+const TABELAS_PLANO_DE_CONTAS = [
+  'fn_classificacao',
+  'plano_contas',
+  'fn_plano_contas',
+  'fn_conta',
+  'conta_despesa',
+] as const;
 
 /**
  * As contas a pagar em aberto da empresa, lidas do IXC na hora.
@@ -45,6 +58,10 @@ export class ContasAbertasService {
 
   /** Nome dos fornecedores, guardado por alguns minutos entre uma tela e outra. */
   private indiceFornecedores: { em: number; nomes: Map<number, string> } | null =
+    null;
+
+  /** O mesmo para o plano de contas, que dá nome à categoria da despesa. */
+  private indiceCategorias: { em: number; nomes: Map<number, string> } | null =
     null;
 
   constructor(
@@ -84,6 +101,7 @@ export class ContasAbertasService {
       .filter((c): c is ContaAberta => c !== null);
 
     await this.completarNomes(contas, avisos);
+    await this.completarCategorias(contas);
     await this.marcarOrigemNaFolha(contas);
 
     return {
@@ -130,6 +148,75 @@ export class ContasAbertasService {
       conta.fornecedor.nome =
         nomes.get(conta.fornecedor.id!) ?? `Fornecedor ${conta.fornecedor.id}`;
     }
+  }
+
+  /**
+   * Dá nome à conta de despesa de cada título — "terreno", "veículos",
+   * "energia" —, que é o eixo do gráfico de com o que a empresa está devendo.
+   *
+   * O `fn_apagar` costuma trazer só o código. O plano de contas mora numa
+   * tabela cujo nome muda de uma versão do IXC para outra e não está fechado na
+   * documentação, então os nomes conhecidos são testados um a um, como já se
+   * faz com a tabela de dados bancários. Nenhum respondendo, o gráfico agrupa
+   * pelo código — menos legível, mas ainda verdadeiro.
+   */
+  private async completarCategorias(contas: ContaAberta[]): Promise<void> {
+    const semNome = contas.filter(
+      (c) => !c.categoria.nome && c.categoria.id !== null,
+    );
+    if (semNome.length === 0) return;
+
+    const nomes = await this.nomesDasContasDeDespesa();
+    for (const conta of semNome) {
+      conta.categoria.nome = nomes.get(conta.categoria.id!) ?? null;
+    }
+  }
+
+  private async nomesDasContasDeDespesa(): Promise<Map<number, string>> {
+    const agora = Date.now();
+    if (
+      this.indiceCategorias &&
+      agora - this.indiceCategorias.em < VALIDADE_DO_INDICE_MS
+    ) {
+      return this.indiceCategorias.nomes;
+    }
+
+    const nomes = new Map<number, string>();
+    for (const tabela of TABELAS_PLANO_DE_CONTAS) {
+      try {
+        const registros = await this.ixc.listAll<Record<string, unknown>>(
+          tabela,
+          { qtype: `${tabela}.id`, query: '0', oper: '>' },
+          { pageSize: 500, maxPages: 10 },
+        );
+        for (const raw of registros) {
+          const id = Number(raw.id);
+          const nome = String(
+            raw.descricao ?? raw.nome ?? raw.conta ?? '',
+          ).trim();
+          if (Number.isInteger(id) && id > 0 && nome) nomes.set(id, nome);
+        }
+        if (nomes.size > 0) {
+          this.logger.log(
+            `Plano de contas lido de "${tabela}": ${nomes.size} contas.`,
+          );
+          break;
+        }
+      } catch {
+        // Tabela que esta base não tem: passa para o próximo nome conhecido.
+        continue;
+      }
+    }
+
+    if (nomes.size === 0) {
+      this.logger.warn(
+        'Nenhuma tabela de plano de contas respondeu — o gráfico por ' +
+          'categoria vai agrupar pelo código da conta.',
+      );
+    }
+
+    this.indiceCategorias = { em: agora, nomes };
+    return nomes;
   }
 
   private async nomesDosFornecedores(): Promise<Map<number, string>> {

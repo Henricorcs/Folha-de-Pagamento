@@ -9,6 +9,7 @@ import {
   Pagina,
   Selo,
   Vazio,
+  type Tom,
 } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
 import { formatBRL, formatData } from '../../lib/format';
@@ -196,9 +197,12 @@ export function Inicio() {
 }
 
 function Linha({ conta }: { conta: ContaAberta }) {
+  const urgencia = urgenciaDaConta(conta);
   return (
     <tr className="linha">
-      <td className="td whitespace-nowrap">
+      <td
+        className={`td whitespace-nowrap border-l-4 ${urgencia.barra}`}
+      >
         <div className="num text-tinta-700">
           {conta.vencimento ? formatData(conta.vencimento) : '—'}
         </div>
@@ -240,35 +244,54 @@ function Linha({ conta }: { conta: ContaAberta }) {
   );
 }
 
-/** Há quanto venceu, ou quanto falta — a leitura que decide o que pagar antes. */
+/**
+ * O semáforo da conta: vermelho venceu, amarelo vence hoje, verde ainda tem
+ * prazo. É a primeira coisa que se lê na tela, então a cor aparece duas vezes —
+ * na barra da esquerda, que se enxerga correndo o olho pela lista, e no selo,
+ * que diz o quanto em palavras. Cor sozinha não serve a quem não a distingue.
+ */
+interface Urgencia {
+  /** Classe da barra colorida na borda da linha */
+  barra: string;
+  tom: Tom;
+  texto: string;
+}
+
+function urgenciaDaConta(conta: ContaAberta): Urgencia {
+  const dias = conta.diasParaVencer;
+
+  if (dias === null) {
+    return { barra: 'border-tinta-200', tom: 'neutro', texto: 'sem data' };
+  }
+  if (dias < 0) {
+    const atraso = Math.abs(dias);
+    return {
+      barra: 'border-rose-500',
+      tom: 'erro',
+      texto: atraso === 1 ? 'venceu ontem' : `${atraso} dias em atraso`,
+    };
+  }
+  if (dias === 0) {
+    return { barra: 'border-amber-400', tom: 'atencao', texto: 'vence hoje' };
+  }
+  return {
+    barra: 'border-emerald-500',
+    tom: 'pago',
+    texto: dias === 1 ? 'vence amanhã' : `em ${dias} dias`,
+  };
+}
+
 function PrazoDaConta({ conta }: { conta: ContaAberta }) {
-  if (conta.diasParaVencer === null) {
-    return (
-      <Selo pequeno tom="neutro" titulo="Sem data de vencimento no IXC">
-        sem data
-      </Selo>
-    );
-  }
-  if (conta.diasParaVencer < 0) {
-    const dias = Math.abs(conta.diasParaVencer);
-    return (
-      <Selo pequeno tom="erro">
-        {dias === 1 ? 'venceu ontem' : `${dias} dias em atraso`}
-      </Selo>
-    );
-  }
-  if (conta.diasParaVencer === 0) {
-    return (
-      <Selo pequeno tom="atencao">
-        vence hoje
-      </Selo>
-    );
-  }
+  const { tom, texto } = urgenciaDaConta(conta);
   return (
-    <Selo pequeno tom={conta.diasParaVencer <= 7 ? 'atencao' : 'neutro'}>
-      {conta.diasParaVencer === 1
-        ? 'vence amanhã'
-        : `em ${conta.diasParaVencer} dias`}
+    <Selo
+      pequeno
+      tom={tom}
+      titulo={
+        conta.diasParaVencer === null ? 'Sem data de vencimento no IXC' : undefined
+      }
+    >
+      {texto}
     </Selo>
   );
 }

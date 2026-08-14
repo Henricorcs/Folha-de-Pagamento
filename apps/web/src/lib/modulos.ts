@@ -76,7 +76,10 @@ const contasPagar: Modulo = {
   inicio: 'inicio',
   icone: IconeSaida,
   tom: 'bg-emerald-500/15 text-emerald-300',
-  menu: [{ to: 'inicio', label: 'Em aberto', icone: IconePainel }],
+  menu: [
+    { to: 'inicio', label: 'Em aberto', icone: IconeSaida },
+    { to: 'painel', label: 'Painel', icone: IconePainel },
+  ],
 };
 
 /** A ordem daqui é a ordem dos cartões na tela de módulos. */

@@ -599,6 +599,8 @@ export interface ContaAberta {
   vencida: boolean;
   observacao: string | null;
   statusAuditoria: 'A' | 'R' | 'C' | null;
+  /** A conta de despesa do IXC: terreno, veículo, equipamento, energia… */
+  categoria: { id: number | null; nome: string | null };
   origem: OrigemNaFolha | null;
 }
 
