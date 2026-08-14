@@ -223,6 +223,10 @@ export class DiaristasService {
         contaPagar: {
           select: { id: true, status: true, erro: true, idFnApagarIxc: true },
         },
+        // Só a data. A tela precisa saber se o recibo já foi assinado, e trazer
+        // o PNG de cada assinatura numa lista de 200 linhas seria carregar
+        // megabytes de imagem para desenhar um selo.
+        assinatura: { select: { assinadoEm: true } },
       },
     });
   }

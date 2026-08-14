@@ -10,6 +10,9 @@ export class UpdateConfigFinanceiraDto {
   @IsOptional() @IsInt() @Min(1) contaContabilDiaria?: number;
   @IsOptional() @IsInt() @Min(1) contaContabilAvulso?: number;
   @IsOptional() @IsInt() @Min(1) cidadePadraoId?: number;
+  // Quem paga, como sai impresso no recibo assinado da diária
+  @IsOptional() @IsString() empresaNome?: string;
+  @IsOptional() @IsString() empresaCnpj?: string;
   @IsOptional() @IsInt() @Min(0) @Max(100) percentualAdiantamento?: number;
   @IsOptional() @IsString() tipoPagamentoPadrao?: string;
   // Rádio "Tipo da chave Pix" do fn_apagar (vazio = aprender do próprio IXC)

@@ -223,6 +223,12 @@ model ConfiguracaoFinanceira {
   // Cidade padrão usada ao criar fornecedores
   cidadePadraoId Int @default(1) @map("cidade_padrao_id")
 
+  // --- Quem paga, como sai impresso no recibo assinado da diária ---
+  /// Razão social de quem entrega o dinheiro. Um recibo sem dizer quem pagou
+  /// não prova nada, então ele nasce com um nome e dá para acertar na tela.
+  empresaNome String @default("ILNET") @map("empresa_nome")
+  empresaCnpj String @default("") @map("empresa_cnpj")
+
   // % do salário base pago no adiantamento do dia 25, para quem recebe
   // adiantamento e não tem um lançamento de valor fixo cadastrado.
   percentualAdiantamento Int @default(40) @map("percentual_adiantamento")
@@ -626,9 +632,66 @@ model Diaria {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  /// Recibo assinado por quem recebeu (só faz sentido no pagamento em mãos)
+  assinatura AssinaturaDiaria?
+
   @@index([diaristaId])
   @@index([data])
   @@map("diarias")
+}
+
+/// ---------------------------------------------------------------------------
+/// Recibo assinado de uma diária paga em mãos.
+///
+/// Dinheiro entregue na mão não deixa rastro em banco nenhum: o comprovante é a
+/// assinatura de quem recebeu. Quem paga gera um link, a pessoa desenha o nome
+/// com o dedo — no celular de quem pagou ou no dela, de onde estiver — e o
+/// recibo fica guardado aqui.
+///
+/// Os valores e nomes são copiados para cá quando o link é gerado, em vez de
+/// serem lidos do cadastro na hora de imprimir — e é exatamente esse texto que
+/// a pessoa lê antes de assinar. Um recibo é o retrato do que ela concordou ter
+/// recebido: se amanhã alguém corrigir o cadastro dela ou o valor da diária, o
+/// papel que ela assinou não pode mudar junto.
+/// ---------------------------------------------------------------------------
+model AssinaturaDiaria {
+  id String @id @default(uuid())
+
+  diaria   Diaria @relation(fields: [diariaId], references: [id], onDelete: Cascade)
+  diariaId String @unique @map("diaria_id")
+
+  /// Segredo que vai na URL pública. Quem tem o link assina — por isso ele é
+  /// sorteado grande, morre ao ser usado e não é reaproveitado.
+  token    String   @unique
+  expiraEm DateTime @map("expira_em")
+
+  /// PNG da assinatura desenhada, em data URL. Vazio até alguém assinar.
+  assinaturaPng String?   @map("assinatura_png")
+  assinadoEm    DateTime? @map("assinado_em")
+
+  // --- O retrato do pagamento, congelado na hora de assinar ---
+  /// Nome que a pessoa confirmou ser o dela ao assinar
+  nomeAssinante String? @map("nome_assinante")
+  cpfAssinante  String? @map("cpf_assinante")
+  /// Valor, serviço e data como estavam no recibo que ela viu
+  valor         Decimal @db.Decimal(14, 2)
+  descricao     String
+  dataDiaria    DateTime @map("data_diaria")
+  detalhamento  String?
+  /// Quem pagou, como aparece no cabeçalho do recibo
+  empresaNome   String  @map("empresa_nome")
+  empresaCnpj   String? @map("empresa_cnpj")
+
+  // --- De onde veio a assinatura, para o caso de alguém contestar ---
+  ip        String?
+  userAgent String? @map("user_agent")
+
+  /// Quem gerou o link
+  criadoPor String?  @map("criado_por")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("assinaturas_diaria")
 }
 
 // ---------------------------------------------------------------------------

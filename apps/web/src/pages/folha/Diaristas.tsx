@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
+import { ColetarAssinatura } from '../../components/ColetarAssinatura';
 import {
   Aviso,
   Bloco,
@@ -93,6 +94,8 @@ export function Diaristas() {
   const [aberto, setAberto] = useState<string | null>(null);
   /** Diarista para quem estamos lançando uma diária. */
   const [pagando, setPagando] = useState<Diarista | null>(null);
+  /** Diária cuja assinatura estamos coletando. */
+  const [coletando, setColetando] = useState<Diaria | null>(null);
 
   const lista = useQuery({
     queryKey: ['diaristas', busca, verInativos],
@@ -713,10 +716,39 @@ export function Diaristas() {
                         <span className="valor">{formatBRL(d.valor)}</span>
                       </td>
                       <td className="td">
-                        <SituacaoDiaria diaria={d} />
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <SituacaoDiaria diaria={d} />
+                          {d.assinatura?.assinadoEm && (
+                            <Selo
+                              pequeno
+                              tom="pago"
+                              titulo="Quem recebeu assinou o recibo"
+                            >
+                              assinado
+                            </Selo>
+                          )}
+                        </div>
                       </td>
                       <td className="td text-right">
                         <div className="flex flex-wrap justify-end gap-1.5">
+                          {d.forma === 'EM_MAOS' &&
+                            (d.assinatura?.assinadoEm ? (
+                              <button
+                                onClick={() => setColetando(d)}
+                                title="Ver a assinatura e o recibo em PDF"
+                                className="btn btn-neutro btn-p"
+                              >
+                                Ver recibo
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => setColetando(d)}
+                                title="Dinheiro em mãos não deixa comprovante no banco — a assinatura de quem recebeu é o comprovante"
+                                className="btn btn-p border border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100"
+                              >
+                                Coletar Assinatura
+                              </button>
+                            ))}
                           {pendenteNoCaixa(d) && (
                             <>
                               <button
@@ -783,6 +815,13 @@ export function Diaristas() {
           onConfirmar={(body) =>
             pagar.mutate({ diaristaId: pagando.id, body })
           }
+        />
+      )}
+
+      {coletando && (
+        <ColetarAssinatura
+          diaria={coletando}
+          onFechar={() => setColetando(null)}
         />
       )}
     </Pagina>

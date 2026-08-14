@@ -104,6 +104,34 @@ export function Configuracoes() {
           </div>
         </Bloco>
 
+        <Bloco titulo="Quem paga, no recibo" className="surgir surgir-2">
+          <p className="mb-4 text-xs leading-relaxed text-tinta-500">
+            Sai impresso no recibo que o diarista assina quando recebe em mãos.
+            Um recibo que não diz quem entregou o dinheiro não prova nada — e o
+            que já foi assinado guarda o nome de então, não muda com isto.
+          </p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="rotulo">Razão social</label>
+              <input
+                value={form.empresaNome}
+                onChange={(e) => txt('empresaNome', e.target.value)}
+                className="campo"
+                placeholder="ILNET"
+              />
+            </div>
+            <div>
+              <label className="rotulo">CNPJ</label>
+              <input
+                value={form.empresaCnpj}
+                onChange={(e) => txt('empresaCnpj', e.target.value)}
+                className="campo num"
+                placeholder="00.000.000/0001-00"
+              />
+            </div>
+          </div>
+        </Bloco>
+
         <Bloco titulo="Tipo da chave Pix" className="surgir surgir-2">
           <p className="mb-4 text-xs leading-relaxed text-tinta-500">
             Na conta a pagar do IXC, o rádio “Tipo da chave Pix” precisa vir

@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { useAuth } from './lib/auth';
 import { MODULO_CONTAS_PAGAR, MODULO_FOLHA } from './lib/modulos';
+import { Assinar } from './pages/Assinar';
 import { Login } from './pages/Login';
 import { Modulos } from './pages/Modulos';
 import { Inicio as ContasPagarInicio } from './pages/contas-pagar/Inicio';
@@ -49,6 +50,10 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+
+      {/* Quem recebeu o dinheiro assina aqui. Fora do login de propósito: o
+          diarista não tem conta no sistema, e o link é a credencial dele. */}
+      <Route path="/assinar/:token" element={<Assinar />} />
       <Route
         path="/modulos"
         element={

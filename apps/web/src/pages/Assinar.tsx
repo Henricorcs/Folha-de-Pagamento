@@ -1,0 +1,251 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRef, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import {
+  AssinaturaCanvas,
+  type AssinaturaCanvasRef,
+} from '../components/AssinaturaCanvas';
+import { api, mensagemErro } from '../lib/api';
+import { formatBRL, formatData } from '../lib/format';
+import type { ReciboPublico } from '../lib/types';
+
+/**
+ * A tela de quem recebeu o dinheiro. É a única do sistema que abre sem login:
+ * o diarista não tem conta aqui e não vai criar uma para dizer que recebeu o
+ * que já está no bolso dele. O link é a credencial.
+ *
+ * Ela é feita para um celular seguro na mão, possivelmente no meio da rua:
+ * texto grande, um campo só, um botão só, e o que está sendo assinado à vista
+ * o tempo todo — ninguém assina o que não consegue ler.
+ */
+export function Assinar() {
+  const { token = '' } = useParams();
+  const queryClient = useQueryClient();
+  const controle = useRef<AssinaturaCanvasRef>(null);
+  const [nome, setNome] = useState('');
+  const [temTraco, setTemTraco] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+
+  const recibo = useQuery({
+    queryKey: ['assinatura', token],
+    queryFn: async () =>
+      (await api.get<ReciboPublico>(`/assinaturas/${token}`)).data,
+    retry: false,
+  });
+
+  const assinar = useMutation({
+    mutationFn: async () => {
+      const assinatura = controle.current?.exportar();
+      if (!assinatura) throw new Error('Assine no quadro antes de confirmar.');
+      return (
+        await api.post<ReciboPublico>(`/assinaturas/${token}`, {
+          assinatura,
+          ...(nome.trim() ? { nome: nome.trim() } : {}),
+        })
+      ).data;
+    },
+    onSuccess: (dados) => {
+      queryClient.setQueryData(['assinatura', token], dados);
+      setErro(null);
+    },
+    onError: (e) => setErro(mensagemErro(e)),
+  });
+
+  if (recibo.isLoading) {
+    return <Moldura><p className="text-center text-tinta-400">Abrindo o recibo…</p></Moldura>;
+  }
+
+  if (recibo.isError) {
+    return (
+      <Moldura>
+        <div className="text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-50 text-2xl">
+            ⏳
+          </div>
+          <h1 className="font-display text-xl font-semibold text-tinta-900">
+            Não deu para abrir
+          </h1>
+          <p className="mt-2 text-sm text-tinta-500">
+            {mensagemErro(recibo.error)}
+          </p>
+        </div>
+      </Moldura>
+    );
+  }
+
+  const r = recibo.data!;
+
+  // --- Já assinado: a tela vira o comprovante ---
+  if (r.assinado) {
+    return (
+      <Moldura>
+        <div className="text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-2xl">
+            ✓
+          </div>
+          <h1 className="font-display text-xl font-semibold text-tinta-900">
+            Recibo assinado
+          </h1>
+          <p className="mt-2 text-sm text-tinta-500">
+            {r.assinadoEm && `Assinado em ${formatDataHora(r.assinadoEm)}.`}
+          </p>
+        </div>
+
+        <Resumo recibo={r} />
+
+        {r.assinaturaPng && (
+          <div className="mt-5 rounded-2xl border border-tinta-100 bg-white p-4">
+            <div className="rotulo">Assinatura</div>
+            <img
+              src={r.assinaturaPng}
+              alt="Assinatura de quem recebeu"
+              className="mx-auto max-h-28"
+            />
+            <div className="mt-2 border-t border-tinta-200 pt-2 text-center text-sm font-semibold text-tinta-800">
+              {r.quemRecebe.nome}
+            </div>
+          </div>
+        )}
+
+        <p className="mt-6 text-center text-xs text-tinta-400">
+          Uma via deste recibo ficou guardada com quem fez o pagamento.
+        </p>
+      </Moldura>
+    );
+  }
+
+  // --- Ainda por assinar ---
+  return (
+    <Moldura>
+      <div className="text-center">
+        <div className="eyebrow">{r.quemPaga.nome}</div>
+        <h1 className="mt-1 font-display text-xl font-semibold text-tinta-900">
+          Recibo de pagamento
+        </h1>
+        <p className="mt-1.5 text-sm text-tinta-500">
+          Confira o que está escrito e assine abaixo.
+        </p>
+      </div>
+
+      <div className="mt-5 rounded-2xl bg-brand-50 p-5 text-center">
+        <div className="eyebrow text-brand-600">Você recebeu</div>
+        <div className="valor mt-1 text-4xl text-brand-700">
+          {formatBRL(r.valor)}
+        </div>
+        <div className="mt-1 text-sm text-tinta-600">em dinheiro, em mãos</div>
+      </div>
+
+      <Resumo recibo={r} />
+
+      <div className="mt-6">
+        <label className="rotulo" htmlFor="nome">
+          Seu nome completo
+        </label>
+        <input
+          id="nome"
+          className="campo"
+          value={nome}
+          onChange={(e) => setNome(e.target.value)}
+          placeholder={r.quemRecebe.nome}
+          autoComplete="name"
+        />
+        <p className="ajuda">
+          Deixe como está se o nome acima já estiver certo.
+        </p>
+      </div>
+
+      <div className="mt-4">
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="rotulo mb-0">Assinatura</span>
+          <button
+            type="button"
+            onClick={() => controle.current?.limpar()}
+            className="btn btn-sutil btn-p"
+          >
+            Limpar
+          </button>
+        </div>
+        <AssinaturaCanvas
+          controle={controle}
+          onMudou={setTemTraco}
+          disabled={assinar.isPending}
+        />
+      </div>
+
+      {erro && (
+        <p className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {erro}
+        </p>
+      )}
+
+      <button
+        onClick={() => assinar.mutate()}
+        disabled={!temTraco || assinar.isPending}
+        className="btn btn-primario mt-5 w-full py-3.5 text-base"
+      >
+        {assinar.isPending ? 'Enviando…' : 'Confirmar que recebi'}
+      </button>
+
+      <p className="mt-4 text-center text-xs leading-relaxed text-tinta-400">
+        Ao confirmar, você declara ter recebido {formatBRL(r.valor)} de{' '}
+        {r.quemPaga.nome} pelo serviço acima, dando plena quitação.
+      </p>
+    </Moldura>
+  );
+}
+
+/** O que o recibo diz, em linhas de conferir. */
+function Resumo({ recibo }: { recibo: ReciboPublico }) {
+  return (
+    <dl className="mt-5 space-y-3 rounded-2xl border border-tinta-100 bg-white p-4 text-sm">
+      <Linha rotulo="Serviço" valor={recibo.descricao} />
+      {recibo.detalhamento && (
+        <Linha rotulo="Composição" valor={recibo.detalhamento} />
+      )}
+      <Linha rotulo="Data do serviço" valor={formatData(recibo.data)} />
+      <Linha rotulo="Quem pagou" valor={recibo.quemPaga.nome} />
+      {recibo.quemPaga.cnpj && (
+        <Linha rotulo="CNPJ" valor={recibo.quemPaga.cnpj} />
+      )}
+    </dl>
+  );
+}
+
+function Linha({ rotulo, valor }: { rotulo: string; valor: string }) {
+  return (
+    <div className="flex gap-3">
+      <dt className="w-32 shrink-0 text-tinta-400">{rotulo}</dt>
+      <dd className="min-w-0 flex-1 text-tinta-800">{valor}</dd>
+    </div>
+  );
+}
+
+/**
+ * A casca da tela. Ela não usa o Layout do sistema de propósito: aqui não há
+ * menu, módulo nem para onde navegar — quem abriu tem uma coisa só para fazer.
+ */
+function Moldura({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-tinta-50 px-4 py-8">
+      <div className="mx-auto w-full max-w-lg">
+        <div className="mb-5 flex justify-center">
+          <img
+            src="/logo-ilnet.png"
+            alt="ilnet"
+            width={104}
+            height={64}
+            className="h-auto w-[86px] opacity-90"
+          />
+        </div>
+        <div className="card p-6 sm:p-7">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function formatDataHora(iso: string): string {
+  return new Intl.DateTimeFormat('pt-BR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(new Date(iso));
+}

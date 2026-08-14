@@ -288,6 +288,9 @@ export interface ConfigFinanceira {
   contaContabilBonus: number;
   contaContabilDiaria: number;
   cidadePadraoId: number;
+  /** Quem paga, como sai impresso no recibo assinado da diária */
+  empresaNome: string;
+  empresaCnpj: string;
   /** % do salário base no adiantamento do dia 25 (padrão 40) */
   percentualAdiantamento: number;
   tipoPagamentoPadrao: string;
@@ -509,6 +512,36 @@ export interface Diaria {
     erro: string | null;
     idFnApagarIxc: number | null;
   } | null;
+  /** Recibo em mãos: null = ninguém coletou; assinadoEm null = link de pé. */
+  assinatura?: { assinadoEm: string | null } | null;
+}
+
+/**
+ * O recibo assinado de uma diária paga em mãos, como a tela de quem paga o vê.
+ * `assinadoEm` vazio = o link está de pé, mas ninguém assinou ainda.
+ */
+export interface AssinaturaDiaria {
+  token: string;
+  expiraEm: string;
+  assinadoEm: string | null;
+  nomeAssinante: string | null;
+  assinaturaPng: string | null;
+}
+
+/**
+ * O mesmo recibo do ponto de vista de quem recebeu — é o que a tela pública
+ * mostra, e traz só o que sai impresso no papel.
+ */
+export interface ReciboPublico {
+  quemPaga: { nome: string; cnpj: string | null };
+  quemRecebe: { nome: string; cpfCnpj: string | null };
+  valor: string;
+  descricao: string;
+  detalhamento: string | null;
+  data: string;
+  assinado: boolean;
+  assinadoEm: string | null;
+  assinaturaPng: string | null;
 }
 
 /** Um caixa/conta do IXC, para configurar de onde sai o dinheiro em mãos. */

@@ -12,6 +12,7 @@ import { ImpostosModule } from './impostos/impostos.module';
 import { FeriasModule } from './ferias/ferias.module';
 import { ValesModule } from './vales/vales.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { AssinaturasModule } from './assinaturas/assinaturas.module';
 import { AuthModule } from './auth/auth.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
@@ -37,6 +38,7 @@ import { HealthController } from './health/health.controller';
     FeriasModule,
     ValesModule,
     DashboardModule,
+    AssinaturasModule,
   ],
   controllers: [HealthController],
   providers: [
