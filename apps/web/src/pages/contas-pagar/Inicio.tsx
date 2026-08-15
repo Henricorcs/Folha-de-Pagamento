@@ -633,13 +633,26 @@ function PrazoDaConta({ conta }: { conta: ContaAberta }) {
   );
 }
 
+/**
+ * Tira os acentos para comparar. Quem procura "aurelio" quer achar "Marco
+ * Aurélio Castro" — e não achou, uma vez, concluindo que a conta nem existia.
+ */
+function semAcento(texto: string): string {
+  // O intervalo é o dos acentos separados pelo NFD, escrito em escape para não
+  // depender de como este arquivo foi salvo.
+  return texto
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
 function filtrar(
   contas: ContaAberta[],
   recorte: Recorte,
   busca: string,
   soSemCategoria: boolean,
 ): ContaAberta[] {
-  const termo = busca.trim().toLowerCase();
+  const termo = semAcento(busca.trim());
 
   return contas.filter((c) => {
     if (soSemCategoria && c.classificacao) return false;
@@ -655,7 +668,7 @@ function filtrar(
 
     return [c.fornecedor.nome, c.documento, c.observacao, c.origem?.beneficiario]
       .filter((v): v is string => !!v)
-      .some((v) => v.toLowerCase().includes(termo));
+      .some((v) => semAcento(v).includes(termo));
   });
 }
 

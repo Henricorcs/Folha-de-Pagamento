@@ -60,6 +60,13 @@ const TIPOS_DE_PAGAMENTO = [
   { valor: 'Cartão', rotulo: 'Cartão', nota: 'Cartão da empresa.' },
 ] as const;
 
+/**
+ * O caixa de onde sai o dinheiro entregue em mãos: "CX - Werick" no IXC.
+ * Escolher "Dinheiro" e deixar a conta do banco lançaria a saída no lugar
+ * errado, e o acerto disso é no IXC, à mão.
+ */
+const CAIXA_EM_MAOS = 23;
+
 /** Uma parcela na tela, antes de virar conta a pagar. */
 interface Parcela {
   /** Valor canônico, como o CampoDinheiro devolve ("1234.56"). */
@@ -392,7 +399,17 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
           <select
             id="tipo-pagamento"
             value={tipoPagamento}
-            onChange={(e) => setTipoPagamento(e.target.value)}
+            onChange={(e) => {
+              const novo = e.target.value;
+              setTipoPagamento(novo);
+              // Em mãos o dinheiro sai do caixa, não do banco: a conta do
+              // caixa já vem escolhida, porque escolher "Dinheiro" e deixar a
+              // conta do banco lançaria a saída no lugar errado.
+              if (novo === 'Dinheiro') setContaPagamento(String(CAIXA_EM_MAOS));
+              else if (contaPagamento === String(CAIXA_EM_MAOS)) {
+                setContaPagamento('');
+              }
+            }}
             className="campo"
           >
             {TIPOS_DE_PAGAMENTO.map((t) => (

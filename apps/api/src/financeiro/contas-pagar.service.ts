@@ -407,7 +407,48 @@ export class ContasPagarService {
         `(${dados.fornecedorNome}): ${dados.valor}` +
         (codigoBarras ? ' (com boleto)' : ''),
     );
-    return this.enviarIxc(conta.id);
+
+    const enviada = await this.enviarIxc(conta.id);
+
+    /*
+     * Já aprovada na auditoria: conta criada por API nasce sem auditoria, e o
+     * IXC só mostra para pagar o que passou por lá — a conta chegava e ficava
+     * invisível para quem ia pagá-la. Quem lança daqui já decidiu que a conta é
+     * devida; aprovar é o passo que faltava para ela aparecer pronta no
+     * financeiro do IXC.
+     *
+     * Falhar aqui não derruba o lançamento: a conta existe no IXC e pode ser
+     * aprovada pela lista, num clique.
+     */
+    if (enviada.idFnApagarIxc) {
+      try {
+        await this.ixc.create(
+          'fn_apagar_auditoria',
+          buildAuditoriaPayload({
+            idFnApagar: enviada.idFnApagarIxc,
+            status: 'A',
+            motivo: 'Lançada e aprovada pelo ILNET FINANCE',
+            operador: '',
+          }),
+        );
+        return this.prisma.contaPagar.update({
+          where: { id: enviada.id },
+          data: {
+            status: StatusContaPagar.APROVADO,
+            aprovadoEm: new Date(),
+            aprovadoPor: usuarioId ?? null,
+          },
+        });
+      } catch (err) {
+        const motivo = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Conta ${enviada.idFnApagarIxc} foi criada, mas a aprovação ` +
+            `automática falhou: ${motivo}`,
+        );
+      }
+    }
+
+    return enviada;
   }
 
   /**
@@ -822,12 +863,25 @@ export class ContasPagarService {
   // -------------------------------------------------------------------------
   // Consultas / manutenção
   // -------------------------------------------------------------------------
+  /**
+   * As contas da folha — a tela de Pagamentos do módulo Folha de Pagamento.
+   *
+   * Despesa lançada à mão fica de fora: ela é conta a pagar da empresa, não
+   * pagamento a quem trabalha nela, e apareceu aqui uma vez misturada com as
+   * diárias e os salários. Nesta tela se aprova e se reprova o que a folha
+   * gerou; conta de fornecedor entrando no meio bagunça a conferência do mês e
+   * os relatórios que saem dela. O lugar dela é o módulo Contas a Pagar.
+   */
   async listar(q: QueryContasPagarDto) {
-    const where: Prisma.ContaPagarWhereInput = {};
+    const where: Prisma.ContaPagarWhereInput = {
+      tipo: { not: TipoLancamento.DESPESA },
+    };
     if (q.status) where.status = q.status;
     if (q.competencia) where.competencia = q.competencia;
     if (q.funcionarioId) where.funcionarioId = q.funcionarioId;
-    if (q.tipo) where.tipo = q.tipo;
+    // Pedir tipo DESPESA aqui não reabre a porta: esta tela é da folha, e o
+    // filtro por tipo não pode desfazer a regra acima.
+    if (q.tipo && q.tipo !== TipoLancamento.DESPESA) where.tipo = q.tipo;
     if (q.busca?.trim()) where.OR = filtroDeBusca(q.busca.trim());
 
     const page = q.page ?? 1;

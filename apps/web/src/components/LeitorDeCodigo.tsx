@@ -97,6 +97,20 @@ export function LeitorDeCodigo({
   const [preparando, setPreparando] = useState(true);
   const [lendo, setLendo] = useState(true);
 
+  /*
+   * O que fazer com o código lido fica numa caixa, e não na lista do efeito.
+   *
+   * As telas passam uma função escrita ali mesmo (`onLido={(c) => …}`), que é
+   * outra a cada render do formulário — e o formulário renderiza a cada tecla
+   * digitada. Com ela na lista de dependências, a câmera era desligada e
+   * religada sem parar, e a leitura nunca durava tempo suficiente para achar
+   * o código. Era esse o motivo de "não lê nada".
+   */
+  const aoLer = useRef(onLido);
+  useEffect(() => {
+    aoLer.current = onLido;
+  }, [onLido]);
+
   useEffect(() => {
     const modo = ALVOS[alvo];
     let parado = false;
@@ -109,7 +123,7 @@ export function LeitorDeCodigo({
       const aceito = modo.aceitar(bruto);
       if (!aceito) return false;
       setLendo(false);
-      onLido(aceito);
+      aoLer.current(aceito);
       return true;
     }
 
@@ -193,7 +207,9 @@ export function LeitorDeCodigo({
       pararZxing?.();
       stream?.getTracks().forEach((t) => t.stop());
     };
-  }, [alvo, onLido]);
+    // Só o alvo reinicia a câmera. O que fazer com o resultado vem da caixa
+    // acima, que não derruba a leitura quando a tela redesenha.
+  }, [alvo]);
 
   const modo = ALVOS[alvo];
 
