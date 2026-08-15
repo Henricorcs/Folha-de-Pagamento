@@ -28,6 +28,12 @@ export class ContasAbertasController {
     return this.service.planoDeContas();
   }
 
+  /** As contas de onde o dinheiro sai — banco e caixa —, como o IXC as tem. */
+  @Get('contas-pagamento')
+  contasDePagamento() {
+    return this.service.contasDePagamento();
+  }
+
   /** Quanto já saiu no mês pelo contas a pagar do IXC. */
   @Get('pagas-no-mes')
   pagasNoMes(@Query('mes') mes?: string) {

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import type { ContaPagar } from '@prisma/client';
 import { ContasPagarService } from '../financeiro/contas-pagar.service';
 import { CategoriasService } from './categorias.service';
@@ -6,7 +6,10 @@ import { CriarDespesaDto } from './dto/despesa.dto';
 
 /** O que aconteceu ao lançar uma despesa à mão. */
 export interface DespesaLancada {
+  /** A primeira conta criada — a única, quando não é parcelado. */
   conta: ContaPagar;
+  /** Todas as contas criadas: uma por parcela. */
+  contas: ContaPagar[];
   /**
    * Por que a etiqueta não ficou, quando não ficou. A conta já existe no IXC
    * nesse caso — o que falta é só a classificação daqui, e ela se resolve na
@@ -37,28 +40,117 @@ export class DespesasService {
     usuarioId?: string,
   ): Promise<DespesaLancada> {
     const hoje = hojeUtc();
-    const conta = await this.contasPagar.criarDespesa(
-      {
-        idFornecedorIxc: dto.idFornecedorIxc,
-        fornecedorNome: dto.fornecedorNome.trim(),
-        valor: dto.valor,
-        dataEmissao: dto.dataEmissao ? dataUtc(dto.dataEmissao) : hoje,
-        dataVencimento: dto.dataVencimento ? dataUtc(dto.dataVencimento) : hoje,
-        observacao: dto.observacao.trim(),
-        contaContabil: dto.contaContabil,
-        tipoPagamentoIxc: dto.tipoPagamento,
-        codigoBarras: dto.codigoBarras,
-        documento: dto.documento,
-        numeroNota: dto.numeroNota,
-        chavePix: dto.chavePix,
-        tipoChavePix: dto.tipoChavePix,
-      },
-      usuarioId,
-    );
+    const emissao = dto.dataEmissao ? dataUtc(dto.dataEmissao) : hoje;
+
+    /** O que é igual em todas as parcelas. */
+    const comum = {
+      idFornecedorIxc: dto.idFornecedorIxc,
+      fornecedorNome: dto.fornecedorNome.trim(),
+      dataEmissao: emissao,
+      contaContabil: dto.contaContabil,
+      contaPagamento: dto.contaPagamento,
+      tipoPagamentoIxc: dto.tipoPagamento,
+      numeroNota: dto.numeroNota,
+      chavePix: dto.chavePix,
+      tipoChavePix: dto.tipoChavePix,
+    };
+
+    if (!dto.parcelas?.length) {
+      const conta = await this.contasPagar.criarDespesa(
+        {
+          ...comum,
+          valor: dto.valor,
+          dataVencimento: dto.dataVencimento ? dataUtc(dto.dataVencimento) : hoje,
+          observacao: dto.observacao.trim(),
+          codigoBarras: dto.codigoBarras,
+          documento: dto.documento,
+        },
+        usuarioId,
+      );
+
+      return {
+        conta,
+        contas: [conta],
+        avisoCategoria: await this.etiquetar(
+          conta,
+          dto.categoriaId ?? null,
+          usuarioId,
+        ),
+      };
+    }
+
+    return this.lancarParcelas(dto, comum, usuarioId);
+  }
+
+  /**
+   * A nota em vezes: uma conta a pagar por parcela no IXC.
+   *
+   * As parcelas vão uma a uma, e o que já entrou fica de pé se a seguinte
+   * falhar. Desfazer as anteriores seria pior: elas já existem no IXC, e o
+   * conserto de "faltou a parcela 4" é lançar a 4 — enquanto o de "sumiram as
+   * três primeiras" é conferir seis registros do outro lado.
+   */
+  private async lancarParcelas(
+    dto: CriarDespesaDto,
+    comum: Record<string, unknown>,
+    usuarioId?: string,
+  ): Promise<DespesaLancada> {
+    const parcelas = dto.parcelas!;
+    const criadas: ContaPagar[] = [];
+    const avisos: string[] = [];
+
+    for (const [i, parcela] of parcelas.entries()) {
+      // "3/6" na observação é o que permite reconhecer a parcela na lista do
+      // IXC, onde todas aparecem com o mesmo fornecedor e o mesmo texto.
+      const observacao =
+        `${dto.observacao.trim()} (${i + 1}/${parcelas.length})`.slice(0, 500);
+
+      try {
+        const conta = await this.contasPagar.criarDespesa(
+          {
+            ...(comum as Parameters<
+              typeof this.contasPagar.criarDespesa
+            >[0]),
+            valor: parcela.valor,
+            dataVencimento: dataUtc(parcela.dataVencimento),
+            observacao,
+            codigoBarras: parcela.codigoBarras ?? null,
+            documento: parcela.documento ?? dto.documento ?? null,
+          },
+          usuarioId,
+        );
+        criadas.push(conta);
+
+        const aviso = await this.etiquetar(
+          conta,
+          dto.categoriaId ?? null,
+          usuarioId,
+        );
+        if (aviso) avisos.push(`Parcela ${i + 1}: ${aviso}`);
+      } catch (err) {
+        const motivo = err instanceof Error ? err.message : String(err);
+        this.logger.error(
+          `Parcela ${i + 1}/${parcelas.length} não foi criada: ${motivo}`,
+        );
+        avisos.push(
+          `A parcela ${i + 1} de ${parcelas.length} não foi criada (${motivo}). ` +
+            `As ${criadas.length} anteriores já estão no IXC — lance esta ` +
+            'de novo sozinha.',
+        );
+        break;
+      }
+    }
+
+    if (criadas.length === 0) {
+      throw new BadRequestException(
+        avisos[0] ?? 'Nenhuma parcela pôde ser criada.',
+      );
+    }
 
     return {
-      conta,
-      avisoCategoria: await this.etiquetar(conta, dto.categoriaId ?? null, usuarioId),
+      conta: criadas[0],
+      contas: criadas,
+      avisoCategoria: avisos.length ? avisos.join(' ') : null,
     };
   }
 

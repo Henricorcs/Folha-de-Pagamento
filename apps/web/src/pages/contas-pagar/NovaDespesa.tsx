@@ -6,6 +6,7 @@ import {
 } from '../../components/LeitorDeCodigo';
 import { CampoDinheiro, Carregando, Janela, Selo } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
+import { formatBRL } from '../../lib/format';
 import {
   TIPOS_CHAVE_PIX,
   type CategoriaDespesa,
@@ -22,7 +23,49 @@ interface FornecedorIxc {
 
 interface DespesaLancada {
   conta: { id: string; idFnApagarIxc: number | null; status: string };
+  contas: Array<{ id: string; idFnApagarIxc: number | null }>;
   avisoCategoria: string | null;
+}
+
+/** Uma conta de onde o dinheiro sai, como o IXC a tem. */
+interface ContaDePagamento {
+  id: number;
+  nome: string;
+  ativa: boolean;
+  usual: boolean;
+}
+
+/**
+ * Os tipos que o IXC entende. É lista fechada de propósito: o rótulo vai exato
+ * para o `fn_apagar.tipo_pagamento`, e um tipo inventado aqui vira uma conta
+ * que o financeiro de lá não sabe pagar.
+ */
+const TIPOS_DE_PAGAMENTO = [
+  {
+    valor: 'Pix',
+    rotulo: 'Pix',
+    nota: 'O banco paga pela chave — ou pelo copia e cola do QR.',
+  },
+  {
+    valor: 'Boleto',
+    rotulo: 'Boleto',
+    nota: 'Precisa da linha digitável; sem ela o IXC não tem como pagar.',
+  },
+  {
+    valor: 'Dinheiro',
+    rotulo: 'Em mãos (dinheiro)',
+    nota: 'Sai do caixa, não do banco. Escolha o caixa na conta ao lado.',
+  },
+  { valor: 'Transferência', rotulo: 'Transferência', nota: 'TED ou DOC.' },
+  { valor: 'Cartão', rotulo: 'Cartão', nota: 'Cartão da empresa.' },
+] as const;
+
+/** Uma parcela na tela, antes de virar conta a pagar. */
+interface Parcela {
+  /** Valor canônico, como o CampoDinheiro devolve ("1234.56"). */
+  valor: string;
+  /** "AAAA-MM-DD" */
+  vencimento: string;
 }
 
 /**
@@ -49,8 +92,16 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
   const [numeroNota, setNumeroNota] = useState('');
   const [chavePix, setChavePix] = useState('');
   const [tipoChavePix, setTipoChavePix] = useState('');
+  const [contaPagamento, setContaPagamento] = useState('');
   /** Qual leitor está aberto: o do boleto, o do QR do PIX, ou nenhum. */
   const [lendo, setLendo] = useState<'boleto' | 'pix' | null>(null);
+
+  // --- Parcelamento ---
+  const [parcelado, setParcelado] = useState(false);
+  const [quantasParcelas, setQuantasParcelas] = useState('2');
+  /** Dias entre uma parcela e a seguinte: quinzenal ou mensal. */
+  const [intervalo, setIntervalo] = useState<15 | 30>(30);
+  const [parcelas, setParcelas] = useState<Parcela[]>([]);
   const [lancada, setLancada] = useState<DespesaLancada | null>(null);
 
   const categorias = useQuery({
@@ -115,6 +166,13 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
           // tente ler o EMV como se fosse CPF ou celular.
           tipoChavePix:
             (ehCopiaECola ? 'Código copia e cola' : tipoChavePix) || undefined,
+          contaPagamento: contaPagamento ? Number(contaPagamento) : undefined,
+          parcelas: parcelado
+            ? parcelas.map((p) => ({
+                valor: Number(p.valor),
+                dataVencimento: p.vencimento,
+              }))
+            : undefined,
         },
       );
       return data;
@@ -125,6 +183,58 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
       void queryClient.invalidateQueries({ queryKey: ['categorias-despesa'] });
     },
   });
+
+  const contasPagamento = useQuery({
+    queryKey: ['contas-pagamento'],
+    queryFn: async () =>
+      (
+        await api.get<ContaDePagamento[]>('/contas-abertas/contas-pagamento')
+      ).data,
+  });
+
+  const usuais = (contasPagamento.data ?? []).filter((c) => c.usual);
+  const demais = (contasPagamento.data ?? []).filter((c) => !c.usual);
+  const nomeDaContaPadrao = contasPagamento.data?.find(
+    (c) => c.id === config.data?.contaPagamentoId,
+  )?.nome;
+
+  /**
+   * Redivide a nota assim que o valor total, a data ou o ritmo mudam.
+   *
+   * A divisão sobra centavos quase sempre (100 em 3 dá 33,33 três vezes e
+   * perde um centavo), e o que sobra vai na primeira parcela: é onde ninguém
+   * se incomoda, e a soma fecha com a nota. Editar qualquer linha depois é
+   * livre — daí em diante manda o que está na tela.
+   */
+  function gerarParcelas(
+    quantidade: number,
+    total: number,
+    primeiroVencimento: string,
+    dias: number,
+  ): Parcela[] {
+    if (quantidade < 1 || !primeiroVencimento) return [];
+    const centavos = Math.round(total * 100);
+    const base = Math.floor(centavos / quantidade);
+    const sobra = centavos - base * quantidade;
+
+    return Array.from({ length: quantidade }, (_, i) => ({
+      valor: (((i === 0 ? base + sobra : base) / 100) || 0).toFixed(2),
+      vencimento: somarDias(primeiroVencimento, dias * i),
+    }));
+  }
+
+  function refazerParcelas(
+    quantidade = Number(quantasParcelas) || 0,
+    dias = intervalo,
+  ) {
+    setParcelas(gerarParcelas(quantidade, Number(valor) || 0, vencimento, dias));
+  }
+
+  const somaDasParcelas = parcelas.reduce(
+    (s, p) => s + (Number(p.valor) || 0),
+    0,
+  );
+  const diferenca = Math.round((somaDasParcelas - (Number(valor) || 0)) * 100) / 100;
 
   const ehBoleto = /boleto/i.test(tipoPagamento);
   const ehPix = /pix/i.test(tipoPagamento);
@@ -146,12 +256,18 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
       <Janela titulo="Conta lançada" onFechar={onFechar}>
         <div className="text-center">
           <p className="font-display text-lg font-semibold text-tinta-900">
-            A conta foi criada no IXC
+            {lancada.contas.length > 1
+              ? `${lancada.contas.length} contas criadas no IXC`
+              : 'A conta foi criada no IXC'}
           </p>
           <p className="mt-1 text-sm text-tinta-500">
-            {lancada.conta.idFnApagarIxc
-              ? `Título nº ${lancada.conta.idFnApagarIxc}, no aguardo da auditoria do IXC como qualquer outra.`
-              : 'A conta foi salva aqui, mas o IXC ainda não devolveu o número dela.'}
+            {lancada.contas.length > 1
+              ? `Títulos ${lancada.contas
+                  .map((c) => c.idFnApagarIxc ?? '?')
+                  .join(', ')} — uma parcela cada, todas no aguardo da auditoria.`
+              : lancada.conta.idFnApagarIxc
+                ? `Título nº ${lancada.conta.idFnApagarIxc}, no aguardo da auditoria do IXC como qualquer outra.`
+                : 'A conta foi salva aqui, mas o IXC ainda não devolveu o número dela.'}
           </p>
           {lancada.avisoCategoria && (
             <p className="mx-auto mt-4 max-w-md rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -270,23 +386,67 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
           <label className="rotulo" htmlFor="tipo-pagamento">
             Tipo de pagamento
           </label>
-          <input
+          {/* Lista fechada, e não campo com sugestão: o rótulo tem de ser
+              exatamente um dos que o IXC conhece, e digitar livre era convite
+              a criar um tipo que o financeiro de lá não entende. */}
+          <select
             id="tipo-pagamento"
-            list="tipos-pagamento"
             value={tipoPagamento}
             onChange={(e) => setTipoPagamento(e.target.value)}
             className="campo"
-            placeholder="Pix"
-          />
-          <datalist id="tipos-pagamento">
-            <option value="Pix" />
-            <option value="Boleto" />
-            <option value="Dinheiro" />
-            <option value="Transferência" />
-            <option value="Cartão" />
-          </datalist>
+          >
+            {TIPOS_DE_PAGAMENTO.map((t) => (
+              <option key={t.valor} value={t.valor}>
+                {t.rotulo}
+              </option>
+            ))}
+          </select>
           <p className="ajuda">
-            O rótulo tem de ser o mesmo do seu IXC.
+            {TIPOS_DE_PAGAMENTO.find((t) => t.valor === tipoPagamento)?.nota ??
+              'O rótulo tem de ser o mesmo do seu IXC.'}
+          </p>
+        </div>
+
+        <div>
+          <label className="rotulo" htmlFor="conta-pagamento">
+            Conta de onde sai
+          </label>
+          <select
+            id="conta-pagamento"
+            value={contaPagamento}
+            onChange={(e) => setContaPagamento(e.target.value)}
+            className="campo"
+            disabled={contasPagamento.isLoading}
+          >
+            <option value="">
+              {config.data
+                ? `Padrão — ${nomeDaContaPadrao ?? config.data.contaPagamentoId}`
+                : 'Padrão das Configurações'}
+            </option>
+            {usuais.length > 0 && (
+              <optgroup label="As que costumam pagar">
+                {usuais.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nome}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {demais.length > 0 && (
+              <optgroup label="Outras contas do IXC">
+                {demais.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nome}
+                    {c.ativa ? '' : ' (inativa)'}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+          <p className="ajuda">
+            {contasPagamento.error
+              ? 'Não deu para ler as contas do IXC — a padrão vale.'
+              : 'É de onde o dinheiro sai: o banco, ou o caixa no pagamento em mãos.'}
           </p>
         </div>
 
@@ -473,6 +633,138 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
           </p>
         </div>
 
+        {/* --- Parcelamento --- */}
+        <div className="sm:col-span-2">
+          <label className="flex items-center gap-2 text-sm text-tinta-700">
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-brand-600"
+              checked={parcelado}
+              onChange={(e) => {
+                setParcelado(e.target.checked);
+                if (e.target.checked) refazerParcelas();
+                else setParcelas([]);
+              }}
+            />
+            Lançar em parcelas — uma conta a pagar para cada uma no IXC
+          </label>
+
+          {parcelado && (
+            <div className="mt-2 rounded-xl border border-tinta-100 p-3">
+              <div className="flex flex-wrap items-end gap-3">
+                <div>
+                  <label className="rotulo" htmlFor="quantas">
+                    Parcelas
+                  </label>
+                  <input
+                    id="quantas"
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={quantasParcelas}
+                    onChange={(e) => {
+                      setQuantasParcelas(e.target.value);
+                      refazerParcelas(Number(e.target.value) || 0);
+                    }}
+                    className="campo w-24"
+                  />
+                </div>
+                <div>
+                  <span className="rotulo">A cada</span>
+                  <div className="flex gap-1.5">
+                    {([15, 30] as const).map((dias) => (
+                      <button
+                        key={dias}
+                        type="button"
+                        onClick={() => {
+                          setIntervalo(dias);
+                          refazerParcelas(undefined, dias);
+                        }}
+                        className={
+                          intervalo === dias
+                            ? 'btn btn-p bg-brand-600 text-white'
+                            : 'btn btn-p btn-neutro'
+                        }
+                      >
+                        {dias} dias
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => refazerParcelas()}
+                  className="btn btn-neutro btn-p"
+                  title="Refaz as parcelas a partir do valor total e do primeiro vencimento"
+                >
+                  Recalcular
+                </button>
+                <span className="ml-auto text-xs text-tinta-400">
+                  A primeira vence em {vencimento ? formatarDia(vencimento) : '—'}
+                </span>
+              </div>
+
+              {parcelas.length > 0 && (
+                <div className="mt-3 overflow-x-auto rolagem-fina">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr>
+                        <th className="th w-10">#</th>
+                        <th className="th">Vencimento</th>
+                        <th className="th">Valor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {parcelas.map((p, i) => (
+                        <tr key={i} className="linha">
+                          <td className="td num text-tinta-400">{i + 1}</td>
+                          <td className="td">
+                            <input
+                              type="date"
+                              value={p.vencimento}
+                              onChange={(e) =>
+                                setParcelas((atual) =>
+                                  atual.map((x, j) =>
+                                    j === i
+                                      ? { ...x, vencimento: e.target.value }
+                                      : x,
+                                  ),
+                                )
+                              }
+                              className="campo py-1"
+                            />
+                          </td>
+                          <td className="td">
+                            <CampoDinheiro
+                              valor={p.valor}
+                              onChange={(v) =>
+                                setParcelas((atual) =>
+                                  atual.map((x, j) =>
+                                    j === i ? { ...x, valor: v } : x,
+                                  ),
+                                )
+                              }
+                              className="campo py-1"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <p className={`ajuda ${diferenca !== 0 ? 'text-amber-700' : ''}`}>
+                {diferenca === 0
+                  ? `As ${parcelas.length} parcelas somam ${formatBRL(somaDasParcelas)} — igual ao total da nota.`
+                  : `As parcelas somam ${formatBRL(somaDasParcelas)}, ${
+                      diferenca > 0 ? 'a mais' : 'a menos'
+                    } que o total da nota (${formatBRL(Math.abs(diferenca))} de diferença).`}
+              </p>
+            </div>
+          )}
+        </div>
+
         <div className="sm:col-span-2">
           <label className="rotulo" htmlFor="observacao">
             Observação
@@ -553,6 +845,27 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
 /** Só os dígitos: boleto copiado vem com pontos, espaços e a máscara do banco. */
 function digitos(valor: string): string {
   return valor.replace(/\D/g, '');
+}
+
+/**
+ * Soma dias a uma data "AAAA-MM-DD", em UTC.
+ *
+ * Em UTC porque o horário de verão, em fuso que o tenha, faria "+30 dias" cair
+ * uma hora antes e virar o dia anterior — uma parcela vencendo dia 30 em vez de
+ * 31 é erro pequeno na tela e grande no caixa.
+ */
+function somarDias(iso: string, dias: number): string {
+  const [ano, mes, dia] = iso.slice(0, 10).split('-').map(Number);
+  const d = new Date(Date.UTC(ano, mes - 1, dia + dias));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(
+    d.getUTCDate(),
+  ).padStart(2, '0')}`;
+}
+
+/** "AAAA-MM-DD" → "15/08/2026", sem passar por Date (que escorrega de fuso). */
+function formatarDia(iso: string): string {
+  const [ano, mes, dia] = iso.slice(0, 10).split('-');
+  return `${dia}/${mes}/${ano}`;
 }
 
 /** Hoje em "AAAA-MM-DD", que é o formato do input de data. */

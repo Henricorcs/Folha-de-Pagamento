@@ -31,6 +31,24 @@ export interface ContasAbertasResposta {
   avisos: string[];
 }
 
+/** Uma conta de onde o dinheiro sai: banco ou caixa. */
+export interface ContaDePagamento {
+  /** `fn_apagar.id_contas` */
+  id: number;
+  nome: string;
+  ativa: boolean;
+  /** É uma das que costumam pagar os débitos — aparece no topo da lista. */
+  usual: boolean;
+}
+
+/**
+ * As contas por onde os débitos da empresa costumam sair, na ordem em que a
+ * tela as oferece: Sicoob, Bradesco, ModoBank (o PIX) e o caixa do Werick, que
+ * é o pagamento em mãos. As outras treze do cadastro do IXC continuam
+ * escolhíveis, só não disputam espaço com estas.
+ */
+const CONTAS_QUE_COSTUMAM_PAGAR = [14, 15, 18, 23];
+
 /** Quanto a empresa já pagou num mês, pelo contas a pagar do IXC. */
 export interface PagamentosDoMes {
   /** "AAAA-MM" */
@@ -404,6 +422,39 @@ export class ContasAbertasService {
     for (const conta of semNome) {
       conta.categoria.nome = nomes.get(conta.categoria.id!) ?? null;
     }
+  }
+
+  /**
+   * As contas de onde o dinheiro sai — banco e caixa —, lidas do IXC.
+   *
+   * As quatro do topo são as que de fato pagam as contas da empresa; o resto do
+   * cadastro continua disponível, mas embaixo. Sem essa separação, escolher a
+   * conta seria caçar quatro nomes no meio de dezessete, quase todos de contas
+   * que a empresa não usa mais.
+   */
+  async contasDePagamento(): Promise<ContaDePagamento[]> {
+    const registros = await this.ixc.listAll<Record<string, unknown>>(
+      'contas',
+      { qtype: 'contas.id', query: '0', oper: '>' },
+      { pageSize: 200, maxPages: 3 },
+    );
+
+    return registros
+      .map((r) => {
+        const id = Number(r.id);
+        return {
+          id,
+          nome: String(r.conta ?? r.descricao ?? `Conta ${id}`).trim(),
+          ativa: String(r.ativo ?? 'S').toUpperCase() !== 'N',
+          usual: CONTAS_QUE_COSTUMAM_PAGAR.includes(id),
+        };
+      })
+      .filter((c) => Number.isInteger(c.id) && c.id > 0 && c.nome)
+      .sort((a, b) => {
+        if (a.usual !== b.usual) return a.usual ? -1 : 1;
+        if (a.ativa !== b.ativa) return a.ativa ? -1 : 1;
+        return a.nome.localeCompare(b.nome, 'pt-BR');
+      });
   }
 
   /**

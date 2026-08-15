@@ -1,6 +1,8 @@
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { TIPOS_CHAVE_PIX } from '../../ixc/ixc.financeiro';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsIn,
   IsInt,
   IsISO8601,
@@ -11,6 +13,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 
 /**
@@ -28,6 +31,27 @@ export class PagarTituloDto {
 
   /** O que aparece no histórico do lançamento no IXC. */
   @IsOptional() @IsString() @MaxLength(200) historico?: string;
+}
+
+/**
+ * Uma parcela de uma nota lançada em vezes. Cada uma vira uma conta a pagar
+ * própria no IXC — é assim que o financeiro de lá entende parcelamento, e é o
+ * que deixa pagar a primeira sem mexer nas outras.
+ */
+export class ParcelaDaDespesaDto {
+  @Transform(({ value }) => (value === '' || value == null ? undefined : Number(value)))
+  @IsNumber()
+  @Min(0.01)
+  valor!: number;
+
+  /** Vencimento desta parcela (AAAA-MM-DD). */
+  @IsISO8601() dataVencimento!: string;
+
+  /** Código do boleto desta parcela, quando cada uma tem o seu. */
+  @IsOptional() @IsString() @MaxLength(60) codigoBarras?: string;
+
+  /** Documento desta parcela, quando cada uma tem o seu. */
+  @IsOptional() @IsString() @MaxLength(40) documento?: string;
 }
 
 /**
@@ -100,4 +124,26 @@ export class CriarDespesaDto {
   @Transform(({ value }) => (value === '' || value == null ? undefined : value))
   @IsIn([...TIPOS_CHAVE_PIX])
   tipoChavePix?: string;
+
+  /** Conta de onde o dinheiro sai (`id_contas`). Vazio = a da configuração. */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value == null ? undefined : Number(value)))
+  @IsInt()
+  @Min(1)
+  contaPagamento?: number;
+
+  /**
+   * As parcelas da nota. Vindo preenchido, `valor` e `dataVencimento` acima
+   * valem só como a soma e a primeira data que a tela mostrou: quem manda são
+   * estas linhas, e cada uma vira uma conta a pagar no IXC.
+   *
+   * O teto de 60 é um ano e meio de parcelas mensais — acima disso é engano de
+   * digitação, e sessenta idas ao IXC já são uma espera longa.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(60)
+  @ValidateNested({ each: true })
+  @Type(() => ParcelaDaDespesaDto)
+  parcelas?: ParcelaDaDespesaDto[];
 }
