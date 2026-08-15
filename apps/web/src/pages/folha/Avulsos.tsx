@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type ReactNode } from 'react';
 import {
-  LeitorDeBoleto,
-  leitorDeBoletoSuportado,
-} from '../../components/LeitorDeBoleto';
+  LeitorDeCodigo,
+  leitorDeCodigoSuportado,
+} from '../../components/LeitorDeCodigo';
 import {
   Aviso,
   Bloco,
@@ -1493,7 +1493,7 @@ function FormularioPagamento({
                 {/* Cobrança com QR: o "copia e cola" lido substitui a chave
                     fixa da pessoa, porque é ele que carrega valor e destino
                     daquele pagamento. */}
-                {leitorDeBoletoSuportado() && (
+                {leitorDeCodigoSuportado() && (
                   <button
                     type="button"
                     onClick={() => setLendoQr(true)}
@@ -1563,7 +1563,7 @@ function FormularioPagamento({
           Cancelar
         </button>
         {lendoQr && (
-          <LeitorDeBoleto
+          <LeitorDeCodigo
             alvo="pix"
             onLido={(codigo) => {
               setChavePix(codigo);

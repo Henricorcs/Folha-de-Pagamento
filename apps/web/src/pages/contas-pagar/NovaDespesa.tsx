@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import {
-  LeitorDeBoleto,
-  leitorDeBoletoSuportado,
-} from '../../components/LeitorDeBoleto';
+  LeitorDeCodigo,
+  leitorDeCodigoSuportado,
+} from '../../components/LeitorDeCodigo';
 import { CampoDinheiro, Carregando, Janela, Selo } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
 import {
@@ -342,7 +342,7 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
               />
               {/* No celular, ler é mais rápido e erra menos que digitar 47
                   dígitos. O botão só existe onde o navegador sabe ler. */}
-              {leitorDeBoletoSuportado() && (
+              {leitorDeCodigoSuportado() && (
                 <button
                   type="button"
                   onClick={() => setLendo('boleto')}
@@ -389,7 +389,7 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
                 className="campo"
                 placeholder="Em branco usa a chave do fornecedor no IXC"
               />
-              {leitorDeBoletoSuportado() && (
+              {leitorDeCodigoSuportado() && (
                 <button
                   type="button"
                   onClick={() => setLendo('pix')}
@@ -532,7 +532,7 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
       )}
 
       {lendo && (
-        <LeitorDeBoleto
+        <LeitorDeCodigo
           alvo={lendo}
           onLido={(codigo) => {
             if (lendo === 'boleto') {
