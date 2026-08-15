@@ -23,6 +23,7 @@ interface Recorrente {
   proximoVencimento: string;
   diasDeAntecedencia: number;
   ativa: boolean;
+  apenasDiasUteis: boolean;
   ultimaGeracaoEm: string | null;
   ultimoErro: string | null;
 }
@@ -124,7 +125,7 @@ export function Recorrentes() {
     <Pagina>
       <CabecalhoPagina
         secao="Contas a pagar"
-        titulo="Despesas que se repetem"
+        titulo="Recorrentes"
         descricao="Serviços pagos todo mês. A conta de cada mês nasce sozinha no IXC poucos dias antes de vencer — e já aprovada."
         acoes={
           <button
@@ -252,6 +253,25 @@ export function Recorrentes() {
                         <div className="text-[11px] text-tinta-400">
                           {r.diasDeAntecedencia} dias antes de vencer
                         </div>
+                        {/* Só dias úteis: é aqui que se vê e se troca, porque
+                            muda a data que o fornecedor vai receber. */}
+                        <label
+                          className="mt-1 flex items-center gap-1.5 text-[11px] text-tinta-500"
+                          title="Vencimento em sábado, domingo ou feriado nacional anda para o próximo dia útil"
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-3.5 w-3.5 accent-brand-600"
+                            checked={r.apenasDiasUteis}
+                            onChange={(e) =>
+                              salvar.mutate({
+                                id: r.id,
+                                dados: { apenasDiasUteis: e.target.checked },
+                              })
+                            }
+                          />
+                          só dias úteis
+                        </label>
                       </td>
 
                       <td className="td text-right">

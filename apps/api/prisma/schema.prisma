@@ -738,6 +738,11 @@ model DespesaRecorrente {
   /// Com quantos dias de antecedência a conta nasce no IXC
   diasDeAntecedencia Int @default(5) @map("dias_de_antecedencia")
 
+  /// Vencimento que cai em sábado, domingo ou feriado nacional anda para o
+  /// próximo dia útil — o banco não paga nesses dias de qualquer forma.
+  /// Ligado por padrão, inclusive nas recorrentes que já existiam.
+  apenasDiasUteis Boolean @default(true) @map("apenas_dias_uteis")
+
   // --- Como a conta sai (o mesmo do lançamento avulso) ---
   contaContabil    Int?    @map("conta_contabil")
   contaPagamento   Int?    @map("conta_pagamento")

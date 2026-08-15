@@ -62,6 +62,9 @@ export class CriarRecorrenteDto {
   @IsOptional() @IsString() @MaxLength(40) tipoPagamentoIxc?: string;
 
   @IsOptional() @IsUUID() categoriaId?: string | null;
+
+  /** Vencimento em sabado, domingo ou feriado anda para o proximo dia util. */
+  @IsOptional() @IsBoolean() apenasDiasUteis?: boolean;
 }
 
 export class AtualizarRecorrenteDto {
@@ -100,4 +103,7 @@ export class AtualizarRecorrenteDto {
 
   /** Desligada, para de gerar. O que já gerou continua de pé. */
   @IsOptional() @IsBoolean() ativa?: boolean;
+
+  /** Vencimento em sábado, domingo ou feriado anda para o próximo dia útil. */
+  @IsOptional() @IsBoolean() apenasDiasUteis?: boolean;
 }

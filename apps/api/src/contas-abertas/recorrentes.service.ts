@@ -3,6 +3,7 @@ import { DespesaRecorrente, Prisma } from '@prisma/client';
 import { ContasPagarService } from '../financeiro/contas-pagar.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CategoriasService } from './categorias.service';
+import { proximoDiaUtil } from './dias-uteis';
 
 /** Uma recorrente com o que a tela mostra sem abrir o cadastro. */
 export interface RecorrenteComResumo {
@@ -75,6 +76,7 @@ export class RecorrentesService {
       contaPagamento?: number;
       tipoPagamentoIxc?: string;
       categoriaId?: string | null;
+      apenasDiasUteis?: boolean;
     },
     usuarioId?: string,
   ): Promise<DespesaRecorrente> {
@@ -90,6 +92,7 @@ export class RecorrentesService {
         contaPagamento: dados.contaPagamento ?? null,
         tipoPagamentoIxc: dados.tipoPagamentoIxc ?? null,
         categoriaId: dados.categoriaId ?? null,
+        apenasDiasUteis: dados.apenasDiasUteis ?? true,
         criadoPor: usuarioId ?? null,
       },
     });
@@ -113,6 +116,7 @@ export class RecorrentesService {
       tipoPagamentoIxc: string;
       categoriaId: string | null;
       ativa: boolean;
+      apenasDiasUteis: boolean;
     }>,
   ): Promise<DespesaRecorrente> {
     await this.buscar(id);
@@ -144,6 +148,9 @@ export class RecorrentesService {
           ? {}
           : { categoriaId: dados.categoriaId }),
         ...(dados.ativa === undefined ? {} : { ativa: dados.ativa }),
+        ...(dados.apenasDiasUteis === undefined
+          ? {}
+          : { apenasDiasUteis: dados.apenasDiasUteis }),
       },
     });
   }
@@ -185,7 +192,16 @@ export class RecorrentesService {
     };
 
     for (const r of pendentes) {
-      const nasceEm = diasAntes(r.proximoVencimento, r.diasDeAntecedencia);
+      /*
+       * O vencimento que vale é o dia útil: sábado, domingo e feriado nacional
+       * andam para o próximo dia em que o banco abre. Sem isso a conta nasce
+       * vencendo num dia em que ninguém pode pagá-la, e ela amanhece atrasada.
+       */
+      const vencimento = r.apenasDiasUteis
+        ? proximoDiaUtil(r.proximoVencimento)
+        : r.proximoVencimento;
+
+      const nasceEm = diasAntes(vencimento, r.diasDeAntecedencia);
       if (nasceEm > hoje) continue;
 
       try {
@@ -197,7 +213,7 @@ export class RecorrentesService {
             // Emitida hoje, vencendo no dia combinado: é o que a conta seria se
             // alguém a lançasse à mão nesta manhã.
             dataEmissao: hoje,
-            dataVencimento: r.proximoVencimento,
+            dataVencimento: vencimento,
             observacao: r.observacao,
             contaContabil: r.contaContabil ?? undefined,
             contaPagamento: r.contaPagamento ?? undefined,
@@ -223,8 +239,16 @@ export class RecorrentesService {
         await this.prisma.despesaRecorrente.update({
           where: { id: r.id },
           data: {
-            // Só agora o vencimento anda: se a criação tivesse falhado, o mês
-            // seguinte teria pulado uma conta sem ninguém notar.
+            /*
+             * Só agora o vencimento anda: se a criação tivesse falhado, o mês
+             * seguinte teria pulado uma conta sem ninguém notar.
+             *
+             * E anda a partir do dia combinado, não do dia útil que foi usado
+             * na conta: um vencimento dia 20 que caiu num sábado sai dia 22,
+             * mas o mês seguinte continua sendo dia 20. Contando do 22, a data
+             * escorregaria alguns dias por ano até não ter mais relação com o
+             * combinado com o fornecedor.
+             */
             proximoVencimento: mesSeguinte(r.proximoVencimento),
             ultimaGeracaoEm: new Date(),
             ultimoErro: null,

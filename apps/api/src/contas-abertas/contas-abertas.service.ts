@@ -279,43 +279,51 @@ export class ContasAbertasService {
     let quantidade = 0;
     let paginasLidas = 0;
 
-    for (let pagina = 1; pagina <= TETO_DE_PAGINAS_PAGAS; pagina++) {
-      const res = await this.ixc.list<Record<string, unknown>>('fn_apagar', {
-        // "P" é pago. A data do pagamento é conferida abaixo, registro a
-        // registro: base que ignore o filtro devolve tudo, e aí seria o mês
-        // inteiro somado errado.
-        qtype: 'fn_apagar.status',
-        query: 'P',
-        oper: '=',
-        page: pagina,
-        rp: 500,
-        sortname: 'fn_apagar.data_pagamento',
-        sortorder: 'desc',
-      });
-      paginasLidas = pagina;
-      if (res.registros.length === 0) break;
+    /*
+     * O status de conta paga varia por instalação do IXC: nesta base é "F"
+     * (34 mil títulos), e "P" não existe em nenhum. Procurar só por "P" era o
+     * que fazia o painel dizer "R$ 0,00 pago neste mês" com o mês inteiro já
+     * pago. Os dois são consultados; um título não tem dois status, então não
+     * há risco de contar duas vezes.
+     */
+    for (const status of ['F', 'P']) {
+      for (let pagina = 1; pagina <= TETO_DE_PAGINAS_PAGAS; pagina++) {
+        const res = await this.ixc.list<Record<string, unknown>>('fn_apagar', {
+          qtype: 'fn_apagar.status',
+          query: status,
+          oper: '=',
+          page: pagina,
+          rp: 500,
+          sortname: 'fn_apagar.data_pagamento',
+          sortorder: 'desc',
+        });
+        paginasLidas = Math.max(paginasLidas, pagina);
+        if (res.registros.length === 0) break;
 
-      let algumaDoMes = false;
-      let algumaMaisNova = false;
+        let algumaDoMes = false;
+        let algumaMaisNova = false;
 
-      for (const raw of res.registros) {
-        const situacao = lerSituacaoContaPagar(raw);
-        if (!situacao.pago || !situacao.dataPagamento) continue;
+        for (const raw of res.registros) {
+          // A situação é conferida registro a registro: base que ignore o
+          // filtro devolve tudo, e aí seria o mês inteiro somado errado.
+          const situacao = lerSituacaoContaPagar(raw);
+          if (!situacao.pago || !situacao.dataPagamento) continue;
 
-        const mesDoPagamento = mesDaData(situacao.dataPagamento);
-        if (mesDoPagamento === alvo) {
-          algumaDoMes = true;
-          total += situacao.valorPago;
-          quantidade += 1;
-        } else if (mesDoPagamento > alvo) {
-          // Pagamento posterior ao mês pedido: ainda não chegamos nele.
-          algumaMaisNova = true;
+          const mesDoPagamento = mesDaData(situacao.dataPagamento);
+          if (mesDoPagamento === alvo) {
+            algumaDoMes = true;
+            total += situacao.valorPago;
+            quantidade += 1;
+          } else if (mesDoPagamento > alvo) {
+            // Pagamento posterior ao mês pedido: ainda não chegamos nele.
+            algumaMaisNova = true;
+          }
         }
-      }
 
-      // A página inteira ficou antes do mês pedido: como a ordem é da mais
-      // recente para a mais antiga, o que vem depois é mais antigo ainda.
-      if (!algumaDoMes && !algumaMaisNova) break;
+        // A página inteira ficou antes do mês pedido: como a ordem é da mais
+        // recente para a mais antiga, o que vem depois é mais antigo ainda.
+        if (!algumaDoMes && !algumaMaisNova) break;
+      }
     }
 
     if (paginasLidas >= TETO_DE_PAGINAS_PAGAS) {

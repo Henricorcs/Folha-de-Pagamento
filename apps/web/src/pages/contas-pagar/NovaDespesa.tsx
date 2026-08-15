@@ -105,6 +105,8 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
 
   /** Repetir todo mês: esta conta vira uma regra, e as próximas nascem sozinhas. */
   const [recorrente, setRecorrente] = useState(false);
+  /** Vencimento em fim de semana ou feriado anda para o proximo dia util. */
+  const [soDiasUteis, setSoDiasUteis] = useState(true);
 
   // --- Parcelamento ---
   const [parcelado, setParcelado] = useState(false);
@@ -200,6 +202,7 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
           contaPagamento: contaPagamento ? Number(contaPagamento) : undefined,
           tipoPagamentoIxc: tipoPagamento.trim() || undefined,
           categoriaId: categoriaId || undefined,
+          apenasDiasUteis: soDiasUteis,
         });
       }
 
@@ -685,14 +688,26 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
               Repetir todo mês — internet, aluguel, contabilidade
             </label>
             {recorrente && (
-              <p className="ajuda">
-                Esta conta é lançada agora, vencendo em{' '}
-                {vencimento ? formatarDia(vencimento) : '—'}. Daí em diante, todo
-                mês uma nova nasce sozinha no IXC{' '}
-                <strong>5 dias antes de vencer</strong>, com o mesmo valor e a
-                mesma categoria. Dá para mudar o valor, desligar ou apagar a
-                repetição na aba Recorrentes.
-              </p>
+              <div className="mt-1 rounded-xl border border-tinta-100 p-3">
+                <p className="text-xs leading-relaxed text-tinta-500">
+                  Esta conta é lançada agora, vencendo em{' '}
+                  {vencimento ? formatarDia(vencimento) : '—'}. Daí em diante,
+                  todo mês uma nova nasce sozinha no IXC{' '}
+                  <strong>5 dias antes de vencer</strong>, com o mesmo valor e a
+                  mesma categoria. Dá para mudar o valor, desligar ou apagar em
+                  Recorrentes.
+                </p>
+                <label className="mt-2 flex items-center gap-2 text-sm text-tinta-700">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-brand-600"
+                    checked={soDiasUteis}
+                    onChange={(e) => setSoDiasUteis(e.target.checked)}
+                  />
+                  Só em dia útil — vencimento em fim de semana ou feriado
+                  nacional passa para o próximo dia em que o banco abre
+                </label>
+              </div>
             )}
           </div>
         )}

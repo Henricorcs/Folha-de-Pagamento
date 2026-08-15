@@ -195,6 +195,37 @@ export function Painel() {
             </div>
           )}
 
+          {/* O fechamento do mês tem cartão próprio: são dois números que se
+              lê de longe, e embaixo do gráfico eles viravam legenda de eixo.
+              Os dois lados saem do contas a pagar do IXC, que é por onde passa
+              todo o dinheiro da empresa — a folha inclusive. */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Indicador
+              rotulo="A pagar até o fim do mês"
+              valor={formatBRL(somar(aPagarNoMes))}
+              detalhe={`${aPagarNoMes.length} título(s), o atraso incluído`}
+            />
+            <Indicador
+              rotulo="Já pago neste mês"
+              valor={
+                pagas.isLoading
+                  ? '…'
+                  : pagas.data
+                    ? formatBRL(pagas.data.total)
+                    : '—'
+              }
+              detalhe={
+                pagas.error
+                  ? 'não deu para ler do IXC'
+                  : pagas.data
+                    ? `${pagas.data.quantidade} título(s) baixados no IXC${
+                        pagas.data.completo ? '' : ' — leitura parcial'
+                      }`
+                    : 'lendo o IXC…'
+              }
+            />
+          </div>
+
           <Bloco titulo="Por urgência" className="surgir surgir-1">
             <FaixaDeUrgencia contas={contas} />
           </Bloco>
@@ -206,48 +237,10 @@ export function Painel() {
               className="surgir surgir-2 xl:col-span-3"
             >
               <AgendaDosDias dias={agenda} />
-
-              {/* O fechamento do mês, embaixo da agenda: o que ainda sai e o
-                  que já saiu. Os dois lados vêm do contas a pagar do IXC, que é
-                  por onde passa tudo — inclusive salário, diária e avulso. */}
-              <div className="mt-3 grid grid-cols-2 gap-3 border-t border-tinta-100 pt-3">
-                <div>
-                  <div className="text-[11px] text-tinta-400">
-                    A pagar até o fim do mês
-                  </div>
-                  <div className="valor text-lg">
-                    {formatBRL(somar(aPagarNoMes))}
-                  </div>
-                  <div className="text-[11px] text-tinta-400">
-                    {aPagarNoMes.length} título(s), o atraso incluído
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[11px] text-tinta-400">
-                    Já pago neste mês
-                  </div>
-                  <div className="valor text-lg">
-                    {pagas.isLoading
-                      ? '…'
-                      : pagas.data
-                        ? formatBRL(pagas.data.total)
-                        : '—'}
-                  </div>
-                  <div className="text-[11px] text-tinta-400">
-                    {pagas.error
-                      ? 'não deu para ler do IXC'
-                      : pagas.data
-                        ? `${pagas.data.quantidade} título(s)${pagas.data.completo ? '' : ' — leitura parcial'}`
-                        : 'lendo o IXC…'}
-                  </div>
-                </div>
-              </div>
-
               <p className="ajuda">
                 Cada coluna é um dia. Sábado e domingo aparecem apagados: o
                 banco não paga neles, então o que vence no fim de semana precisa
-                sair antes. Tudo aqui é o que passa pelo contas a pagar do IXC —
-                a folha inclusive.
+                sair antes.
               </p>
             </Bloco>
 

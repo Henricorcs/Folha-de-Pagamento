@@ -26,6 +26,7 @@ export function TornarRecorrente({
 }) {
   const queryClient = useQueryClient();
   const [apagarIrmas, setApagarIrmas] = useState(true);
+  const [soDiasUteis, setSoDiasUteis] = useState(true);
   const [feito, setFeito] = useState<{ apagadas: number } | null>(null);
 
   /**
@@ -56,6 +57,7 @@ export function TornarRecorrente({
         observacao: conta.observacao || conta.fornecedor.nome,
         proximoVencimento,
         categoriaId: conta.classificacao?.id ?? undefined,
+        apenasDiasUteis: soDiasUteis,
       });
 
       let apagadas = 0;
@@ -111,6 +113,17 @@ export function TornarRecorrente({
           no IXC <strong>5 dias antes de vencer</strong>, já aprovada — a
           próxima vencendo em {formatarDia(proximoVencimento)}.
         </p>
+
+        <label className="mt-3 flex items-center gap-2 text-sm text-tinta-700">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-brand-600"
+            checked={soDiasUteis}
+            onChange={(e) => setSoDiasUteis(e.target.checked)}
+          />
+          Só em dia útil — vencimento em fim de semana ou feriado nacional passa
+          para o próximo dia em que o banco abre
+        </label>
       </div>
 
       {/* As irmãs futuras: o ponto que liga as duas pontas. */}
@@ -160,7 +173,7 @@ export function TornarRecorrente({
 
       <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
         <span className="mr-auto text-xs text-tinta-400">
-          Dá para mudar o valor, desligar ou apagar em "Repetem todo mês".
+          Dá para mudar o valor, desligar ou apagar em Recorrentes.
         </span>
         <button onClick={onFechar} className="btn btn-neutro">
           Cancelar
