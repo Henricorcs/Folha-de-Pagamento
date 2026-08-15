@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   FormaPagamento,
+  OrigemLancamento,
   StatusContaPagar,
   TipoLancamento,
 } from '@prisma/client';
@@ -78,10 +79,13 @@ export class DashboardService {
       // data de emissão.
       this.prisma.contaPagar.findMany({
         where: {
-          // Despesa lançada à mão (energia, aluguel, material) é conta a pagar
-          // da empresa, não custo de folha. Ela nasce sem competência, então
-          // entraria pela data de emissão e inflaria justamente o número que
-          // este painel existe para responder: quanto custou a folha do mês.
+          // Nada que tenha nascido no Contas a Pagar entra na conta da folha:
+          // nem a despesa lançada à mão (energia, aluguel, material), nem o
+          // pagamento avulso a um fornecedor do IXC. Todos nascem sem
+          // competência, então entrariam pela data de emissão e inflariam
+          // justamente o número que este painel existe para responder: quanto
+          // custou a folha do mês.
+          origem: OrigemLancamento.FOLHA,
           tipo: { not: TipoLancamento.DESPESA },
           OR: [
             { competencia: { in: competenciasLidas } },
@@ -112,7 +116,10 @@ export class DashboardService {
         },
       }),
       this.prisma.pagamentoAvulso.findMany({
-        where: { data: { gte: inicio, lt: fim } },
+        where: {
+          origem: OrigemLancamento.FOLHA,
+          data: { gte: inicio, lt: fim },
+        },
         select: {
           data: true,
           valor: true,
@@ -124,8 +131,14 @@ export class DashboardService {
         },
       }),
       this.impostos.resumo(meses),
+      // "Últimos lançamentos": só o que a folha gerou. Um pagamento feito no
+      // Contas a Pagar aparecia aqui no topo, empurrando para fora justamente
+      // o que esta lista existe para mostrar.
       this.prisma.contaPagar.findMany({
-        where: { tipo: { not: TipoLancamento.DESPESA } },
+        where: {
+          origem: OrigemLancamento.FOLHA,
+          tipo: { not: TipoLancamento.DESPESA },
+        },
         orderBy: { createdAt: 'desc' },
         take: 8,
       }),

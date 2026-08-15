@@ -1,5 +1,6 @@
 import {
   FormaPagamento,
+  OrigemLancamento,
   StatusContaPagar,
   TipoLancamento,
 } from '@prisma/client';
@@ -582,6 +583,34 @@ describe('gasto com vendas', () => {
 
     const r = await service.resumo(COMP, 1);
     expect(r.vendas.serie[0]).toMatchObject({ funcionarios: 0, total: 0 });
+  });
+});
+
+/**
+ * O painel da folha responde "quanto custou a folha deste mês". Pagamento
+ * feito no módulo Contas a Pagar não é folha, e apareceu aqui: no custo do
+ * mês, na fatia de avulsos e no topo dos últimos lançamentos. O filtro fica
+ * na consulta, antes de qualquer soma — é o único lugar onde não dá para
+ * esquecer de aplicá-lo depois.
+ */
+describe('nada do contas a pagar entra na folha', () => {
+  it('as três consultas do painel pedem só o que é da folha', async () => {
+    const { service, prisma } = montarServico({});
+
+    await service.resumo(COMP, 1);
+
+    const [series, ultimos] = prisma.contaPagar.findMany.mock.calls;
+    expect(series[0].where).toEqual(
+      expect.objectContaining({ origem: OrigemLancamento.FOLHA }),
+    );
+    expect(ultimos[0].where).toEqual(
+      expect.objectContaining({ origem: OrigemLancamento.FOLHA }),
+    );
+
+    const [avulsos] = prisma.pagamentoAvulso.findMany.mock.calls;
+    expect(avulsos[0].where).toEqual(
+      expect.objectContaining({ origem: OrigemLancamento.FOLHA }),
+    );
   });
 });
 

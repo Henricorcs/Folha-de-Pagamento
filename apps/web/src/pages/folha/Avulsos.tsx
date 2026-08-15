@@ -134,10 +134,17 @@ export function Avulsos({ doIxc = false }: { doIxc?: boolean } = {}) {
   const [aberto, setAberto] = useState<string | null>(null);
   const [pagando, setPagando] = useState<BeneficiarioAvulso | null>(null);
 
+  /**
+   * De qual lado esta tela está. A folha e o contas a pagar dividem as mesmas
+   * tabelas, e sem dizer o módulo a folha listaria também os fornecedores do
+   * IXC pagos do outro lado — que não são custo dela.
+   */
+  const modulo = doIxc ? 'contas-pagar' : 'folha';
+
   const lista = useQuery({
-    queryKey: ['avulsos', busca, verInativos],
+    queryKey: ['avulsos', modulo, busca, verInativos],
     queryFn: async () => {
-      const params: Record<string, string> = {};
+      const params: Record<string, string> = { modulo };
       if (busca) params.busca = busca;
       if (verInativos) params.todos = 'true';
       return (
@@ -201,11 +208,11 @@ export function Avulsos({ doIxc = false }: { doIxc?: boolean } = {}) {
   });
 
   const pagamentos = useQuery({
-    queryKey: ['pagamentos-avulsos', aberto],
+    queryKey: ['pagamentos-avulsos', modulo, aberto],
     queryFn: async () =>
       (
         await api.get<PagamentoAvulso[]>('/avulsos/pagamentos', {
-          params: { beneficiarioId: aberto },
+          params: { beneficiarioId: aberto, modulo },
         })
       ).data,
     enabled: !!aberto,

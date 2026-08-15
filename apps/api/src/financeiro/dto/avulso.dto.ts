@@ -145,6 +145,9 @@ export class PagarAvulsoDto {
 
 export class QueryPagamentosAvulsosDto {
   @IsOptional() @IsString() beneficiarioId?: string;
+
+  /** "contas-pagar" para ver os de lá; qualquer outra coisa, os da folha. */
+  @IsOptional() @IsString() modulo?: string;
 }
 
 /** Fornecedor do IXC escolhido na lista, para ganhar cadastro aqui. */

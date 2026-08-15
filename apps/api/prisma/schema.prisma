@@ -304,6 +304,19 @@ enum TipoLancamento {
   DESPESA
 }
 
+/// De qual módulo o lançamento nasceu.
+///
+/// A folha e o contas a pagar dividem tabelas — as duas geram `fn_apagar`, as
+/// duas pagam gente de fora — e o que se paga a um fornecedor pelo módulo
+/// Contas a Pagar apareceu nos números da folha, inflando o custo do mês e os
+/// relatórios que saem dele. Esta coluna é a divisa: o que nasce em
+/// CONTAS_PAGAR não entra em nenhuma tela, soma ou relatório da folha, seja
+/// qual for o tipo do lançamento.
+enum OrigemLancamento {
+  FOLHA
+  CONTAS_PAGAR
+}
+
 model Lancamento {
   id String @id @default(uuid())
 
@@ -462,6 +475,10 @@ model BeneficiarioAvulso {
   observacoes String?
   ativo       Boolean @default(true)
 
+  /// Onde este cadastro nasceu. O criado a partir da lista de fornecedores do
+  /// IXC é do Contas a Pagar — a folha não o lista nem soma o que ele recebeu.
+  origem OrigemLancamento @default(FOLHA)
+
   idFornecedorIxc     Int?    @map("id_fornecedor_ixc")
   cidadeIxc           Int?    @map("cidade_ixc")
   /// Ligado quando a pessoa, avisada de que já existe fornecedor com aquele
@@ -488,6 +505,9 @@ model PagamentoAvulso {
 
   beneficiario   BeneficiarioAvulso @relation(fields: [beneficiarioId], references: [id], onDelete: Cascade)
   beneficiarioId String             @map("beneficiario_id")
+
+  /// Módulo em que este pagamento foi feito. CONTAS_PAGAR fica fora da folha.
+  origem OrigemLancamento @default(FOLHA)
 
   data          DateTime
   /// Total pago = serviço + comissão de venda + extra, editável na tela
@@ -524,6 +544,7 @@ model PagamentoAvulso {
 
   @@index([beneficiarioId])
   @@index([data])
+  @@index([origem])
   @@map("pagamentos_avulsos")
 }
 
@@ -787,6 +808,9 @@ model ContaPagar {
   competencia String?        @map("competencia") // "AAAA-MM" (null p/ avulso sem competência)
   tipo        TipoLancamento // SALARIO | ADIANTAMENTO | BONUS | AVULSO
 
+  /// Módulo de onde ela veio. CONTAS_PAGAR não aparece em nada da folha.
+  origem OrigemLancamento @default(FOLHA)
+
   // Beneficiário: funcionário OU avulso (exatamente um preenchido)
   funcionario   Funcionario? @relation(fields: [funcionarioId], references: [id], onDelete: SetNull)
   funcionarioId String?      @map("funcionario_id")
@@ -873,6 +897,7 @@ model ContaPagar {
   @@index([funcionarioId])
   @@index([diaristaId])
   @@index([idFnApagarIxc])
+  @@index([origem])
   @@map("contas_pagar")
 }
 

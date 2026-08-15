@@ -10,6 +10,7 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
+import { OrigemLancamento } from '@prisma/client';
 import type { Request } from 'express';
 import { AvulsosService } from './avulsos.service';
 import {
@@ -25,6 +26,19 @@ function usuarioId(req: Request): string | undefined {
   return (req.user as { id?: string } | undefined)?.id;
 }
 
+/**
+ * De qual módulo a tela está perguntando.
+ *
+ * O padrão é a folha, e de propósito: quem não disser nada vê o que sempre viu.
+ * Só a tela de Contas a Pagar manda `modulo=contas-pagar`, e é ela que enxerga
+ * os cadastros e pagamentos daquele lado.
+ */
+function origemDoModulo(modulo?: string): OrigemLancamento {
+  return modulo === 'contas-pagar'
+    ? OrigemLancamento.CONTAS_PAGAR
+    : OrigemLancamento.FOLHA;
+}
+
 @Controller('avulsos')
 export class AvulsosController {
   constructor(private readonly service: AvulsosService) {}
@@ -34,8 +48,13 @@ export class AvulsosController {
   listarBeneficiarios(
     @Query('busca') busca?: string,
     @Query('todos') todos?: string,
+    @Query('modulo') modulo?: string,
   ) {
-    return this.service.listarBeneficiarios(busca, todos === 'true');
+    return this.service.listarBeneficiarios(
+      busca,
+      todos === 'true',
+      origemDoModulo(modulo),
+    );
   }
 
   /**
@@ -97,7 +116,10 @@ export class AvulsosController {
   // --- Pagamentos ---
   @Get('pagamentos')
   listarPagamentos(@Query() q: QueryPagamentosAvulsosDto) {
-    return this.service.listarPagamentos(q.beneficiarioId);
+    return this.service.listarPagamentos(
+      q.beneficiarioId,
+      origemDoModulo(q.modulo),
+    );
   }
 
   /** Paga alguém de fora da folha: conta a pagar no IXC ou saída do caixa. */

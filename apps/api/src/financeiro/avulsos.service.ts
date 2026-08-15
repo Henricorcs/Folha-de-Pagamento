@@ -7,6 +7,7 @@ import {
 import {
   BeneficiarioAvulso,
   FormaPagamento,
+  OrigemLancamento,
   PagamentoAvulso,
   Prisma,
   StatusContaPagar,
@@ -107,11 +108,19 @@ export class AvulsosService {
   // -------------------------------------------------------------------------
   // Cadastro
   // -------------------------------------------------------------------------
+  /**
+   * Os cadastros de um módulo só.
+   *
+   * A folha e o contas a pagar dividem esta tabela, e quem foi puxado da lista
+   * de fornecedores do IXC é do contas a pagar: não é gente que a folha
+   * registrou, e vê-lo na tela da folha é o começo de somá-lo no custo do mês.
+   */
   async listarBeneficiarios(
     busca?: string,
     todos = false,
+    origem: OrigemLancamento = OrigemLancamento.FOLHA,
   ): Promise<BeneficiarioComResumo[]> {
-    const where: Prisma.BeneficiarioAvulsoWhereInput = {};
+    const where: Prisma.BeneficiarioAvulsoWhereInput = { origem };
     if (!todos) where.ativo = true;
     if (busca) {
       where.OR = [
@@ -258,6 +267,9 @@ export class AvulsosService {
         // Já existe lá: o pagamento usa este código em vez de abrir outro
         // fornecedor com o mesmo CPF.
         idFornecedorIxc: doIxc.idFornecedor,
+        // Só a tela do Contas a Pagar cria cadastro assim, pela lista de
+        // fornecedores do IXC. A folha não lista quem entrou por aqui.
+        origem: OrigemLancamento.CONTAS_PAGAR,
       },
     });
   }
@@ -392,9 +404,12 @@ export class AvulsosService {
   // -------------------------------------------------------------------------
   // Pagamentos
   // -------------------------------------------------------------------------
-  listarPagamentos(beneficiarioId?: string) {
+  listarPagamentos(
+    beneficiarioId?: string,
+    origem: OrigemLancamento = OrigemLancamento.FOLHA,
+  ) {
     return this.prisma.pagamentoAvulso.findMany({
-      where: beneficiarioId ? { beneficiarioId } : undefined,
+      where: { origem, ...(beneficiarioId ? { beneficiarioId } : {}) },
       orderBy: [{ data: 'desc' }, { createdAt: 'desc' }],
       take: 200,
       include: {
@@ -468,6 +483,10 @@ export class AvulsosService {
 
     const base = {
       beneficiarioId,
+      // A origem vem do cadastro, não da tela: quem foi puxado da lista de
+      // fornecedores do IXC é do Contas a Pagar, e o pagamento a ele também —
+      // por qualquer caminho que se chegue aqui.
+      origem: beneficiario.origem,
       data: dto.data ? new Date(dto.data) : hojeUtc(),
       valor: new Prisma.Decimal(valor),
       vendas: partes.vendas ?? 0,
@@ -534,6 +553,9 @@ export class AvulsosService {
           {
             beneficiarioAvulsoId: base.beneficiarioId,
             tipo: TipoLancamento.AVULSO,
+            // A conta a pagar herda a origem do pagamento: é ela que aparece
+            // em "Últimos lançamentos" e que soma no custo do mês da folha.
+            origem: base.origem,
             valor: Number(base.valor),
             contaContabil: base.contaContabil,
             ...(emMaos

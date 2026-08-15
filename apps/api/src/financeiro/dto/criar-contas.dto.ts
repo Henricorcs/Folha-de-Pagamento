@@ -11,7 +11,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { TipoLancamento } from '@prisma/client';
+import { OrigemLancamento, TipoLancamento } from '@prisma/client';
 
 export class ItemContaPagarDto {
   @IsOptional() @IsString() funcionarioId?: string;
@@ -20,6 +20,13 @@ export class ItemContaPagarDto {
 
   @IsEnum(TipoLancamento)
   tipo!: TipoLancamento;
+
+  /**
+   * De qual módulo esta conta nasceu. Omitido = FOLHA, que é quem chama este
+   * caminho na maioria das vezes (salário, adiantamento, bônus, diária).
+   * CONTAS_PAGAR some de tudo que é da folha.
+   */
+  @IsOptional() @IsEnum(OrigemLancamento) origem?: OrigemLancamento;
 
   @IsNumber() @Min(0.01) valor!: number;
 

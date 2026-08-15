@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import {
   ContaPagar,
+  OrigemLancamento,
   Prisma,
   StatusContaPagar,
   TipoLancamento,
@@ -381,6 +382,9 @@ export class ContasPagarService {
     const conta = await this.prisma.contaPagar.create({
       data: {
         tipo: TipoLancamento.DESPESA,
+        // Despesa só existe no Contas a Pagar — não há caminho da folha até
+        // aqui, e marcar na origem também evita depender só do tipo.
+        origem: OrigemLancamento.CONTAS_PAGAR,
         competencia: null,
         beneficiarioNome: dados.fornecedorNome,
         idFornecedorIxc: dados.idFornecedorIxc,
@@ -488,6 +492,9 @@ export class ContasPagarService {
       data: {
         competencia: item.competencia ?? null,
         tipo: item.tipo,
+        // Quem não diz de onde veio é a folha: são os caminhos antigos
+        // (salário, adiantamento, bônus, diária), e todos são dela.
+        origem: item.origem ?? OrigemLancamento.FOLHA,
         funcionarioId: item.funcionarioId ?? null,
         beneficiarioAvulsoId: item.beneficiarioAvulsoId ?? null,
         diaristaId: item.diaristaId ?? null,
@@ -866,14 +873,16 @@ export class ContasPagarService {
   /**
    * As contas da folha — a tela de Pagamentos do módulo Folha de Pagamento.
    *
-   * Despesa lançada à mão fica de fora: ela é conta a pagar da empresa, não
-   * pagamento a quem trabalha nela, e apareceu aqui uma vez misturada com as
-   * diárias e os salários. Nesta tela se aprova e se reprova o que a folha
-   * gerou; conta de fornecedor entrando no meio bagunça a conferência do mês e
-   * os relatórios que saem dela. O lugar dela é o módulo Contas a Pagar.
+   * Nada que tenha nascido no Contas a Pagar entra aqui, seja qual for o tipo:
+   * despesa lançada à mão, pagamento avulso a um fornecedor do IXC, o que for.
+   * Nesta tela se aprova e se reprova o que a folha gerou; conta de fornecedor
+   * entrando no meio bagunça a conferência do mês e os relatórios que saem
+   * dela. O filtro por tipo continua porque despesa nasceu antes da coluna de
+   * origem existir e os dois caminhos se reforçam.
    */
   async listar(q: QueryContasPagarDto) {
     const where: Prisma.ContaPagarWhereInput = {
+      origem: OrigemLancamento.FOLHA,
       tipo: { not: TipoLancamento.DESPESA },
     };
     if (q.status) where.status = q.status;
