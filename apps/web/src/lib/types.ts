@@ -361,6 +361,35 @@ export interface BeneficiarioComResumo {
   pendentesNoCaixa: number;
 }
 
+/**
+ * Um fornecedor do cadastro do IXC, como a tela de pagamentos avulsos do
+ * módulo Contas a Pagar o mostra: o que existe lá, mais o que esta casa já
+ * sabe sobre ele.
+ */
+export interface FornecedorParaPagar {
+  idFornecedor: number;
+  nome: string;
+  nomeFantasia: string | null;
+  cpfCnpj: string | null;
+  tipoPessoa: string | null;
+  email: string | null;
+  telefone: string | null;
+  cidadeIxc: number | null;
+  ativo: boolean;
+  /** Cadastro daqui, quando já existe. Null = nunca recebeu por este app. */
+  beneficiarioId: string | null;
+  quantidadePagamentos: number;
+  ultimoPagamento: string | null;
+}
+
+export interface PaginaFornecedoresParaPagar {
+  itens: FornecedorParaPagar[];
+  /** Quantos há no filtro inteiro no IXC, não nesta página. */
+  total: number;
+  page: number;
+  porPagina: number;
+}
+
 export interface PagamentoAvulso {
   id: string;
   beneficiarioId: string;

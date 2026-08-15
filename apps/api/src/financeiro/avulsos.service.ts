@@ -49,6 +49,24 @@ export interface BeneficiarioComResumo {
   pendentesNoCaixa: number;
 }
 
+/**
+ * Um fornecedor do IXC do jeito que a tela de pagamentos avulsos precisa vê-lo:
+ * o cadastro de lá, mais o que esta casa já sabe sobre ele.
+ */
+export interface FornecedorParaPagar extends FornecedorNoIxc {
+  /** Cadastro daqui, quando já existe. Null = nunca recebeu por este app. */
+  beneficiarioId: string | null;
+  quantidadePagamentos: number;
+  ultimoPagamento: Date | null;
+}
+
+export interface PaginaFornecedoresParaPagar {
+  itens: FornecedorParaPagar[];
+  total: number;
+  page: number;
+  porPagina: number;
+}
+
 /** Cadastro salvo, mais o que não deu certo do lado do IXC (se algo). */
 export interface BeneficiarioSalvo {
   beneficiario: BeneficiarioAvulso;
@@ -146,6 +164,102 @@ export class AvulsosService {
     const b = await this.prisma.beneficiarioAvulso.findUnique({ where: { id } });
     if (!b) throw new NotFoundException('Beneficiário não encontrado');
     return b;
+  }
+
+  /**
+   * O cadastro de fornecedores do IXC, página a página, com o que esta casa já
+   * sabe de cada um: quem já recebeu por aqui vem com o cadastro daqui junto e
+   * o histórico à mão.
+   *
+   * É a lista que a tela de pagamentos avulsos abre mostrando — quem vai pagar
+   * procura a pessoa pelo nome, e ela já existe no IXC.
+   */
+  async listarFornecedoresDoIxc(opts: {
+    busca?: string;
+    page?: number;
+    porPagina?: number;
+  }): Promise<PaginaFornecedoresParaPagar> {
+    const pagina = await this.fornecedores.listarDoIxc(opts);
+    const ids = pagina.itens.map((f) => f.idFornecedor);
+
+    // Uma consulta só para a página inteira: um findUnique por linha seriam
+    // vinte idas ao banco para desenhar uma tabela.
+    const conhecidos = ids.length
+      ? await this.prisma.beneficiarioAvulso.findMany({
+          where: { idFornecedorIxc: { in: ids } },
+          select: {
+            id: true,
+            idFornecedorIxc: true,
+            pagamentos: { select: { data: true } },
+          },
+        })
+      : [];
+
+    const porFornecedor = new Map(
+      conhecidos.map((b) => [b.idFornecedorIxc, b]),
+    );
+
+    return {
+      ...pagina,
+      itens: pagina.itens.map((f) => {
+        const daqui = porFornecedor.get(f.idFornecedor);
+        return {
+          ...f,
+          beneficiarioId: daqui?.id ?? null,
+          quantidadePagamentos: daqui?.pagamentos.length ?? 0,
+          ultimoPagamento:
+            daqui?.pagamentos.reduce<Date | null>(
+              (maior, p) => (!maior || p.data > maior ? p.data : maior),
+              null,
+            ) ?? null,
+        };
+      }),
+    };
+  }
+
+  /**
+   * O cadastro daqui para um fornecedor do IXC, criando-o se ainda não houver.
+   *
+   * É o que deixa pagar alguém direto da lista do IXC sem preencher cadastro
+   * antes: o que o IXC já sabe (nome, documento, chave PIX, cidade) é copiado
+   * para cá, e o vínculo pelo `idFornecedorIxc` garante que a segunda vez ache
+   * o mesmo cadastro em vez de criar outro.
+   */
+  async garantirBeneficiarioDoIxc(
+    idFornecedorIxc: number,
+  ): Promise<BeneficiarioAvulso> {
+    const existente = await this.prisma.beneficiarioAvulso.findFirst({
+      where: { idFornecedorIxc },
+    });
+    if (existente) return existente;
+
+    const doIxc = await this.fornecedores.buscarNoIxcPorId(idFornecedorIxc);
+    if (!doIxc) {
+      throw new NotFoundException(
+        `Fornecedor ${idFornecedorIxc} não foi encontrado no IXC.`,
+      );
+    }
+
+    this.logger.log(
+      `Cadastro criado a partir do fornecedor ${idFornecedorIxc} do IXC: ${doIxc.nome}`,
+    );
+    return this.prisma.beneficiarioAvulso.create({
+      data: {
+        nome: doIxc.nome,
+        cpfCnpj: doIxc.cpfCnpj,
+        // O IXC guarda "E" (estrangeiro) além de F e J; o cadastro daqui só
+        // conhece pessoa física e jurídica, e quem não é jurídica é física.
+        tipoPessoa: doIxc.tipoPessoa === 'J' ? 'J' : 'F',
+        telefone: doIxc.telefone,
+        email: doIxc.email,
+        chavePix: doIxc.chavePix,
+        tipoChavePix: doIxc.tipoChavePix,
+        cidadeIxc: doIxc.cidadeIxc,
+        // Já existe lá: o pagamento usa este código em vez de abrir outro
+        // fornecedor com o mesmo CPF.
+        idFornecedorIxc: doIxc.idFornecedor,
+      },
+    });
   }
 
   /**

@@ -109,8 +109,12 @@ export default function App() {
         <Route path="painel" element={<ContasPagarPainel />} />
         {/* A mesma tela de avulsos da folha: é pagamento da empresa e é
             lançamento da folha, e obrigar a trocar de módulo no meio do
-            trabalho custaria mais que o caminho repetido. */}
-        <Route path="avulsos" element={<Avulsos />} />
+            trabalho custaria mais que o caminho repetido.
+
+            Aqui ela abre pelo cadastro de fornecedores do IXC: neste módulo se
+            paga qualquer um deles, e não só quem esta casa já cadastrou. Na
+            folha continua sendo a lista de cá. */}
+        <Route path="avulsos" element={<Avulsos doIxc />} />
         <Route path="categorias" element={<ContasPagarCategorias />} />
       </Route>
 

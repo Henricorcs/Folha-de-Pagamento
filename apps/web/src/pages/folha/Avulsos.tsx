@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
   Aviso,
   Bloco,
@@ -21,6 +21,7 @@ import type {
   BeneficiarioSalvo,
   ConsultaCpfCnpj,
   FormaPagamento,
+  PaginaFornecedoresParaPagar,
   PagamentoAvulso,
 } from '../../lib/types';
 
@@ -48,6 +49,20 @@ type EscolhaFornecedor =
 
 function hojeISO(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+/** Primeira linha desta página, contada de 1 — o "X" de "X–Y de 3.238". */
+function inicioDaPagina(p: PaginaFornecedoresParaPagar): number {
+  return (p.page - 1) * p.porPagina + 1;
+}
+
+/**
+ * Última linha desta página. Sai da contagem real do que veio, e não de
+ * `page × porPagina`: a última página quase nunca vem cheia, e prometer 3.250
+ * de 3.238 seria dizer que existe o que não existe.
+ */
+function fimDaPagina(p: PaginaFornecedoresParaPagar): number {
+  return (p.page - 1) * p.porPagina + p.itens.length;
 }
 
 /**
@@ -88,10 +103,19 @@ function partesDoPagamento(p: PagamentoAvulso): string[] {
   return partes;
 }
 
-export function Avulsos() {
+/**
+ * @param doIxc Abre pela lista de fornecedores do IXC em vez de pelos
+ * cadastrados aqui. É como a tela aparece no módulo Contas a Pagar: quem paga
+ * alguém de fora da folha procura a pessoa pelo nome, e ela já está cadastrada
+ * no IXC — o cadastro daqui nasce sozinho na hora do primeiro pagamento. No
+ * módulo Folha a tela continua sendo a lista de quem esta casa cadastrou.
+ */
+export function Avulsos({ doIxc = false }: { doIxc?: boolean } = {}) {
   const qc = useQueryClient();
   const [busca, setBusca] = useState('');
   const [verInativos, setVerInativos] = useState(false);
+  /** Página da lista do IXC (só no modo `doIxc`). */
+  const [pagina, setPagina] = useState(1);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [erro, setErro] = useState(false);
   /** Cadastro aberto: null = fechado, "novo" = novo, id = editando. */
@@ -115,6 +139,58 @@ export function Avulsos() {
           params,
         })
       ).data;
+    },
+  });
+
+  // A busca só vai ao IXC depois que se para de digitar: cada tecla aqui seria
+  // uma consulta a um sistema lento que não é nosso.
+  const [buscaIxc, setBuscaIxc] = useState('');
+  useEffect(() => {
+    if (!doIxc) return;
+    const id = setTimeout(() => {
+      setBuscaIxc(busca.trim());
+      setPagina(1);
+    }, 400);
+    return () => clearTimeout(id);
+  }, [busca, doIxc]);
+
+  const fornecedoresIxc = useQuery({
+    queryKey: ['fornecedores-ixc-avulsos', buscaIxc, pagina],
+    queryFn: async () =>
+      (
+        await api.get<PaginaFornecedoresParaPagar>('/avulsos/fornecedores-ixc', {
+          params: { busca: buscaIxc || undefined, page: pagina, porPagina: 25 },
+        })
+      ).data,
+    enabled: doIxc,
+    // O IXC demora e às vezes não responde: repetir por baixo dobraria a espera
+    // com a tela parada, sem dizer nada a quem está esperando.
+    retry: 0,
+    // Enquanto a página nova não chega, a anterior fica na tela em vez de
+    // piscar para vazio a cada clique em "Próxima".
+    placeholderData: (anterior) => anterior,
+  });
+
+  /**
+   * Abre o pagamento de alguém escolhido na lista do IXC. O cadastro daqui é
+   * criado na hora, se ainda não houver — é ele que guarda o histórico e a
+   * chave PIX; o vínculo pelo código do fornecedor garante que a segunda vez
+   * ache o mesmo cadastro em vez de abrir outro.
+   */
+  const pagarDoIxc = useMutation({
+    mutationFn: async (idFornecedorIxc: number) =>
+      (
+        await api.post<BeneficiarioAvulso>('/avulsos/beneficiarios/do-ixc', {
+          idFornecedorIxc,
+        })
+      ).data,
+    onSuccess: (beneficiario) => {
+      void qc.invalidateQueries({ queryKey: ['avulsos'] });
+      setPagando(beneficiario);
+    },
+    onError: (err) => {
+      setErro(true);
+      setFeedback(mensagemErro(err));
     },
   });
 
@@ -369,7 +445,11 @@ export function Avulsos() {
       <CabecalhoPagina
         secao="Pagamentos avulsos"
         titulo="Pagar quem não é da folha"
-        descricao="Mão de obra contratada, serviço pontual, patrocínio, ajuda de custo. A pessoa fica cadastrada e vira fornecedor no IXC — o pagamento sai por lá como conta a pagar, do banco por PIX ou do caixa em dinheiro."
+        descricao={
+          doIxc
+            ? 'Todo o cadastro de fornecedores do IXC, para pagar quem já existe lá sem cadastrar de novo. O pagamento sai como conta a pagar no IXC, do banco por PIX ou do caixa em dinheiro.'
+            : 'Mão de obra contratada, serviço pontual, patrocínio, ajuda de custo. A pessoa fica cadastrada e vira fornecedor no IXC — o pagamento sai por lá como conta a pagar, do banco por PIX ou do caixa em dinheiro.'
+        }
         acoes={
           <button onClick={abrirNovo} className="btn btn-primario">
             Cadastrar beneficiário
@@ -547,20 +627,170 @@ export function Avulsos() {
         <input
           value={busca}
           onChange={(e) => setBusca(e.target.value)}
-          placeholder="Buscar por nome ou documento"
+          placeholder={
+            doIxc ? 'Buscar no IXC pelo nome' : 'Buscar por nome ou documento'
+          }
           className="campo max-w-xs"
         />
-        <label className="flex items-center gap-2 text-sm text-tinta-600">
-          <input
-            type="checkbox"
-            className="accent-brand-600"
-            checked={verInativos}
-            onChange={(e) => setVerInativos(e.target.checked)}
-          />
-          Mostrar desativados
-        </label>
+        {doIxc ? (
+          <span className="text-xs text-tinta-400">
+            {fornecedoresIxc.isFetching
+              ? 'Lendo o IXC…'
+              : fornecedoresIxc.data
+                ? `${fornecedoresIxc.data.total.toLocaleString('pt-BR')} fornecedor(es) ativo(s) no IXC`
+                : ''}
+          </span>
+        ) : (
+          <label className="flex items-center gap-2 text-sm text-tinta-600">
+            <input
+              type="checkbox"
+              className="accent-brand-600"
+              checked={verInativos}
+              onChange={(e) => setVerInativos(e.target.checked)}
+            />
+            Mostrar desativados
+          </label>
+        )}
       </div>
 
+      {doIxc && (
+        <Bloco className="surgir surgir-2" semPadding>
+          <div className="overflow-x-auto rolagem-fina">
+            <table className="w-full text-sm">
+              <thead>
+                <tr>
+                  <th className="th">Fornecedor no IXC</th>
+                  <th className="th">CPF / CNPJ</th>
+                  <th className="th">Por aqui</th>
+                  <th className="th text-right">Ação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {fornecedoresIxc.isLoading && (
+                  <tr>
+                    <td colSpan={4}>
+                      <Carregando texto="Lendo o cadastro do IXC…" />
+                    </td>
+                  </tr>
+                )}
+                {fornecedoresIxc.error && (
+                  <tr>
+                    <td colSpan={4}>
+                      <Vazio titulo="Não deu para ler o IXC">
+                        {mensagemErro(fornecedoresIxc.error)}
+                      </Vazio>
+                    </td>
+                  </tr>
+                )}
+                {fornecedoresIxc.data?.itens.length === 0 && (
+                  <tr>
+                    <td colSpan={4}>
+                      <Vazio titulo="Ninguém com esse nome no IXC">
+                        A busca procura pela razão social do cadastro de
+                        fornecedores.
+                      </Vazio>
+                    </td>
+                  </tr>
+                )}
+                {(fornecedoresIxc.data?.itens ?? []).map((f) => (
+                  <tr key={f.idFornecedor} className="linha">
+                    <td className="td">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium text-tinta-900">
+                          {f.nome}
+                        </span>
+                        <Selo tom="neutro" pequeno titulo="Código no IXC">
+                          #{f.idFornecedor}
+                        </Selo>
+                      </div>
+                      {f.nomeFantasia && f.nomeFantasia !== f.nome && (
+                        <div className="mt-0.5 text-xs text-tinta-400">
+                          {f.nomeFantasia}
+                        </div>
+                      )}
+                    </td>
+                    <td className="td num text-tinta-500">
+                      {f.cpfCnpj ?? '—'}
+                    </td>
+                    <td className="td text-tinta-500">
+                      {f.beneficiarioId ? (
+                        <button
+                          onClick={() =>
+                            setAberto(
+                              aberto === f.beneficiarioId
+                                ? null
+                                : f.beneficiarioId,
+                            )
+                          }
+                          className="text-left"
+                          title="Ver os pagamentos feitos por aqui"
+                        >
+                          <Selo tom="pago" pequeno>
+                            {f.quantidadePagamentos} pagamento(s)
+                          </Selo>
+                          {f.ultimoPagamento && (
+                            <span className="num ml-2 text-xs text-tinta-400">
+                              último em {formatData(f.ultimoPagamento)}
+                            </span>
+                          )}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-tinta-400">
+                          nunca recebeu por aqui
+                        </span>
+                      )}
+                    </td>
+                    <td className="td text-right">
+                      <button
+                        onClick={() => pagarDoIxc.mutate(f.idFornecedor)}
+                        disabled={pagarDoIxc.isPending}
+                        className="btn btn-p bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40"
+                      >
+                        {pagarDoIxc.isPending &&
+                        pagarDoIxc.variables === f.idFornecedor
+                          ? 'Abrindo…'
+                          : 'Pagar'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Paginação: são milhares de cadastros, e a tela mostra 25 por vez. */}
+          {fornecedoresIxc.data && fornecedoresIxc.data.total > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-tinta-100 px-5 py-3.5">
+              <span className="num text-xs text-tinta-400">
+                {inicioDaPagina(fornecedoresIxc.data)}–
+                {fimDaPagina(fornecedoresIxc.data)} de{' '}
+                {fornecedoresIxc.data.total.toLocaleString('pt-BR')}
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPagina((p) => Math.max(1, p - 1))}
+                  disabled={pagina === 1 || fornecedoresIxc.isFetching}
+                  className="btn btn-neutro btn-p"
+                >
+                  Anterior
+                </button>
+                <button
+                  onClick={() => setPagina((p) => p + 1)}
+                  disabled={
+                    fimDaPagina(fornecedoresIxc.data) >=
+                      fornecedoresIxc.data.total || fornecedoresIxc.isFetching
+                  }
+                  className="btn btn-neutro btn-p"
+                >
+                  Próxima
+                </button>
+              </div>
+            </div>
+          )}
+        </Bloco>
+      )}
+
+      {!doIxc && (
       <Bloco className="surgir surgir-2" semPadding>
         <div className="overflow-x-auto rolagem-fina">
           <table className="w-full text-sm">
@@ -708,6 +938,7 @@ export function Avulsos() {
           </table>
         </div>
       </Bloco>
+      )}
 
       {aberto && abertoBeneficiario && (
         <Bloco

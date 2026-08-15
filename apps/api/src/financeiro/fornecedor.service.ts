@@ -16,7 +16,7 @@ import {
   somenteDigitos,
   variacoesDocumento,
 } from '../ixc/ixc.fornecedor';
-import type { IxcFornecedor } from '../ixc/ixc.types';
+import type { IxcFornecedor, IxcListParams } from '../ixc/ixc.types';
 import { ConfigFinanceiraService } from './config-financeira.service';
 
 /**
@@ -41,6 +41,15 @@ export interface FornecedorNoIxc {
   conta: string | null;
   chavePix: string | null;
   tipoChavePix: string | null;
+}
+
+/** Uma página do cadastro de fornecedores do IXC. */
+export interface PaginaFornecedoresIxc {
+  itens: FornecedorNoIxc[];
+  /** Quantos o IXC diz haver no filtro inteiro, não nesta página. */
+  total: number;
+  page: number;
+  porPagina: number;
 }
 
 /** O que aconteceu ao ligar alguém daqui a um fornecedor do IXC. */
@@ -218,6 +227,72 @@ export class FornecedorService {
   }
 
   /**
+   * Uma página do cadastro de fornecedores do IXC, em ordem alfabética.
+   *
+   * A tela de pagamentos avulsos abre nesta lista: quem paga alguém de fora da
+   * folha procura a pessoa pelo nome, e ela já está cadastrada lá — obrigar a
+   * cadastrar de novo aqui antes de poder pagar era pedir o mesmo dado duas
+   * vezes e criar fornecedor duplicado no IXC.
+   *
+   * Vem em páginas de propósito: são milhares de cadastros, e trazer todos a
+   * cada abertura da tela seria uma leitura enorme no IXC para mostrar as vinte
+   * primeiras linhas.
+   */
+  async listarDoIxc(opts: {
+    busca?: string;
+    page?: number;
+    porPagina?: number;
+  }): Promise<PaginaFornecedoresIxc> {
+    const page = Math.max(1, opts.page ?? 1);
+    const porPagina = Math.min(Math.max(opts.porPagina ?? 25, 1), 100);
+    const busca = opts.busca?.trim() ?? '';
+
+    // Com busca, procura pelo nome; sem busca, lista os ativos em ordem. O
+    // filtro do ativo vai no próprio pedido e não aqui: filtrar depois deixaria
+    // páginas curtas e a contagem errada.
+    const params: Pick<IxcListParams, 'qtype' | 'query' | 'oper'> = busca
+      ? { qtype: 'fornecedor.razao', query: busca, oper: 'L' }
+      : { qtype: 'fornecedor.ativo', query: 'S', oper: '=' };
+
+    const res = await this.ixc.list<Record<string, unknown>>('fornecedor', {
+      ...params,
+      page,
+      rp: porPagina,
+      sortname: 'fornecedor.razao',
+      sortorder: 'asc',
+    });
+
+    const itens = res.registros
+      .filter((b) => String(b.ativo ?? '').toUpperCase() !== 'N')
+      .map((bruto) => {
+        const id = Number(bruto.id);
+        return {
+          idFornecedor: id,
+          nome:
+            texto(bruto.razao) ?? texto(bruto.fantasia) ?? `Fornecedor ${id}`,
+          nomeFantasia: texto(bruto.fantasia),
+          cpfCnpj: texto(bruto.cnpj_cpf) ?? texto(bruto.cpf_cnpj),
+          tipoPessoa: texto(bruto.tipo_pessoa),
+          email: texto(bruto.email),
+          telefone: texto(bruto.celular) ?? texto(bruto.telefone),
+          cidadeIxc: Number(bruto.cidade) || null,
+          ativo: true,
+          // Dados bancários custam uma consulta por fornecedor, noutra tabela.
+          // Numa lista de vinte linhas seriam vinte idas ao IXC para dados que
+          // só interessam na hora de pagar — e lá eles são lidos.
+          banco: null,
+          agencia: null,
+          conta: null,
+          chavePix: null,
+          tipoChavePix: null,
+        };
+      })
+      .filter((f) => Number.isInteger(f.idFornecedor) && f.idFornecedor > 0);
+
+    return { itens, total: res.total, page, porPagina };
+  }
+
+  /**
    * Fornecedores do IXC cujo nome contém o termo — a busca de quem vai lançar
    * uma despesa à mão. A conta de energia é da Cemar e o financiamento é do
    * banco: ninguém sabe o código desses cadastros de cabeça, e o IXC exige o
@@ -307,6 +382,45 @@ export class FornecedorService {
     if (!algumaRespondeu && ultimoErro && achados.size === 0) throw ultimoErro;
 
     return [...achados.values()].slice(0, limite);
+  }
+
+  /**
+   * Um fornecedor do IXC pelo código, com a aba "Dados bancários" junto.
+   *
+   * É o que traz a chave PIX de quem foi escolhido numa lista — ali só havia
+   * nome e documento, e é a chave que de fato paga.
+   */
+  async buscarNoIxcPorId(
+    idFornecedor: number,
+  ): Promise<FornecedorNoIxc | null> {
+    const bruto = await this.ixc.getById<Record<string, unknown>>(
+      'fornecedor',
+      'fornecedor.id',
+      idFornecedor,
+    );
+    if (!bruto) return null;
+
+    const id = Number(bruto.id);
+    if (!Number.isInteger(id) || id <= 0) return null;
+
+    const cfg = await this.config.obter();
+    const banco = await this.dadosBancarios.doFornecedor(
+      id,
+      cfg.fornecedorTabelaBanco,
+    );
+
+    return {
+      idFornecedor: id,
+      nome: texto(bruto.razao) ?? texto(bruto.fantasia) ?? `Fornecedor ${id}`,
+      nomeFantasia: texto(bruto.fantasia),
+      cpfCnpj: texto(bruto.cnpj_cpf) ?? texto(bruto.cpf_cnpj),
+      tipoPessoa: texto(bruto.tipo_pessoa),
+      email: texto(bruto.email),
+      telefone: texto(bruto.celular) ?? texto(bruto.telefone),
+      cidadeIxc: Number(bruto.cidade) || null,
+      ativo: String(bruto.ativo ?? '').toUpperCase() !== 'N',
+      ...banco,
+    };
   }
 
   /**

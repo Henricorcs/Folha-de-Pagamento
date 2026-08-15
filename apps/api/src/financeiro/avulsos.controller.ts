@@ -18,6 +18,7 @@ import {
   QueryFornecedorIxcDto,
   QueryPagamentosAvulsosDto,
   UpdateBeneficiarioDto,
+  VincularFornecedorIxcDto,
 } from './dto/avulso.dto';
 
 function usuarioId(req: Request): string | undefined {
@@ -35,6 +36,30 @@ export class AvulsosController {
     @Query('todos') todos?: string,
   ) {
     return this.service.listarBeneficiarios(busca, todos === 'true');
+  }
+
+  /**
+   * O cadastro de fornecedores do IXC, em páginas — é por ele que a tela de
+   * Contas a Pagar abre, para pagar quem já existe lá sem cadastrar de novo.
+   */
+  @Get('fornecedores-ixc')
+  listarFornecedoresDoIxc(
+    @Query('busca') busca?: string,
+    @Query('page') page?: string,
+    @Query('porPagina') porPagina?: string,
+  ) {
+    return this.service.listarFornecedoresDoIxc({
+      busca,
+      page: Number(page) || 1,
+      porPagina: Number(porPagina) || 25,
+    });
+  }
+
+  /** O cadastro daqui para um fornecedor do IXC — cria na primeira vez. */
+  @Post('beneficiarios/do-ixc')
+  @HttpCode(200)
+  garantirDoIxc(@Body() dto: VincularFornecedorIxcDto) {
+    return this.service.garantirBeneficiarioDoIxc(dto.idFornecedorIxc);
   }
 
   /**

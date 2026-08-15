@@ -136,6 +136,14 @@ export class QueryPagamentosAvulsosDto {
   @IsOptional() @IsString() beneficiarioId?: string;
 }
 
+/** Fornecedor do IXC escolhido na lista, para ganhar cadastro aqui. */
+export class VincularFornecedorIxcDto {
+  @Transform(({ value }) => (value === '' || value == null ? undefined : Number(value)))
+  @IsInt()
+  @Min(1)
+  idFornecedorIxc!: number;
+}
+
 export class QueryFornecedorIxcDto {
   @IsString() @MinLength(3) cpfCnpj!: string;
 }
