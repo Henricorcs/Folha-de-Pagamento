@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type ReactNode } from 'react';
 import {
+  LeitorDeBoleto,
+  leitorDeBoletoSuportado,
+} from '../../components/LeitorDeBoleto';
+import {
   Aviso,
   Bloco,
   CabecalhoPagina,
@@ -1266,6 +1270,7 @@ function FormularioPagamento({
     beneficiario.tipoChavePix ?? '',
   );
   const [contaContabil, setContaContabil] = useState('');
+  const [lendoQr, setLendoQr] = useState(false);
 
   const categorias = useQuery({
     queryKey: ['categorias-despesa'],
@@ -1478,12 +1483,27 @@ function FormularioPagamento({
         {forma === 'IXC' && (
           <>
             <Campo label="Chave PIX — vai exata para o IXC">
-              <input
-                value={chavePix}
-                onChange={(e) => setChavePix(e.target.value)}
-                className="campo"
-                placeholder="Ex.: (99) 99230-0993"
-              />
+              <div className="flex gap-2">
+                <input
+                  value={chavePix}
+                  onChange={(e) => setChavePix(e.target.value)}
+                  className="campo"
+                  placeholder="Ex.: (99) 99230-0993"
+                />
+                {/* Cobrança com QR: o "copia e cola" lido substitui a chave
+                    fixa da pessoa, porque é ele que carrega valor e destino
+                    daquele pagamento. */}
+                {leitorDeBoletoSuportado() && (
+                  <button
+                    type="button"
+                    onClick={() => setLendoQr(true)}
+                    className="btn btn-neutro shrink-0"
+                    title="Ler o QR Code do PIX com a câmera"
+                  >
+                    QR
+                  </button>
+                )}
+              </div>
             </Campo>
             <Campo label="Tipo da chave">
               <select
@@ -1542,6 +1562,18 @@ function FormularioPagamento({
         <button onClick={onCancelar} className="btn btn-neutro">
           Cancelar
         </button>
+        {lendoQr && (
+          <LeitorDeBoleto
+            alvo="pix"
+            onLido={(codigo) => {
+              setChavePix(codigo);
+              setTipoChavePix('Código copia e cola');
+              setLendoQr(false);
+            }}
+            onFechar={() => setLendoQr(false)}
+          />
+        )}
+
         {semPix ? (
           <span className="text-sm text-rose-600">
             Sem chave PIX o banco não paga por PIX — informe a chave, escolha

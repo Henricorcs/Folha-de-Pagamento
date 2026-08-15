@@ -47,6 +47,11 @@ export class DespesasService {
         observacao: dto.observacao.trim(),
         contaContabil: dto.contaContabil,
         tipoPagamentoIxc: dto.tipoPagamento,
+        codigoBarras: dto.codigoBarras,
+        documento: dto.documento,
+        numeroNota: dto.numeroNota,
+        chavePix: dto.chavePix,
+        tipoChavePix: dto.tipoChavePix,
       },
       usuarioId,
     );

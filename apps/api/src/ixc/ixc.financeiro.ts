@@ -63,6 +63,35 @@ export interface ContaPagarInput {
    * da tela na coluna `tipo_chave_pix`.
    */
   mapaTipoChave?: MapaTipoChavePix | null;
+
+  /** Linha digitável do boleto, só dígitos. É o que o IXC usa para pagá-lo. */
+  codigoBarras?: string | null;
+  /** Número do documento (`fn_apagar.documento`). */
+  documento?: string | null;
+  /** Número da nota fiscal, quando a despesa tem uma. */
+  numeroNota?: string | null;
+}
+
+/**
+ * Só os dígitos da linha digitável, que é como o IXC guarda o código de barras.
+ *
+ * Quem copia um boleto traz pontos, espaços e a máscara do banco junto; mandar
+ * isso ao IXC é mandar um código que o banco não reconhece.
+ */
+export function somenteDigitosDoBoleto(valor?: string | null): string {
+  return String(valor ?? '').replace(/\D/g, '');
+}
+
+/**
+ * Um código de boleto plausível: 44 dígitos (código de barras), 47 (linha
+ * digitável de cobrança) ou 48 (contas de consumo e tributos).
+ *
+ * A conferência é de tamanho, não de dígito verificador: rejeitar um boleto
+ * bom por causa de um cálculo que varia entre convênios seria pior do que
+ * deixar o IXC recusar um ruim.
+ */
+export function pareceCodigoDeBoleto(digitos: string): boolean {
+  return [44, 47, 48].includes(digitos.length);
 }
 
 /** Tipos da chave PIX, como aparecem na tela de contas a pagar do IXC. */
@@ -279,6 +308,11 @@ export function buildContaPagarPayload(
     chave_pix: chave,
     // Rádio "Tipo da chave Pix" da tela de contas a pagar.
     [radio.campo]: radio.valor,
+    // O boleto só é pagável no IXC com o código; sem ele a conta chega lá e
+    // fica parada esperando alguém digitar à mão.
+    codigo_barras: somenteDigitosDoBoleto(input.codigoBarras),
+    documento: input.documento ?? '',
+    numero_nota: input.numeroNota ?? '',
     previsao: 'N',
     liberado: 'S',
     obs: input.observacao,

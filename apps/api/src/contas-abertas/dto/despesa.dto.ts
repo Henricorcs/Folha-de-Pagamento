@@ -1,4 +1,5 @@
 import { Transform } from 'class-transformer';
+import { TIPOS_CHAVE_PIX } from '../../ixc/ixc.financeiro';
 import {
   IsIn,
   IsInt,
@@ -74,4 +75,29 @@ export class CriarDespesaDto {
   @IsInt()
   @Min(1)
   contaContabil?: number;
+
+  /**
+   * Linha digitável do boleto. Vai como só dígitos para o IXC — é com ela que
+   * ele paga; sem ela, a conta chega lá sem como ser paga por boleto.
+   */
+  @IsOptional() @IsString() @MaxLength(60) codigoBarras?: string;
+
+  /** Número do documento da despesa, quando existe. */
+  @IsOptional() @IsString() @MaxLength(40) documento?: string;
+
+  /** Número da nota fiscal, quando a despesa tem uma. */
+  @IsOptional() @IsString() @MaxLength(40) numeroNota?: string;
+
+  /**
+   * Chave PIX desta conta. Costuma ser o "copia e cola" lido de um QR Code de
+   * cobrança, que vale só para este pagamento. Vazio = a chave do cadastro do
+   * fornecedor no IXC. O limite cabe um EMV inteiro.
+   */
+  @IsOptional() @IsString() @MaxLength(600) chavePix?: string;
+
+  /** Tipo da chave acima, como o IXC o nomeia. */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value == null ? undefined : value))
+  @IsIn([...TIPOS_CHAVE_PIX])
+  tipoChavePix?: string;
 }

@@ -19,8 +19,10 @@ import {
   lerSituacaoContaPagar,
   lerStatusAuditoria,
   normalizarTipoChavePix,
+  pareceCodigoDeBoleto,
   parseCodigosTipoChavePix,
   serializarCodigosTipoChavePix,
+  somenteDigitosDoBoleto,
   type MapaTipoChavePix,
   type StatusAuditoriaIxc,
   type TipoChavePix,
@@ -352,10 +354,29 @@ export class ContasPagarService {
       contaContabil?: number;
       contaPagamento?: number;
       tipoPagamentoIxc?: string;
+      codigoBarras?: string | null;
+      documento?: string | null;
+      numeroNota?: string | null;
+      chavePix?: string | null;
+      tipoChavePix?: string | null;
     },
     usuarioId?: string,
   ): Promise<ContaPagar> {
     const cfg = await this.config.obter();
+
+    const codigoBarras = somenteDigitosDoBoleto(dados.codigoBarras) || null;
+    // Boleto sem código chega ao IXC sem como ser pago: melhor recusar aqui,
+    // com a conta ainda não criada, do que deixar um título parado lá.
+    if (
+      /boleto/i.test(dados.tipoPagamentoIxc ?? '') &&
+      codigoBarras &&
+      !pareceCodigoDeBoleto(codigoBarras)
+    ) {
+      throw new BadRequestException(
+        `O código do boleto tem ${codigoBarras.length} dígitos — o esperado é ` +
+          '44, 47 ou 48. Confira a linha digitável.',
+      );
+    }
 
     const conta = await this.prisma.contaPagar.create({
       data: {
@@ -371,6 +392,11 @@ export class ContasPagarService {
         dataEmissao: dados.dataEmissao,
         dataVencimento: dados.dataVencimento,
         observacao: dados.observacao,
+        codigoBarras,
+        documento: dados.documento?.trim() || null,
+        numeroNota: dados.numeroNota?.trim() || null,
+        chavePix: dados.chavePix?.trim() || null,
+        tipoChavePix: dados.tipoChavePix?.trim() || null,
         status: StatusContaPagar.RASCUNHO,
         criadoPor: usuarioId ?? null,
       },
@@ -378,7 +404,8 @@ export class ContasPagarService {
 
     this.logger.log(
       `Despesa lançada à mão para o fornecedor ${dados.idFornecedorIxc} ` +
-        `(${dados.fornecedorNome}): ${dados.valor}`,
+        `(${dados.fornecedorNome}): ${dados.valor}` +
+        (codigoBarras ? ' (com boleto)' : ''),
     );
     return this.enviarIxc(conta.id);
   }
@@ -480,6 +507,9 @@ export class ContasPagarService {
         chavePix: ehPix ? pix.chave : null,
         tipoChavePix: ehPix ? pix.tipo : null,
         mapaTipoChave: ehPix ? await this.mapaTipoChavePix(cfg, tipoChave) : null,
+        codigoBarras: conta.codigoBarras,
+        documento: conta.documento,
+        numeroNota: conta.numeroNota,
       });
 
       const { id: idFnApagar } = await this.ixc.create('fn_apagar', payload);
@@ -1123,7 +1153,19 @@ export class ContasPagarService {
     beneficiarioAvulsoId: string | null;
     diaristaId: string | null;
     idFornecedorIxc?: number | null;
+    chavePix?: string | null;
+    tipoChavePix?: string | null;
   }): Promise<{ chave: string | null; tipo: TipoChavePix | null }> {
+    // Chave informada na conta manda em qualquer cadastro: é o caso do QR Code
+    // de uma cobrança, cujo "copia e cola" vale só para aquele pagamento e não
+    // tem nada a ver com a chave fixa de quem recebe.
+    if (conta.chavePix?.trim()) {
+      return {
+        chave: conta.chavePix.trim(),
+        tipo: normalizarTipoChavePix(conta.tipoChavePix),
+      };
+    }
+
     // Conta lançada à mão: não há pessoa deste lado, e a chave está onde
     // sempre esteve — na aba "Dados bancários" do fornecedor, no IXC. Sem
     // buscá-la ali, a conta ia para lá com "Pix" no tipo de pagamento e a

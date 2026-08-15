@@ -1,8 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import {
+  LeitorDeBoleto,
+  leitorDeBoletoSuportado,
+} from '../../components/LeitorDeBoleto';
 import { CampoDinheiro, Carregando, Janela, Selo } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
-import type { CategoriaDespesa, ConfigFinanceira } from '../../lib/types';
+import {
+  TIPOS_CHAVE_PIX,
+  type CategoriaDespesa,
+  type ConfigFinanceira,
+} from '../../lib/types';
 
 /** Um fornecedor achado no IXC pela busca desta tela. */
 interface FornecedorIxc {
@@ -36,6 +44,13 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
   const [categoriaId, setCategoriaId] = useState('');
   const [tipoPagamento, setTipoPagamento] = useState('');
   const [observacao, setObservacao] = useState('');
+  const [codigoBarras, setCodigoBarras] = useState('');
+  const [documento, setDocumento] = useState('');
+  const [numeroNota, setNumeroNota] = useState('');
+  const [chavePix, setChavePix] = useState('');
+  const [tipoChavePix, setTipoChavePix] = useState('');
+  /** Qual leitor está aberto: o do boleto, o do QR do PIX, ou nenhum. */
+  const [lendo, setLendo] = useState<'boleto' | 'pix' | null>(null);
   const [lancada, setLancada] = useState<DespesaLancada | null>(null);
 
   const categorias = useQuery({
@@ -92,6 +107,14 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
           observacao: observacao.trim(),
           categoriaId: categoriaId || null,
           tipoPagamento: tipoPagamento.trim() || undefined,
+          codigoBarras: digitos(codigoBarras) || undefined,
+          documento: documento.trim() || undefined,
+          numeroNota: numeroNota.trim() || undefined,
+          chavePix: chavePix.trim() || undefined,
+          // QR lido é sempre copia e cola: dizer isso ao IXC evita que ele
+          // tente ler o EMV como se fosse CPF ou celular.
+          tipoChavePix:
+            (ehCopiaECola ? 'Código copia e cola' : tipoChavePix) || undefined,
         },
       );
       return data;
@@ -103,8 +126,18 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
     },
   });
 
+  const ehBoleto = /boleto/i.test(tipoPagamento);
+  const ehPix = /pix/i.test(tipoPagamento);
+  const boletoValido = [44, 47, 48].includes(digitos(codigoBarras).length);
+  const ehCopiaECola = /^0002/.test(chavePix.trim());
+
   const podeLancar =
-    !!fornecedor && Number(valor) > 0 && observacao.trim().length >= 3;
+    !!fornecedor &&
+    Number(valor) > 0 &&
+    observacao.trim().length >= 3 &&
+    // Boleto com código pela metade não é recusado aqui, mas com código errado
+    // sim: a conta chegaria ao IXC com um número que o banco não reconhece.
+    (!ehBoleto || !codigoBarras || boletoValido);
 
   // Depois de lançada a tela vira recibo: a conta já existe no IXC e mostrar o
   // formulário de novo convidaria a lançar a mesma despesa duas vezes.
@@ -288,6 +321,134 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
           )}
         </div>
 
+        {/*
+          O boleto só aparece quando é boleto que vai pagar: é o campo mais
+          longo da tela, e deixá-lo aberto o tempo todo empurraria o resto para
+          baixo em toda conta paga por PIX.
+        */}
+        {ehBoleto && (
+          <div className="sm:col-span-2">
+            <label className="rotulo" htmlFor="codigo-barras">
+              Linha digitável do boleto
+            </label>
+            <div className="flex gap-2">
+              <input
+                id="codigo-barras"
+                value={codigoBarras}
+                onChange={(e) => setCodigoBarras(e.target.value)}
+                className="campo num"
+                inputMode="numeric"
+                placeholder="Cole os números do boleto — pontos e espaços vão embora"
+              />
+              {/* No celular, ler é mais rápido e erra menos que digitar 47
+                  dígitos. O botão só existe onde o navegador sabe ler. */}
+              {leitorDeBoletoSuportado() && (
+                <button
+                  type="button"
+                  onClick={() => setLendo('boleto')}
+                  className="btn btn-neutro shrink-0"
+                  title="Ler o código de barras com a câmera"
+                >
+                  Ler boleto
+                </button>
+              )}
+            </div>
+            <p
+              className={`ajuda ${
+                codigoBarras && !boletoValido ? 'text-amber-700' : ''
+              }`}
+            >
+              {!codigoBarras
+                ? 'Sem o código, a conta chega ao IXC sem como ser paga por boleto.'
+                : boletoValido
+                  ? `${digitos(codigoBarras).length} dígitos — ok.`
+                  : `${digitos(codigoBarras).length} dígitos. O esperado é 44, 47 ou 48 — confira se copiou a linha inteira.`}
+            </p>
+          </div>
+        )}
+
+        {/*
+          A chave só aparece no PIX, e é opcional: em branco, vale a do cadastro
+          do fornecedor no IXC. O QR de uma cobrança é outra coisa — o "copia e
+          cola" dele vale só para aquele pagamento, com valor e beneficiário
+          dentro —, e é por isso que ele fica aqui, na conta, e não no cadastro.
+        */}
+        {ehPix && (
+          <div className="sm:col-span-2">
+            <label className="rotulo" htmlFor="chave-pix">
+              Chave PIX desta conta
+            </label>
+            <div className="flex gap-2">
+              <input
+                id="chave-pix"
+                value={chavePix}
+                onChange={(e) => {
+                  setChavePix(e.target.value);
+                  if (!e.target.value) setTipoChavePix('');
+                }}
+                className="campo"
+                placeholder="Em branco usa a chave do fornecedor no IXC"
+              />
+              {leitorDeBoletoSuportado() && (
+                <button
+                  type="button"
+                  onClick={() => setLendo('pix')}
+                  className="btn btn-neutro shrink-0"
+                  title="Ler o QR Code do PIX com a câmera"
+                >
+                  Ler QR Code
+                </button>
+              )}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <select
+                value={tipoChavePix}
+                onChange={(e) => setTipoChavePix(e.target.value)}
+                className="campo max-w-[220px]"
+                disabled={!chavePix}
+              >
+                <option value="">Tipo pelo formato da chave</option>
+                {TIPOS_CHAVE_PIX.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+              {ehCopiaECola && (
+                <span className="text-xs text-emerald-700 dark:text-emerald-300">
+                  QR lido: código copia e cola, {chavePix.length} caracteres.
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div>
+          <label className="rotulo" htmlFor="documento">
+            Documento
+          </label>
+          <input
+            id="documento"
+            value={documento}
+            onChange={(e) => setDocumento(e.target.value)}
+            className="campo"
+            placeholder="opcional"
+          />
+        </div>
+
+        <div>
+          <label className="rotulo" htmlFor="numero-nota">
+            Número da nota
+          </label>
+          <input
+            id="numero-nota"
+            value={numeroNota}
+            onChange={(e) => setNumeroNota(e.target.value)}
+            className="campo"
+            placeholder="opcional"
+          />
+        </div>
+
         <div className="sm:col-span-2">
           <label className="rotulo" htmlFor="categoria">
             A que se refere
@@ -342,9 +503,11 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
           <span className="mr-auto text-xs text-tinta-400">
             {!fornecedor
               ? 'Escolha o fornecedor para continuar.'
-              : Number(valor) > 0
-                ? 'Escreva a observação (o que é essa conta).'
-                : 'Informe o valor.'}
+              : !(Number(valor) > 0)
+                ? 'Informe o valor.'
+                : observacao.trim().length < 3
+                  ? 'Escreva a observação (o que é essa conta).'
+                  : 'Confira a linha digitável do boleto.'}
           </span>
         )}
         <button onClick={onFechar} className="btn btn-neutro">
@@ -367,8 +530,29 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
           </Selo>
         </p>
       )}
+
+      {lendo && (
+        <LeitorDeBoleto
+          alvo={lendo}
+          onLido={(codigo) => {
+            if (lendo === 'boleto') {
+              setCodigoBarras(codigo);
+            } else {
+              setChavePix(codigo);
+              setTipoChavePix('Código copia e cola');
+            }
+            setLendo(null);
+          }}
+          onFechar={() => setLendo(null)}
+        />
+      )}
     </Janela>
   );
+}
+
+/** Só os dígitos: boleto copiado vem com pontos, espaços e a máscara do banco. */
+function digitos(valor: string): string {
+  return valor.replace(/\D/g, '');
 }
 
 /** Hoje em "AAAA-MM-DD", que é o formato do input de data. */

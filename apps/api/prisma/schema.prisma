@@ -765,6 +765,24 @@ model ContaPagar {
   dataVencimento   DateTime @map("data_vencimento")
   observacao       String
 
+  // --- Boleto ---
+  /// Linha digitável/código de barras do boleto. É o que o IXC precisa para
+  /// pagar por boleto; sem ele a conta chega lá e não tem como ser paga.
+  /// Guardado só de dígitos, que é o formato que o fn_apagar aceita.
+  codigoBarras     String?  @map("codigo_barras")
+  /// Número do documento no IXC (`fn_apagar.documento`)
+  documento        String?
+  /// Número da nota fiscal, quando a despesa tem uma
+  numeroNota       String?  @map("numero_nota")
+
+  // --- PIX desta conta ---
+  /// Chave PIX informada na hora de lançar, quando ela não é a do cadastro:
+  /// é o caso do QR Code lido de uma cobrança, cujo "copia e cola" vale só
+  /// para aquele pagamento. Vazio = usa a chave do fornecedor no IXC.
+  chavePix         String?  @map("chave_pix")
+  /// Tipo da chave acima, como o IXC o nomeia ("Código copia e cola", "CPF/CNPJ"…)
+  tipoChavePix     String?  @map("tipo_chave_pix")
+
   status StatusContaPagar @default(RASCUNHO)
   erro   String?
 
