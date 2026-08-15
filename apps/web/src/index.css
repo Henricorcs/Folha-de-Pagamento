@@ -24,6 +24,28 @@
 
   --papel: 255 255 255;
   --barra: 10 16 32;
+
+  /*
+   * Séries dos gráficos, na ordem fixa em que são servidas. Ficam aqui, e não
+   * só no módulo dos gráficos, porque o tema escuro troca uma delas: sobre o
+   * cartão escuro o violeta original fica em 2,8:1, abaixo do mínimo de 3:1
+   * que separa uma barra do fundo. Ver `graficos.tsx`.
+   */
+  --serie-1: #1490ee;
+  --serie-2: #d97706;
+  --serie-3: #0e9e91;
+  --serie-4: #e11d48;
+  --serie-5: #7c3aed;
+
+  /*
+   * O semáforo da conta. Também troca por tema: âmbar e verde vivos ficam
+   * abaixo de 3:1 sobre papel branco, e escuros somem no fundo escuro. Cada
+   * tema usa o tom que se lê nele.
+   */
+  --estado-vencido: #e11d48;
+  --estado-hoje: #b45309;
+  --estado-prazo: #047857;
+  --estado-sem-data: #64748b;
 }
 
 .dark {
@@ -45,6 +67,14 @@
 
   --papel: 23 33 54;
   --barra: 10 16 32;
+
+  /* Só o violeta muda: os outros quatro passam nos dois fundos. */
+  --serie-5: #8b5cf6;
+
+  --estado-vencido: #fb7185;
+  --estado-hoje: #f59e0b;
+  --estado-prazo: #10b981;
+  --estado-sem-data: #94a3b8;
 }
 
 @layer base {

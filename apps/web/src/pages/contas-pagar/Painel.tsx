@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   BarrasComparadas,
   BarrasEmpilhadas,
+  CORES_DE_ESTADO,
+  formatCompacto,
   PALETA,
   type SerieGrafico,
 } from '../../components/graficos';
@@ -11,17 +13,24 @@ import {
   Bloco,
   CabecalhoPagina,
   Carregando,
+  Indicador,
   Pagina,
+  Selo,
   Vazio,
 } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
-import { formatBRL } from '../../lib/format';
+import { formatBRL, formatData } from '../../lib/format';
 import type { ContaAberta, ContasAbertas } from '../../lib/types';
+import { DetalheDaConta } from './DetalheDaConta';
 
 /**
- * O painel do que a empresa deve, pelas três perguntas que se faz olhando uma
- * carteira de contas: **com o quê** se está devendo, **quando** vence, e **a
- * quem** se deve.
+ * O painel do que a empresa deve, na ordem em que as perguntas aparecem para
+ * quem paga: **quanto** está em aberto, **o que sai nesta semana**, **com o
+ * quê** se está devendo, **quando** vence o resto e **a quem** se deve.
+ *
+ * A ordem não é enfeite. As duas primeiras seções respondem o dia de trabalho
+ * — o que precisa sair agora — e as três de baixo respondem o mês. Um painel
+ * que abre por gráfico anual obriga a rolar para achar a conta que vence hoje.
  *
  * Roda sobre a mesma leitura da tela de lista — mesma chave de consulta, mesma
  * resposta do IXC. Trocar de aba não faz o IXC ser consultado de novo, e os
@@ -32,12 +41,21 @@ import type { ContaAberta, ContasAbertas } from '../../lib/types';
 /** Quantas fatias os gráficos mostram antes de juntar o resto. */
 const TETO_DE_FATIAS = 8;
 
+/** Quantos dias a agenda de pagamento cobre. */
+const DIAS_NA_AGENDA = 14;
+
+/** Quantas contas a fila de pagamento lista antes de mandar para a lista. */
+const TETO_DA_FILA = 8;
+
 export function Painel() {
   const consulta = useQuery({
     queryKey: ['contas-abertas'],
     queryFn: async () => (await api.get<ContasAbertas>('/contas-abertas')).data,
     retry: 0,
   });
+
+  /** Conta cuja ficha está aberta — a fila daqui abre o mesmo detalhe da lista. */
+  const [detalhando, setDetalhando] = useState<ContaAberta | null>(null);
 
   // A lista vazia sai de um `useMemo` para ser sempre o mesmo array: um `[]`
   // criado a cada render refaria todos os agrupamentos abaixo sem nada ter
@@ -53,18 +71,24 @@ export function Painel() {
     [contas],
   );
   const porMes = useMemo(() => agruparPorMes(contas), [contas]);
+  const agenda = useMemo(() => agruparPorDia(contas), [contas]);
   /** O que ainda não foi etiquetado — fica de fora de todo relatório por categoria. */
   const semClassificar = useMemo(
     () => contas.filter((c) => !c.classificacao),
     [contas],
   );
+  /** O que precisa sair primeiro: o que venceu, depois o que vence antes. */
+  const fila = useMemo(() => filaDePagamento(contas), [contas]);
+
+  const resumo = consulta.data?.resumo;
+  const total = resumo?.total ?? 0;
 
   return (
     <Pagina>
       <CabecalhoPagina
         secao="Painel"
         titulo="Com o que a empresa está devendo"
-        descricao="A mesma leitura da lista, vista por categoria de despesa, por mês de vencimento e por credor."
+        descricao="A mesma leitura da lista: o que vence nos próximos dias, com o que se está gastando e a quem se deve."
         acoes={
           <button
             onClick={() => consulta.refetch()}
@@ -79,7 +103,7 @@ export function Painel() {
       {consulta.error && (
         <Aviso tom="erro">
           Não deu para ler as contas do IXC: {mensagemErro(consulta.error)}
-          {consulta.data ? ' Os gráficos são da última leitura que deu certo.' : ''}
+          {consulta.data ? ' Os números são da última leitura que deu certo.' : ''}
         </Aviso>
       )}
 
@@ -87,7 +111,7 @@ export function Painel() {
         <Bloco semPadding>
           {consulta.error ? (
             <Vazio titulo="Não deu para ler o IXC">
-              Os gráficos saem das contas que estão no IXC, e ele não respondeu
+              Os números saem das contas que estão no IXC, e ele não respondeu
               agora. Tente de novo em Atualizar.
             </Vazio>
           ) : (
@@ -103,19 +127,87 @@ export function Painel() {
         </Bloco>
       ) : (
         <div className="space-y-6">
+          {/* --- Os quatro números que se olha primeiro --- */}
+          {resumo && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <Indicador
+                rotulo="Total em aberto"
+                valor={formatBRL(resumo.total)}
+                detalhe={`${resumo.quantidade} título(s) no IXC`}
+                acento
+              />
+              <Indicador
+                rotulo="Vencidas"
+                valor={formatBRL(resumo.vencidas.total)}
+                detalhe={`${resumo.vencidas.quantidade} título(s)`}
+                alerta={
+                  resumo.vencidas.quantidade > 0
+                    ? 'Já passou do vencimento'
+                    : undefined
+                }
+              />
+              <Indicador
+                rotulo="Vencem em 7 dias"
+                valor={formatBRL(resumo.venceEmSeteDias.total)}
+                detalhe={`${resumo.venceEmSeteDias.quantidade} título(s) — é o que o caixa precisa ter na semana`}
+              />
+              <Indicador
+                rotulo="Sem categoria"
+                valor={formatBRL(somar(semClassificar))}
+                detalhe={
+                  semClassificar.length
+                    ? `${semClassificar.length} título(s) fora dos gráficos por categoria`
+                    : 'Tudo classificado'
+                }
+                alerta={
+                  semClassificar.length > 0
+                    ? 'Esse dinheiro não aparece por categoria'
+                    : undefined
+                }
+              />
+            </div>
+          )}
+
           <Bloco titulo="Por urgência" className="surgir surgir-1">
             <FaixaDeUrgencia contas={contas} />
           </Bloco>
 
-          <Bloco titulo="Com o que a empresa está devendo" className="surgir surgir-2">
+          {/* --- O dia de trabalho: o que sai nos próximos dias --- */}
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-5">
+            <Bloco
+              titulo={`Agenda dos próximos ${DIAS_NA_AGENDA} dias`}
+              className="surgir surgir-2 xl:col-span-3"
+            >
+              <AgendaDosDias dias={agenda} />
+              <p className="ajuda">
+                Cada coluna é um dia. Sábado e domingo aparecem apagados: o
+                banco não paga neles, então o que vence no fim de semana precisa
+                sair antes.
+              </p>
+            </Bloco>
+
+            <Bloco
+              titulo="Fila de pagamento"
+              className="surgir surgir-3 xl:col-span-2"
+              semPadding
+            >
+              <FilaDePagamento
+                contas={fila}
+                onAbrir={(c) => setDetalhando(c)}
+              />
+            </Bloco>
+          </div>
+
+          {/* --- O mês: com o quê, quando e a quem --- */}
+          <Bloco titulo="Com o que a empresa está devendo" className="surgir surgir-4">
             {porCategoria.length === 0 ? (
               <Vazio titulo="Nada classificado ainda">
-                Este gráfico sai da classificação de cada débito. Abra uma conta
-                na aba "Em aberto" e escolha a que ela se refere — a partir da
-                primeira, o gráfico começa a existir.
+                Este gráfico sai da classificação de cada débito. Marque as
+                contas na aba "Em aberto" e escolha a que elas se referem — a
+                partir da primeira, o gráfico começa a existir.
               </Vazio>
             ) : (
-              <BarrasComparadas itens={paraBarras(porCategoria)} />
+              <BarrasComparadas itens={paraBarras(porCategoria, total)} />
             )}
             {semClassificar.length > 0 && (
               <p className="ajuda">
@@ -126,7 +218,7 @@ export function Painel() {
             )}
           </Bloco>
 
-          <Bloco titulo="Por mês de vencimento" className="surgir surgir-3">
+          <Bloco titulo="Por mês de vencimento" className="surgir surgir-4">
             <BarrasEmpilhadas meses={porMes} series={SERIES_DO_MES} />
             <p className="ajuda">
               A primeira coluna junta tudo que já venceu, de qualquer ano. As
@@ -136,9 +228,17 @@ export function Painel() {
           </Bloco>
 
           <Bloco titulo="Maiores credores" className="surgir surgir-4">
-            <BarrasComparadas itens={paraBarras(porFornecedor)} />
+            <BarrasComparadas itens={paraBarras(porFornecedor, total)} />
+            <Concentracao grupos={porFornecedor} total={total} />
           </Bloco>
         </div>
+      )}
+
+      {detalhando && (
+        <DetalheDaConta
+          conta={detalhando}
+          onFechar={() => setDetalhando(null)}
+        />
       )}
     </Pagina>
   );
@@ -149,27 +249,30 @@ export function Painel() {
  * amarelo vence hoje, verde ainda tem prazo. Uma barra só, proporcional ao
  * dinheiro — não à quantidade de títulos, que esconde uma conta de cem mil no
  * meio de trinta de cinquenta reais.
+ *
+ * Os segmentos são separados por um fio da cor do cartão: encostados, duas
+ * cores vizinhas viram uma mancha só.
  */
 function FaixaDeUrgencia({ contas }: { contas: ContaAberta[] }) {
   const fatias = [
     {
       rotulo: 'Vencidas',
-      cor: '#E11D48',
+      cor: CORES_DE_ESTADO.vencido,
       contas: contas.filter((c) => c.diasParaVencer !== null && c.diasParaVencer < 0),
     },
     {
       rotulo: 'Vencem hoje',
-      cor: '#F59E0B',
+      cor: CORES_DE_ESTADO.hoje,
       contas: contas.filter((c) => c.diasParaVencer === 0),
     },
     {
       rotulo: 'Ainda no prazo',
-      cor: '#10B981',
+      cor: CORES_DE_ESTADO.prazo,
       contas: contas.filter((c) => c.diasParaVencer !== null && c.diasParaVencer > 0),
     },
     {
       rotulo: 'Sem vencimento',
-      cor: '#94A3B8',
+      cor: CORES_DE_ESTADO.semData,
       contas: contas.filter((c) => c.diasParaVencer === null),
     },
   ]
@@ -183,12 +286,12 @@ function FaixaDeUrgencia({ contas }: { contas: ContaAberta[] }) {
 
   return (
     <div>
-      <div className="flex h-4 w-full overflow-hidden rounded-full bg-tinta-100">
+      <div className="flex h-4 w-full gap-[2px] overflow-hidden rounded-full bg-tinta-100">
         {fatias.map((f) => (
           <div
             key={f.rotulo}
             style={{ width: `${(f.total / total) * 100}%`, background: f.cor }}
-            title={`${f.rotulo}: ${formatBRL(f.total)}`}
+            title={`${f.rotulo}: ${formatBRL(f.total)} em ${f.contas.length} título(s)`}
           />
         ))}
       </div>
@@ -203,7 +306,9 @@ function FaixaDeUrgencia({ contas }: { contas: ContaAberta[] }) {
             <span className="valor text-[12px] text-tinta-700">
               {formatBRL(f.total)}
             </span>
-            <span className="text-tinta-400">({f.contas.length})</span>
+            <span className="text-tinta-400">
+              ({f.contas.length} · {Math.round((f.total / total) * 100)}%)
+            </span>
           </span>
         ))}
       </div>
@@ -211,8 +316,182 @@ function FaixaDeUrgencia({ contas }: { contas: ContaAberta[] }) {
   );
 }
 
+interface DiaDaAgenda {
+  /** AAAA-MM-DD */
+  dia: string;
+  /** Dia do mês, para o rótulo. */
+  numero: number;
+  /** Sigla do dia da semana. */
+  semana: string;
+  fimDeSemana: boolean;
+  hoje: boolean;
+  total: number;
+  quantidade: number;
+  /** Vencidas de antes da janela, empilhadas no primeiro dia. */
+  atrasado: boolean;
+}
+
+/**
+ * Quanto sai em cada um dos próximos dias. É a leitura que a tela de lista não
+ * dá: lá as contas estão em ordem, mas ninguém soma de cabeça o que cai na
+ * terça.
+ *
+ * A primeira coluna é o atraso acumulado — tudo que já venceu, de qualquer
+ * data. Ela fica junto porque atraso também precisa sair do caixa desta
+ * semana, e escondê-la faria a agenda parecer mais leve do que é.
+ */
+function AgendaDosDias({ dias }: { dias: DiaDaAgenda[] }) {
+  const maior = Math.max(1, ...dias.map((d) => d.total));
+  const vazio = dias.every((d) => d.total === 0);
+
+  if (vazio) {
+    return (
+      <div className="flex h-44 flex-col justify-center">
+        <p className="text-sm text-tinta-400">
+          Nada vence nos próximos {DIAS_NA_AGENDA} dias.
+        </p>
+        <p className="mt-1 text-xs text-tinta-300">
+          O que está em aberto vence depois disso — veja o gráfico por mês.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-44 items-end gap-1.5">
+      {dias.map((d) => (
+        <div
+          key={d.dia}
+          className="group relative flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1.5"
+          title={
+            d.total > 0
+              ? `${d.atrasado ? 'Atrasadas' : formatData(d.dia)}: ${formatBRL(d.total)} em ${d.quantidade} título(s)`
+              : `${formatData(d.dia)}: nada vence`
+          }
+        >
+          <span className="num shrink-0 text-[10px] font-semibold text-tinta-400 opacity-0 transition group-hover:opacity-100">
+            {d.total > 0 ? formatCompacto(d.total) : ''}
+          </span>
+          <div className="flex w-full flex-1 items-end">
+            <div
+              className="w-full animate-crescer rounded-t-[4px] transition-opacity group-hover:opacity-80"
+              style={{
+                height: `${Math.max((d.total / maior) * 100, d.total > 0 ? 3 : 0)}%`,
+                background: d.atrasado
+                  ? CORES_DE_ESTADO.vencido
+                  : d.hoje
+                    ? CORES_DE_ESTADO.hoje
+                    : PALETA[0],
+              }}
+            />
+          </div>
+          <div
+            className={`shrink-0 text-center leading-tight ${
+              d.hoje ? 'font-semibold text-tinta-700' : 'text-tinta-400'
+            }`}
+          >
+            <div className="num text-[10px]">
+              {d.atrasado ? '!' : d.numero}
+            </div>
+            <div
+              className={`text-[9px] uppercase ${
+                d.fimDeSemana && !d.atrasado ? 'text-tinta-300' : ''
+              }`}
+            >
+              {d.atrasado ? 'atr.' : d.semana}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * O que pagar primeiro, em ordem de aperto: o que venceu antes vem antes, e o
+ * que ainda tem prazo entra por vencimento. Cada linha abre a ficha do débito
+ * — daqui até saber o que é a conta são dois cliques, não uma volta pela lista.
+ */
+function FilaDePagamento({
+  contas,
+  onAbrir,
+}: {
+  contas: ContaAberta[];
+  onAbrir: (conta: ContaAberta) => void;
+}) {
+  if (contas.length === 0) {
+    return (
+      <Vazio titulo="Nada para os próximos dias">
+        Não há conta vencida nem vencendo nesta semana. O que está em aberto
+        vence mais para a frente.
+      </Vazio>
+    );
+  }
+
+  return (
+    <div className="divide-y divide-tinta-100">
+      {contas.map((c) => {
+        const dias = c.diasParaVencer;
+        const atrasada = dias !== null && dias < 0;
+        return (
+          <button
+            key={c.idFnApagar}
+            onClick={() => onAbrir(c)}
+            className="flex w-full items-center justify-between gap-3 px-5 py-3 text-left transition hover:bg-tinta-50"
+          >
+            <span className="min-w-0">
+              <span className="block truncate text-sm text-tinta-800">
+                {c.fornecedor.nome || `Fornecedor ${c.fornecedor.id ?? '?'}`}
+              </span>
+              <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                <Selo pequeno tom={atrasada ? 'erro' : dias === 0 ? 'atencao' : 'pago'}>
+                  {atrasada
+                    ? `${Math.abs(dias)} dia(s) em atraso`
+                    : dias === 0
+                      ? 'vence hoje'
+                      : `em ${dias} dia(s)`}
+                </Selo>
+                {c.classificacao ? (
+                  <span className="text-[11px] text-tinta-400">
+                    {c.classificacao.nome}
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-amber-600">
+                    sem categoria
+                  </span>
+                )}
+              </span>
+            </span>
+            <span className="valor shrink-0 text-sm">
+              {formatBRL(c.valorAberto)}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Quanto os maiores credores representam do total. Uma carteira concentrada em
+ * três nomes se negocia; espalhada em cem, não — e o gráfico de barras sozinho
+ * não responde isso.
+ */
+function Concentracao({ grupos, total }: { grupos: Grupo[]; total: number }) {
+  if (grupos.length < 3 || total <= 0) return null;
+  const tresMaiores = grupos.slice(0, 3).reduce((s, g) => s + g.total, 0);
+  const fatia = Math.round((tresMaiores / total) * 100);
+
+  return (
+    <p className="ajuda">
+      Os três maiores somam {formatBRL(tresMaiores)} — {fatia}% de tudo que está
+      em aberto.
+    </p>
+  );
+}
+
 const SERIES_DO_MES: SerieGrafico[] = [
-  { chave: 'vencido', rotulo: 'Já vencido', cor: '#E11D48' },
+  { chave: 'vencido', rotulo: 'Já vencido', cor: CORES_DE_ESTADO.vencido },
   { chave: 'aVencer', rotulo: 'A vencer', cor: PALETA[0] },
 ];
 
@@ -253,12 +532,19 @@ function agrupar(
   return cabem;
 }
 
-function paraBarras(grupos: Grupo[]) {
+/**
+ * As barras ganham a fatia do total ao lado da contagem: "12 tít." diz quantas
+ * contas são, e "· 34%" diz o tamanho daquilo no bolso da empresa.
+ */
+function paraBarras(grupos: Grupo[], total: number) {
   return grupos.map((g, i) => ({
     rotulo: g.rotulo,
     valor: g.total,
     cor: PALETA[i % PALETA.length],
-    detalhe: `${g.quantidade} tít.`,
+    detalhe:
+      total > 0
+        ? `${g.quantidade} tít. · ${Math.round((g.total / total) * 100)}%`
+        : `${g.quantidade} tít.`,
   }));
 }
 
@@ -314,6 +600,74 @@ function agruparPorMes(
     ...janela.map((m) => porMes.get(m)!),
     ...(depois.aVencer > 0 ? [depois] : []),
   ];
+}
+
+const SIGLA_SEMANA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+
+/**
+ * O que vence em cada um dos próximos dias, com o atraso acumulado na frente.
+ *
+ * As datas do IXC chegam como "AAAA-MM-DD" e são comparadas como texto, sem
+ * virar `Date`: converter para data local no fuso de Brasília joga a conta que
+ * vence dia 1º para o dia 31, e uma agenda de pagamento errada por um dia é
+ * pior que agenda nenhuma.
+ */
+function agruparPorDia(contas: ContaAberta[]): DiaDaAgenda[] {
+  const hoje = new Date();
+  const dias: DiaDaAgenda[] = [];
+
+  const atrasadas = contas.filter(
+    (c) => c.diasParaVencer !== null && c.diasParaVencer < 0,
+  );
+  if (atrasadas.length > 0) {
+    dias.push({
+      dia: 'atrasadas',
+      numero: 0,
+      semana: '',
+      fimDeSemana: false,
+      hoje: false,
+      atrasado: true,
+      total: somar(atrasadas),
+      quantidade: atrasadas.length,
+    });
+  }
+
+  for (let i = 0; i < DIAS_NA_AGENDA; i++) {
+    const d = new Date(hoje);
+    d.setDate(hoje.getDate() + i);
+    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const doDia = contas.filter(
+      (c) => c.vencimento !== null && String(c.vencimento).slice(0, 10) === iso,
+    );
+
+    dias.push({
+      dia: iso,
+      numero: d.getDate(),
+      semana: SIGLA_SEMANA[d.getDay()],
+      fimDeSemana: d.getDay() === 0 || d.getDay() === 6,
+      hoje: i === 0,
+      atrasado: false,
+      total: somar(doDia),
+      quantidade: doDia.length,
+    });
+  }
+
+  return dias;
+}
+
+/**
+ * A ordem em que as contas precisam sair: as vencidas primeiro, da mais antiga
+ * para a mais nova, e depois as da semana. Empatou no prazo, paga a maior —
+ * é a que mais pesa se atrasar.
+ */
+function filaDePagamento(contas: ContaAberta[]): ContaAberta[] {
+  return contas
+    .filter((c) => c.diasParaVencer !== null && c.diasParaVencer <= 7)
+    .sort((a, b) => {
+      const prazo = (a.diasParaVencer ?? 0) - (b.diasParaVencer ?? 0);
+      return prazo !== 0 ? prazo : b.valorAberto - a.valorAberto;
+    })
+    .slice(0, TETO_DA_FILA);
 }
 
 /** O mês dado e os seguintes, em sequência. */

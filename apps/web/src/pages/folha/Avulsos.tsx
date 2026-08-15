@@ -1060,6 +1060,7 @@ export function Avulsos({ doIxc = false }: { doIxc?: boolean } = {}) {
         <FormularioPagamento
           beneficiario={pagando}
           ocupado={pagar.isPending}
+          soValor={doIxc}
           onCancelar={() => setPagando(null)}
           onConfirmar={(body) =>
             pagar.mutate({ beneficiarioId: pagando.id, body })
@@ -1195,14 +1196,25 @@ function resumoDoPagamento(p: PagamentoAvulso): string {
  * vendas que a pessoa fechou (cliente da empresa também vende) e um extra
  * quando fez algo por fora no mesmo acerto.
  */
+/**
+ * @param soValor Esconde a comissão de venda e o serviço por fora, deixando um
+ * valor só. É como o formulário aparece no módulo Contas a Pagar, onde o
+ * pagamento avulso é uma saída da empresa e não um acerto de quem também vende.
+ * Na folha as três partes continuam, porque lá elas são o acerto do mês.
+ *
+ * Não é só enfeite de tela: escondidos, os campos não vão no pedido, e o
+ * pagamento sai com o valor inteiro como serviço.
+ */
 function FormularioPagamento({
   beneficiario,
   ocupado,
+  soValor = false,
   onCancelar,
   onConfirmar,
 }: {
   beneficiario: BeneficiarioAvulso;
   ocupado: boolean;
+  soValor?: boolean;
   onCancelar: () => void;
   onConfirmar: (body: Record<string, unknown>) => void;
 }) {
@@ -1261,57 +1273,61 @@ function FormularioPagamento({
         </Campo>
       </div>
 
-      <Parte titulo="Serviço" valor={servico}>
-        <Campo label="Valor do serviço (R$)" span2>
+      <Parte titulo="Valor" valor={servico}>
+        <Campo label="Valor (R$)" span2>
           <CampoDinheiro valor={valorServico} onChange={setValorServico} />
         </Campo>
       </Parte>
 
-      <Parte
-        titulo="Vendas"
-        valor={comissao}
-        nota="Cliente da empresa também vende e recebe comissão. Deixe em zero quando o acerto não tiver venda."
-      >
-        <Campo label="Quantas vendas">
-          <input
-            type="number"
-            min="0"
-            value={vendas}
-            onChange={(e) => setVendas(e.target.value)}
-            placeholder="0"
-            className="campo"
-          />
-        </Campo>
-        <Campo label="Valor de cada venda (R$)">
-          <CampoDinheiro
-            valor={valorPorVenda}
-            onChange={setValorPorVenda}
-            placeholder={
-              beneficiario.valorPorVenda
-                ? `combinado ${formatBRL(beneficiario.valorPorVenda)}`
-                : 'ex.: 50,00'
-            }
-          />
-        </Campo>
-      </Parte>
+      {!soValor && (
+        <>
+          <Parte
+            titulo="Vendas"
+            valor={comissao}
+            nota="Cliente da empresa também vende e recebe comissão. Deixe em zero quando o acerto não tiver venda."
+          >
+            <Campo label="Quantas vendas">
+              <input
+                type="number"
+                min="0"
+                value={vendas}
+                onChange={(e) => setVendas(e.target.value)}
+                placeholder="0"
+                className="campo"
+              />
+            </Campo>
+            <Campo label="Valor de cada venda (R$)">
+              <CampoDinheiro
+                valor={valorPorVenda}
+                onChange={setValorPorVenda}
+                placeholder={
+                  beneficiario.valorPorVenda
+                    ? `combinado ${formatBRL(beneficiario.valorPorVenda)}`
+                    : 'ex.: 50,00'
+                }
+              />
+            </Campo>
+          </Parte>
 
-      <Parte
-        titulo="Serviço por fora"
-        valor={extra}
-        nota="Aquele trabalho a mais que rendeu um troco no mesmo acerto."
-      >
-        <Campo label="Valor extra (R$)">
-          <CampoDinheiro valor={valorExtra} onChange={setValorExtra} />
-        </Campo>
-        <Campo label="O que foi">
-          <input
-            value={descricaoExtra}
-            onChange={(e) => setDescricaoExtra(e.target.value)}
-            className="campo"
-            placeholder="Ex.: instalação"
-          />
-        </Campo>
-      </Parte>
+          <Parte
+            titulo="Serviço por fora"
+            valor={extra}
+            nota="Aquele trabalho a mais que rendeu um troco no mesmo acerto."
+          >
+            <Campo label="Valor extra (R$)">
+              <CampoDinheiro valor={valorExtra} onChange={setValorExtra} />
+            </Campo>
+            <Campo label="O que foi">
+              <input
+                value={descricaoExtra}
+                onChange={(e) => setDescricaoExtra(e.target.value)}
+                className="campo"
+                placeholder="Ex.: instalação"
+              />
+            </Campo>
+          </Parte>
+        </>
+      )}
 
       <div className="mt-5 grid grid-cols-1 gap-4 border-t border-tinta-100 pt-5 sm:grid-cols-2 lg:grid-cols-3">
         <Campo label="Do que se trata — vai para o IXC" span2>
@@ -1362,10 +1378,16 @@ function FormularioPagamento({
             onConfirmar({
               data,
               valorServico: valorServico || undefined,
-              vendas: Number(vendas) || 0,
-              valorPorVenda: valorPorVenda || undefined,
-              valorExtra: valorExtra || undefined,
-              descricaoExtra: descricaoExtra || undefined,
+              // Sem as partes na tela, nada de comissão nem extra no pedido: o
+              // valor digitado é o pagamento inteiro.
+              ...(soValor
+                ? {}
+                : {
+                    vendas: Number(vendas) || 0,
+                    valorPorVenda: valorPorVenda || undefined,
+                    valorExtra: valorExtra || undefined,
+                    descricaoExtra: descricaoExtra || undefined,
+                  }),
               descricao,
               forma,
               contaContabil: contaContabil || undefined,

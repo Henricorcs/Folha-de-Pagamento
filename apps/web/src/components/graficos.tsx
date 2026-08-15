@@ -15,12 +15,25 @@ import { formatBRL } from '../lib/format';
  * série da outra para quem lê.
  */
 export const PALETA = [
-  '#1490EE', // azul da marca
-  '#D97706', // âmbar
-  '#0E9E91', // turquesa
-  '#E11D48', // vermelho
-  '#7C3AED', // violeta
+  'var(--serie-1)', // azul da marca
+  'var(--serie-2)', // âmbar
+  'var(--serie-3)', // turquesa
+  'var(--serie-4)', // vermelho
+  'var(--serie-5)', // violeta
 ] as const;
+
+/**
+ * O semáforo da conta a pagar, nos mesmos tons em toda a ferramenta. São cores
+ * de estado, não de série: nunca servem para "a quarta categoria", e sempre
+ * aparecem junto do rótulo em palavras — quem não distingue as cores lê o
+ * mesmo que os outros.
+ */
+export const CORES_DE_ESTADO = {
+  vencido: 'var(--estado-vencido)',
+  hoje: 'var(--estado-hoje)',
+  prazo: 'var(--estado-prazo)',
+  semData: 'var(--estado-sem-data)',
+} as const;
 
 export interface SerieGrafico {
   /** Campo do objeto de cada mês que guarda o valor desta série. */
@@ -311,7 +324,7 @@ function somar(mes: LinhaDoMes, series: SerieGrafico[]): number {
 }
 
 /** "R$ 12,4 mil" — cabe em cima da barra sem virar sopa de dígitos. */
-function formatCompacto(valor: number): string {
+export function formatCompacto(valor: number): string {
   if (valor >= 1000) {
     const mil = valor / 1000;
     return `${mil.toFixed(mil >= 100 ? 0 : 1).replace('.', ',')} mil`;
