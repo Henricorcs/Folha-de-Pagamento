@@ -22,6 +22,7 @@ import type {
 import { EditarConta, ExcluirConta, PagarEmMaos } from './AcoesDaConta';
 import { DetalheDaConta } from './DetalheDaConta';
 import { NovaDespesa } from './NovaDespesa';
+import { TornarRecorrente } from './TornarRecorrente';
 
 /**
  * O que a empresa deve hoje, lido do IXC na hora de abrir.
@@ -53,6 +54,8 @@ export function Inicio() {
   const [pagandoEmMaos, setPagandoEmMaos] = useState<ContaAberta[] | null>(null);
   const [editando, setEditando] = useState<ContaAberta | null>(null);
   const [excluindo, setExcluindo] = useState<ContaAberta | null>(null);
+  /** Conta que está virando despesa mensal. */
+  const [repetindo, setRepetindo] = useState<ContaAberta | null>(null);
 
   const consulta = useQuery({
     queryKey: ['contas-abertas'],
@@ -308,13 +311,20 @@ export function Inicio() {
         encontraria.
       */}
       {marcados.size > 0 && (
-        <div className="surgir mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3">
-          <span className="text-sm font-semibold text-brand-900">
+        <div className="surgir barra-selecao mb-4">
+          <span className="barra-selecao-titulo">
             {marcados.size} título(s) marcado(s)
+          </span>
+          <span className="valor text-sm text-white/80">
+            {formatBRL(
+              (consulta.data?.contas ?? [])
+                .filter((c) => marcados.has(c.idFnApagar))
+                .reduce((s, c) => s + c.valorAberto, 0),
+            )}
           </span>
           {marcados.size > visiveisMarcados.length && (
             <span
-              className="text-xs text-brand-700"
+              className="text-xs text-white/50"
               title="A marcação continua valendo para o que o filtro escondeu"
             >
               ({visiveisMarcados.length} na tela agora)
@@ -378,13 +388,13 @@ export function Inicio() {
               }
             }}
             disabled={excluirLote.isPending}
-            className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10"
+            className="btn btn-p border border-white/15 text-rose-200 hover:bg-rose-500/20"
           >
             {excluirLote.isPending ? 'Apagando…' : 'Excluir'}
           </button>
           <button
             onClick={() => setMarcados(new Set())}
-            className="btn btn-sutil btn-p"
+            className="btn btn-p text-white/60 hover:bg-white/10 hover:text-white"
           >
             Limpar seleção
           </button>
@@ -465,6 +475,18 @@ export function Inicio() {
         <DetalheDaConta
           conta={detalhando}
           onFechar={() => setDetalhando(null)}
+          onRepetir={() => {
+            setRepetindo(detalhando);
+            setDetalhando(null);
+          }}
+        />
+      )}
+
+      {repetindo && (
+        <TornarRecorrente
+          conta={repetindo}
+          todas={consulta.data?.contas ?? []}
+          onFechar={() => setRepetindo(null)}
         />
       )}
 
@@ -523,8 +545,8 @@ function Linha({
         }
       }}
       title="Abrir o detalhe deste débito"
-      className={`linha cursor-pointer focus:bg-brand-50 focus:outline-none ${
-        marcado ? 'bg-brand-50/60' : ''
+      className={`linha cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500 ${
+        marcado ? 'linha-marcada' : ''
       }`}
     >
       {/* O clique aqui morre no checkbox: marcar para classificar em lote e

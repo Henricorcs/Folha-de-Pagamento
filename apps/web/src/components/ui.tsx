@@ -167,16 +167,18 @@ export function Janela({
   }, [onFechar]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex justify-center overflow-y-auto rolagem-fina bg-barra/60 p-4 backdrop-blur-sm sm:p-6"
-      onClick={onFechar}
-    >
+    /*
+     * O clique no fundo não fecha: estas janelas carregam trabalho — um
+     * pagamento conferido, uma edição de meia dúzia de campos — e um clique
+     * fora de mira jogava tudo fora sem perguntar. Sai pelo X ou pelo Esc,
+     * que são gestos de quem quer sair.
+     */
+    <div className="fixed inset-0 z-50 flex justify-center overflow-y-auto rolagem-fina bg-barra/70 p-4 backdrop-blur-sm sm:p-6">
       <div
         role="dialog"
         aria-modal="true"
         aria-label={titulo}
-        onClick={(e) => e.stopPropagation()}
-        className="surgir my-auto h-fit w-full max-w-5xl rounded-2xl bg-papel shadow-2xl"
+        className="surgir my-auto h-fit w-full max-w-5xl rounded-2xl border border-tinta-100 bg-papel shadow-2xl"
       >
         <div className="flex items-start justify-between gap-3 border-b border-tinta-100 px-5 py-4 sm:px-6">
           <h2 className="titulo-bloco">{titulo}</h2>

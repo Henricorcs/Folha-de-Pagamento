@@ -489,7 +489,7 @@ export function ContasPagar() {
                 <tr
                   key={c.id}
                   className={`linha ${
-                    selecao.includes(c.id) ? 'bg-brand-50/60' : ''
+                    selecao.includes(c.id) ? 'linha-marcada' : ''
                   }`}
                 >
                   <td className="td">

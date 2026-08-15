@@ -171,6 +171,33 @@
   .linha {
     @apply border-t border-tinta-100 transition-colors hover:bg-tinta-50/70;
   }
+  /*
+   * Linha marcada: um véu da cor da marca e uma faixa na borda esquerda.
+   *
+   * Era `bg-brand-50`, uma cor clara fixa — no tema escuro ela virava uma
+   * tarja quase branca por cima do texto claro, e uma seleção de quinhentas
+   * linhas deixava a tabela ilegível. Véu com transparência funciona nos dois
+   * temas porque escurece ou clareia o que já está lá, em vez de trocar.
+   */
+  .linha-marcada {
+    @apply bg-brand-500/10 dark:bg-brand-400/[0.14];
+    box-shadow: inset 3px 0 0 theme('colors.brand.500');
+  }
+
+  /*
+   * Barra de ações da seleção: escura e fixa no topo, igual nos dois módulos.
+   *
+   * Escura porque é a única faixa da tela que precisa se destacar do conteúdo
+   * sem depender do tema — clara, ela sumia no modo escuro. Fixa porque a
+   * lista tem centenas de linhas: marcar lá embaixo e ter de rolar até o topo
+   * para achar o botão é o caminho mais curto para desistir da seleção.
+   */
+  .barra-selecao {
+    @apply sticky top-2 z-20 flex flex-wrap items-center gap-3 rounded-xl bg-barra px-4 py-3 text-sm text-white shadow-lg;
+  }
+  .barra-selecao-titulo {
+    @apply font-semibold text-white;
+  }
 
   /* --- Selos --- */
   .selo {

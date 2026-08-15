@@ -26,9 +26,12 @@ import type {
 export function DetalheDaConta({
   conta,
   onFechar,
+  onRepetir,
 }: {
   conta: ContaAberta;
   onFechar: () => void;
+  /** Abre a tela que transforma esta conta em despesa mensal. */
+  onRepetir?: () => void;
 }) {
   const queryClient = useQueryClient();
   const [copiado, setCopiado] = useState(false);
@@ -290,7 +293,15 @@ export function DetalheDaConta({
         </div>
         )}
 
-        <div className="mt-5 flex justify-end">
+        <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+          {/* Serviço mensal quase sempre se descobre olhando uma conta que já
+              chegou — é aqui que dá para dizer "essa se repete" sem ter de
+              lançá-la de novo. */}
+          {onRepetir && conta.fornecedor.id && (
+            <button onClick={onRepetir} className="btn btn-neutro mr-auto">
+              Repetir todo mês
+            </button>
+          )}
           <button onClick={onFechar} className="btn btn-neutro">
             Fechar
           </button>
