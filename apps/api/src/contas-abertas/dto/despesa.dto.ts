@@ -132,6 +132,15 @@ export class ParcelaDaDespesaDto {
 
   /** Documento desta parcela, quando cada uma tem o seu. */
   @IsOptional() @IsString() @MaxLength(40) documento?: string;
+
+  /**
+   * Como esta parcela se chama na observação do IXC — "13/120".
+   *
+   * Sem isto o número sai da posição na lista, o que só serve para nota nova.
+   * Num consórcio já em andamento a primeira a lançar é a 13 de 120, e chamá-la
+   * de "1/85" faria a conta do sistema não bater com o boleto do grupo.
+   */
+  @IsOptional() @IsString() @MaxLength(20) rotulo?: string;
 }
 
 /**
@@ -217,12 +226,14 @@ export class CriarDespesaDto {
    * valem só como a soma e a primeira data que a tela mostrou: quem manda são
    * estas linhas, e cada uma vira uma conta a pagar no IXC.
    *
-   * O teto de 60 é um ano e meio de parcelas mensais — acima disso é engano de
-   * digitação, e sessenta idas ao IXC já são uma espera longa.
+   * O teto de 240 é o mesmo da tela: vinte anos de parcelas mensais. Era 60,
+   * pensando em nota parcelada, mas consórcio de máquina agrícola passa de 100
+   * parcelas com facilidade — um trator em 120 meses é comum. Acima de 240 é
+   * engano de digitação.
    */
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(60)
+  @ArrayMaxSize(240)
   @ValidateNested({ each: true })
   @Type(() => ParcelaDaDespesaDto)
   parcelas?: ParcelaDaDespesaDto[];

@@ -118,6 +118,12 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
   const [parcelas, setParcelas] = useState<Parcela[]>([]);
 
   // --- Consórcio ---
+  /**
+   * Como as datas caminham: "mes" mantém o dia (vence todo dia 10), "dias30"
+   * conta de trinta em trinta. As duas coisas se separam depois de meio ano, e
+   * qual vale depende do contrato do grupo.
+   */
+  const [ritmoConsorcio, setRitmoConsorcio] = useState<'mes' | 'dias30'>('mes');
   const [totalParcelas, setTotalParcelas] = useState('');
   const [parcelasPagas, setParcelasPagas] = useState('');
   const [taxaAdmin, setTaxaAdmin] = useState('');
@@ -188,9 +194,15 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
             (ehCopiaECola ? 'Código copia e cola' : tipoChavePix) || undefined,
           contaPagamento: contaPagamento ? Number(contaPagamento) : undefined,
           parcelas: parcelado
-            ? parcelas.map((p) => ({
+            ? parcelas.map((p, i) => ({
                 valor: Number(p.valor),
                 dataVencimento: p.vencimento,
+                // Num consórcio a numeração continua a do grupo: o IXC precisa
+                // ler "13/120", que é o que vem no boleto.
+                rotulo:
+                  modoParcela === 'consorcio'
+                    ? `${(Number(parcelasPagas) || 0) + i + 1}/${totalParcelas}`
+                    : undefined,
               }))
             : undefined,
         },
@@ -292,8 +304,12 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
    * anual entra a cada doze meses — que é como o grupo corrige o saldo. As
    * duas taxas são opcionais e a tabela continua editável: consórcio tem
    * regra de contrato, e o que vale é o boleto que chega.
+   *
+   * O `ritmo` vem por parâmetro, e não do estado, porque quem troca o botão
+   * precisa gerar já com a escolha nova — `setState` só vale no render
+   * seguinte, e a tabela sairia com o ritmo anterior.
    */
-  function gerarConsorcio(): Parcela[] {
+  function gerarConsorcio(ritmo = ritmoConsorcio): Parcela[] {
     const restantes = faltamDoConsorcio;
     if (restantes < 1 || !vencimento) return [];
 
@@ -307,7 +323,10 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
       const valorDaParcela = comTaxa * Math.pow(1 + reajuste, anos);
       return {
         valor: valorDaParcela.toFixed(2),
-        vencimento: mesesDepois(vencimento, i),
+        vencimento:
+          ritmo === 'mes'
+            ? mesesDepois(vencimento, i)
+            : somarDias(vencimento, 30 * i),
       };
     });
   }
@@ -893,6 +912,34 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
                     </div>
                   </div>
 
+                  <div className="mt-3">
+                    <span className="rotulo">As parcelas vencem</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(
+                        [
+                          ['mes', 'Todo mês no mesmo dia'],
+                          ['dias30', 'A cada 30 dias'],
+                        ] as const
+                      ).map(([r, rotulo]) => (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => {
+                            setRitmoConsorcio(r);
+                            setParcelas(gerarConsorcio(r));
+                          }}
+                          className={
+                            ritmoConsorcio === r
+                              ? 'btn btn-p bg-brand-600 text-white'
+                              : 'btn btn-p btn-neutro'
+                          }
+                        >
+                          {rotulo}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="mt-2 flex flex-wrap items-center gap-3">
                     <button
                       type="button"
@@ -1103,9 +1150,25 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
           disabled={!podeLancar || lancar.isPending}
           className="btn btn-primario"
         >
-          {lancar.isPending ? 'Lançando no IXC…' : 'Lançar conta'}
+          {lancar.isPending
+            ? parcelas.length > 1
+              ? `Lançando ${parcelas.length} contas no IXC…`
+              : 'Lançando no IXC…'
+            : parcelado && parcelas.length > 1
+              ? `Lançar ${parcelas.length} contas`
+              : 'Lançar conta'}
         </button>
       </div>
+
+      {/* Cada parcela é uma ida ao IXC, e mais uma para aprovar. Uma dúzia
+          passa despercebida; oitenta demoram, e sem aviso parece travado. */}
+      {parcelado && parcelas.length > 24 && (
+        <p className="mt-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+          São {parcelas.length} contas para criar no IXC, uma de cada vez —
+          costuma levar alguns minutos. Deixe esta tela aberta até o fim; se
+          parar no meio, as que já entraram ficam lá e a tela diz em qual parou.
+        </p>
+      )}
 
       {fornecedor && (
         <p className="mt-3 text-right text-xs text-tinta-400">

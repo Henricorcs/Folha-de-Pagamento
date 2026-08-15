@@ -101,9 +101,11 @@ export class DespesasService {
 
     for (const [i, parcela] of parcelas.entries()) {
       // "3/6" na observação é o que permite reconhecer a parcela na lista do
-      // IXC, onde todas aparecem com o mesmo fornecedor e o mesmo texto.
-      const observacao =
-        `${dto.observacao.trim()} (${i + 1}/${parcelas.length})`.slice(0, 500);
+      // IXC, onde todas aparecem com o mesmo fornecedor e o mesmo texto. Num
+      // consórcio já em andamento a numeração vem pronta da tela, porque ali a
+      // primeira a lançar pode ser a 13 de 120.
+      const numero = parcela.rotulo || `${i + 1}/${parcelas.length}`;
+      const observacao = `${dto.observacao.trim()} (${numero})`.slice(0, 500);
 
       try {
         const conta = await this.contasPagar.criarDespesa(
