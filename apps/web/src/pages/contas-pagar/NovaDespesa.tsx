@@ -110,10 +110,18 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
 
   // --- Parcelamento ---
   const [parcelado, setParcelado] = useState(false);
+  /** "nota" divide um total; "consorcio" repete a parcela que falta. */
+  const [modoParcela, setModoParcela] = useState<'nota' | 'consorcio'>('nota');
   const [quantasParcelas, setQuantasParcelas] = useState('2');
   /** Dias entre uma parcela e a seguinte: quinzenal ou mensal. */
   const [intervalo, setIntervalo] = useState<15 | 30>(30);
   const [parcelas, setParcelas] = useState<Parcela[]>([]);
+
+  // --- Consórcio ---
+  const [totalParcelas, setTotalParcelas] = useState('');
+  const [parcelasPagas, setParcelasPagas] = useState('');
+  const [taxaAdmin, setTaxaAdmin] = useState('');
+  const [reajusteAnual, setReajusteAnual] = useState('');
   const [lancada, setLancada] = useState<DespesaLancada | null>(null);
 
   const categorias = useQuery({
@@ -262,6 +270,52 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
     setParcelas(gerarParcelas(quantidade, Number(valor) || 0, vencimento, dias));
   }
 
+  /**
+   * Quantas parcelas do consórcio ainda não foram pagas. O teto de 240 é para
+   * um dedo escorregado no total não virar mil linhas na tela — e mil contas
+   * no IXC.
+   */
+  const faltamDoConsorcio = Math.min(
+    Math.max((Number(totalParcelas) || 0) - (Number(parcelasPagas) || 0), 0),
+    240,
+  );
+
+  /**
+   * As parcelas que faltam de um consórcio.
+   *
+   * Diferente da nota parcelada: ali o valor total é dividido; aqui o valor da
+   * parcela é conhecido e o que se sabe é quantas faltam. Quem entra com um
+   * consórcio no meio já pagou algumas fora do sistema, e são as que sobram
+   * que precisam existir como conta a pagar.
+   *
+   * A parcela cheia é o valor base mais a taxa de administração, e o reajuste
+   * anual entra a cada doze meses — que é como o grupo corrige o saldo. As
+   * duas taxas são opcionais e a tabela continua editável: consórcio tem
+   * regra de contrato, e o que vale é o boleto que chega.
+   */
+  function gerarConsorcio(): Parcela[] {
+    const restantes = faltamDoConsorcio;
+    if (restantes < 1 || !vencimento) return [];
+
+    const base = Number(valor) || 0;
+    const comTaxa = base * (1 + (Number(taxaAdmin) || 0) / 100);
+    const reajuste = (Number(reajusteAnual) || 0) / 100;
+
+    return Array.from({ length: restantes }, (_, i) => {
+      // A cada doze parcelas o valor sobe uma vez — o reajuste do grupo.
+      const anos = Math.floor(i / 12);
+      const valorDaParcela = comTaxa * Math.pow(1 + reajuste, anos);
+      return {
+        valor: valorDaParcela.toFixed(2),
+        vencimento: mesesDepois(vencimento, i),
+      };
+    });
+  }
+
+  function refazerConsorcio() {
+    setParcelas(gerarConsorcio());
+  }
+
   const somaDasParcelas = parcelas.reduce(
     (s, p) => s + (Number(p.valor) || 0),
     0,
@@ -279,7 +333,10 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
     observacao.trim().length >= 3 &&
     // Boleto com código pela metade não é recusado aqui, mas com código errado
     // sim: a conta chegaria ao IXC com um número que o banco não reconhece.
-    (!ehBoleto || !codigoBarras || boletoValido);
+    (!ehBoleto || !codigoBarras || boletoValido) &&
+    // Marcar "em parcelas" e mandar sem nenhuma linha lançaria uma conta só,
+    // do valor cheio — o oposto do que se pediu.
+    (!parcelado || parcelas.length > 0);
 
   // Depois de lançada a tela vira recibo: a conta já existe no IXC e mostrar o
   // formulário de novo convidaria a lançar a mesma despesa duas vezes.
@@ -409,7 +466,9 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label className="rotulo" htmlFor="valor">
-            Valor
+            {parcelado && modoParcela === 'consorcio'
+              ? 'Valor da parcela'
+              : 'Valor'}
           </label>
           <CampoDinheiro valor={valor} onChange={setValor} placeholder="0,00" />
         </div>
@@ -722,8 +781,9 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
               checked={parcelado}
               onChange={(e) => {
                 setParcelado(e.target.checked);
-                if (e.target.checked) refazerParcelas();
-                else setParcelas([]);
+                if (!e.target.checked) setParcelas([]);
+                else if (modoParcela === 'consorcio') refazerConsorcio();
+                else refazerParcelas();
               }}
             />
             Lançar em parcelas — uma conta a pagar para cada uma no IXC
@@ -731,6 +791,133 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
 
           {parcelado && (
             <div className="mt-2 rounded-xl border border-tinta-100 p-3">
+              {/* Dois jeitos de parcelar, e a diferença é o que se sabe: numa
+                  nota sabe-se o total e divide-se; num consórcio sabe-se a
+                  parcela e quantas faltam. */}
+              <div className="mb-3 flex flex-wrap gap-1.5">
+                {(
+                  [
+                    ['nota', 'Nota parcelada', 'Divide o valor total'],
+                    [
+                      'consorcio',
+                      'Consórcio',
+                      'Repete a parcela que falta pagar',
+                    ],
+                  ] as const
+                ).map(([modo, rotulo, nota]) => (
+                  <button
+                    key={modo}
+                    type="button"
+                    onClick={() => {
+                      setModoParcela(modo);
+                      if (modo === 'consorcio') setParcelas(gerarConsorcio());
+                      else refazerParcelas();
+                    }}
+                    title={nota}
+                    className={
+                      modoParcela === modo
+                        ? 'btn btn-p bg-brand-600 text-white'
+                        : 'btn btn-p btn-neutro'
+                    }
+                  >
+                    {rotulo}
+                  </button>
+                ))}
+              </div>
+
+              {modoParcela === 'consorcio' ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div>
+                      <label className="rotulo" htmlFor="total-parcelas">
+                        Parcelas no total
+                      </label>
+                      <input
+                        id="total-parcelas"
+                        type="number"
+                        min={1}
+                        max={240}
+                        value={totalParcelas}
+                        onChange={(e) => setTotalParcelas(e.target.value)}
+                        onBlur={refazerConsorcio}
+                        className="campo"
+                        placeholder="80"
+                      />
+                    </div>
+                    <div>
+                      <label className="rotulo" htmlFor="parcelas-pagas">
+                        Já pagas
+                      </label>
+                      <input
+                        id="parcelas-pagas"
+                        type="number"
+                        min={0}
+                        value={parcelasPagas}
+                        onChange={(e) => setParcelasPagas(e.target.value)}
+                        onBlur={refazerConsorcio}
+                        className="campo"
+                        placeholder="12"
+                      />
+                    </div>
+                    <div>
+                      <label className="rotulo" htmlFor="taxa-admin">
+                        Taxa de adm. (%)
+                      </label>
+                      <input
+                        id="taxa-admin"
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        value={taxaAdmin}
+                        onChange={(e) => setTaxaAdmin(e.target.value)}
+                        onBlur={refazerConsorcio}
+                        className="campo"
+                        placeholder="0"
+                      />
+                    </div>
+                    <div>
+                      <label className="rotulo" htmlFor="reajuste">
+                        Reajuste anual (%)
+                      </label>
+                      <input
+                        id="reajuste"
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        value={reajusteAnual}
+                        onChange={(e) => setReajusteAnual(e.target.value)}
+                        onBlur={refazerConsorcio}
+                        className="campo"
+                        placeholder="0"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={refazerConsorcio}
+                      className="btn btn-neutro btn-p"
+                    >
+                      Gerar as que faltam
+                    </button>
+                    <span className="text-xs text-tinta-400">
+                      {faltamDoConsorcio > 0
+                        ? `Faltam ${faltamDoConsorcio} de ${totalParcelas || '?'}, a primeira vencendo em ${
+                            vencimento ? formatarDia(vencimento) : '—'
+                          }.`
+                        : 'Informe o total e quantas já foram pagas.'}
+                    </span>
+                  </div>
+
+                  <p className="ajuda">
+                    O valor acima é o da parcela, não o total do consórcio. A
+                    taxa de administração entra em cada uma, e o reajuste anual
+                    sobe o valor a cada doze parcelas — a tabela abaixo fica
+                    editável, porque o que vale é o boleto que o grupo manda.
+                  </p>
+                </>
+              ) : (
               <div className="flex flex-wrap items-end gap-3">
                 <div>
                   <label className="rotulo" htmlFor="quantas">
@@ -783,13 +970,14 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
                   A primeira vence em {vencimento ? formatarDia(vencimento) : '—'}
                 </span>
               </div>
+              )}
 
               {parcelas.length > 0 && (
                 <div className="mt-3 overflow-x-auto rolagem-fina">
                   <table className="w-full text-sm">
                     <thead>
                       <tr>
-                        <th className="th w-10">#</th>
+                        <th className="th w-16">#</th>
                         <th className="th">Vencimento</th>
                         <th className="th">Valor</th>
                       </tr>
@@ -797,7 +985,14 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
                     <tbody>
                       {parcelas.map((p, i) => (
                         <tr key={i} className="linha">
-                          <td className="td num text-tinta-400">{i + 1}</td>
+                          {/* No consórcio a numeração continua de onde o grupo
+                              parou: quem já pagou 12 de 80 vê a próxima como
+                              13/80, que é o número que vem no boleto. */}
+                          <td className="td num whitespace-nowrap text-tinta-400">
+                            {modoParcela === 'consorcio'
+                              ? `${(Number(parcelasPagas) || 0) + i + 1}/${totalParcelas || '?'}`
+                              : i + 1}
+                          </td>
                           <td className="td">
                             <input
                               type="date"
@@ -834,13 +1029,26 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
                 </div>
               )}
 
-              <p className={`ajuda ${diferenca !== 0 ? 'text-amber-700' : ''}`}>
-                {diferenca === 0
-                  ? `As ${parcelas.length} parcelas somam ${formatBRL(somaDasParcelas)} — igual ao total da nota.`
-                  : `As parcelas somam ${formatBRL(somaDasParcelas)}, ${
-                      diferenca > 0 ? 'a mais' : 'a menos'
-                    } que o total da nota (${formatBRL(Math.abs(diferenca))} de diferença).`}
-              </p>
+              {/* No consórcio não há "total da nota" com que conferir: o valor
+                  digitado é o da parcela. O que interessa saber é quanto ainda
+                  falta pagar até o fim do grupo. */}
+              {modoParcela === 'consorcio' ? (
+                <p className="ajuda">
+                  {parcelas.length > 0
+                    ? `${parcelas.length} parcela(s) a lançar, somando ${formatBRL(
+                        somaDasParcelas,
+                      )} até ${formatarDia(parcelas[parcelas.length - 1].vencimento)}.`
+                    : 'Nenhuma parcela a lançar ainda.'}
+                </p>
+              ) : (
+                <p className={`ajuda ${diferenca !== 0 ? 'text-amber-700' : ''}`}>
+                  {diferenca === 0
+                    ? `As ${parcelas.length} parcelas somam ${formatBRL(somaDasParcelas)} — igual ao total da nota.`
+                    : `As parcelas somam ${formatBRL(somaDasParcelas)}, ${
+                        diferenca > 0 ? 'a mais' : 'a menos'
+                      } que o total da nota (${formatBRL(Math.abs(diferenca))} de diferença).`}
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -880,7 +1088,11 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
                 ? 'Informe o valor.'
                 : observacao.trim().length < 3
                   ? 'Escreva a observação (o que é essa conta).'
-                  : 'Confira a linha digitável do boleto.'}
+                  : parcelado && parcelas.length === 0
+                    ? modoParcela === 'consorcio'
+                      ? 'Diga quantas parcelas são no total e quantas já foram pagas.'
+                      : 'Gere as parcelas antes de lançar.'
+                    : 'Confira a linha digitável do boleto.'}
           </span>
         )}
         <button onClick={onFechar} className="btn btn-neutro">
@@ -952,6 +1164,22 @@ function mesSeguinte(iso: string): string {
   const [ano, mes, dia] = iso.slice(0, 10).split('-').map(Number);
   const ultimoDoProximo = new Date(Date.UTC(ano, mes + 1, 0)).getUTCDate();
   const d = new Date(Date.UTC(ano, mes, Math.min(dia, ultimoDoProximo)));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(
+    d.getUTCDate(),
+  ).padStart(2, '0')}`;
+}
+
+/**
+ * O mesmo dia, alguns meses à frente — a conta de um consórcio vence todo dia
+ * 10, não a cada 30 dias, e as duas coisas se separam depois de meio ano.
+ * Mesmo cuidado com o dia 31 do `mesSeguinte`.
+ */
+function mesesDepois(iso: string, meses: number): string {
+  const [ano, mes, dia] = iso.slice(0, 10).split('-').map(Number);
+  const ultimoDoAlvo = new Date(Date.UTC(ano, mes + meses, 0)).getUTCDate();
+  const d = new Date(
+    Date.UTC(ano, mes - 1 + meses, Math.min(dia, ultimoDoAlvo)),
+  );
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(
     d.getUTCDate(),
   ).padStart(2, '0')}`;
