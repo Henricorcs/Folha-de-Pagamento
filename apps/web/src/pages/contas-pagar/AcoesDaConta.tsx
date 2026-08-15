@@ -32,15 +32,20 @@ function hojeISO(): string {
 }
 
 /**
- * Pagar em mãos — uma conta ou várias, na mesma janela.
+ * Pagar — uma conta ou várias, na mesma janela.
  *
- * A confirmação mostra o que vai sair e de onde antes de qualquer coisa
- * acontecer: é dinheiro saindo do caixa, e uma tela que só diz "pago" depois
- * do fato não dá chance de conferir a lista.
+ * A conta escolhida decide o que acontece, e a tela diz qual é o caso antes de
+ * confirmar:
  *
- * O lote vai uma conta por vez no IXC; o que já saiu fica de pé se a seguinte
- * falhar, e a tela diz quais passaram. Desfazer pagamento que deu certo por
- * causa do que não deu seria tirar dinheiro do caixa duas vezes.
+ * - **ModoBank**: só aprova no IXC. O pagamento sai pela tela dele lá, com um
+ *   botão que este app não tem permissão de acionar — marcar como paga aqui
+ *   seria dar por quitado o que o banco ainda não pagou.
+ * - **qualquer outra conta**: aprova e dá baixa, que é o mesmo que fazer o
+ *   pagamento manual no IXC. É o que evita repetir o trabalho lá.
+ *
+ * O lote vai uma conta por vez; o que já saiu fica de pé se a seguinte falhar,
+ * e a tela diz quais passaram. Desfazer pagamento que deu certo por causa do
+ * que não deu seria tirar dinheiro do caixa duas vezes.
  */
 export function PagarEmMaos({
   contas,
@@ -51,9 +56,11 @@ export function PagarEmMaos({
 }) {
   const queryClient = useQueryClient();
   const [data, setData] = useState(hojeISO);
+  const [contaEscolhida, setContaEscolhida] = useState('');
   const [resultado, setResultado] = useState<{
     pagas: number;
     total: number;
+    aguardandoBanco: number;
     falhas: Array<{ idFnApagar: number; erro: string }>;
   } | null>(null);
 
@@ -63,25 +70,41 @@ export function PagarEmMaos({
       (await api.get<ContaDePagamento[]>('/contas-abertas/contas-pagamento'))
         .data,
   });
-  const caixa = contasIxc.data?.find((c) => c.id === CAIXA_EM_MAOS);
+
+  const config = useQuery({
+    queryKey: ['config-financeira'],
+    queryFn: async () =>
+      (await api.get<{ contaPagamentoId: number }>('/config-financeira')).data,
+  });
+
+  /** A do banco que paga sozinho: é a padrão da configuração (ModoBank). */
+  const contaDoBanco = config.data?.contaPagamentoId;
+  const contaAtual = Number(contaEscolhida) || contaDoBanco;
+  const escolhida = contasIxc.data?.find((c) => c.id === contaAtual);
+  const soAprova = !!contaDoBanco && contaAtual === contaDoBanco;
 
   const total = contas.reduce((s, c) => s + c.valorAberto, 0);
 
   const pagar = useMutation({
     mutationFn: async () => {
       const { data: r } = await api.post<{
-        pagas: Array<{ idFnApagar: number }>;
+        pagas: Array<{ idFnApagar: number; aguardandoBanco: boolean }>;
         falhas: Array<{ idFnApagar: number; erro: string }>;
         total: number;
       }>('/contas-abertas/pagar-lote', {
         idsFnApagar: contas.map((c) => c.idFnApagar),
-        forma: 'EM_MAOS',
+        contaPagamento: contaAtual,
         data,
       });
       return r;
     },
     onSuccess: (r) => {
-      setResultado({ pagas: r.pagas.length, total: r.total, falhas: r.falhas });
+      setResultado({
+        pagas: r.pagas.length,
+        total: r.total,
+        aguardandoBanco: r.pagas.filter((p) => p.aguardandoBanco).length,
+        falhas: r.falhas,
+      });
       void queryClient.invalidateQueries({ queryKey: ['contas-abertas'] });
       void queryClient.invalidateQueries({ queryKey: ['pagas-no-mes'] });
     },
@@ -89,15 +112,21 @@ export function PagarEmMaos({
 
   if (resultado) {
     return (
-      <Janela titulo="Pagamento feito" onFechar={onFechar}>
+      <Janela
+        titulo={resultado.aguardandoBanco ? 'Aprovado no IXC' : 'Pagamento feito'}
+        onFechar={onFechar}
+      >
         <p className="font-display text-lg font-semibold text-tinta-900">
-          {resultado.pagas === 1
-            ? `${formatBRL(resultado.total)} pago e baixado no IXC`
-            : `${resultado.pagas} contas pagas — ${formatBRL(resultado.total)}`}
+          {resultado.aguardandoBanco
+            ? `${resultado.pagas} conta(s) aprovadas — ${formatBRL(resultado.total)}`
+            : resultado.pagas === 1
+              ? `${formatBRL(resultado.total)} pago e baixado no IXC`
+              : `${resultado.pagas} contas pagas — ${formatBRL(resultado.total)}`}
         </p>
         <p className="mt-1 text-sm text-tinta-500">
-          Saiu de {caixa?.nome ?? `conta ${CAIXA_EM_MAOS}`}. No IXC as contas
-          constam quitadas; estornar, se precisar, é por lá.
+          {resultado.aguardandoBanco
+            ? `Estão liberadas no IXC para o ${escolhida?.nome ?? 'banco'} pagar — é lá que o pagamento sai.`
+            : `Saiu de ${escolhida?.nome ?? 'conta escolhida'}. No IXC as contas constam quitadas; estornar, se precisar, é por lá.`}
         </p>
 
         {resultado.falhas.length > 0 && (
@@ -126,24 +155,56 @@ export function PagarEmMaos({
 
   return (
     <Janela
-      titulo={contas.length === 1 ? 'Pagar em mãos' : `Pagar ${contas.length} contas em mãos`}
+      titulo={contas.length === 1 ? 'Pagar' : `Pagar ${contas.length} contas`}
       onFechar={onFechar}
     >
       <div className="rounded-2xl bg-tinta-50 p-4">
-        <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <div className="text-sm text-tinta-500">Vai sair do caixa</div>
+            <div className="text-sm text-tinta-500">
+              {soAprova ? 'Vai ser liberado para o banco' : 'Vai sair de'}
+            </div>
             <div className="valor text-3xl">{formatBRL(total)}</div>
           </div>
-          <div className="text-right">
-            <div className="text-sm text-tinta-500">De onde sai</div>
-            <div className="font-semibold text-tinta-900">
-              {contasIxc.isLoading
-                ? 'lendo…'
-                : (caixa?.nome ?? `Conta ${CAIXA_EM_MAOS}`)}
-            </div>
+          <div className="min-w-[240px]">
+            <label className="rotulo" htmlFor="conta-do-pagamento">
+              De onde sai
+            </label>
+            <select
+              id="conta-do-pagamento"
+              value={contaEscolhida}
+              onChange={(e) => setContaEscolhida(e.target.value)}
+              className="campo"
+              disabled={contasIxc.isLoading}
+            >
+              <option value="">
+                {contaDoBanco
+                  ? `Padrão — ${contasIxc.data?.find((c) => c.id === contaDoBanco)?.nome ?? contaDoBanco}`
+                  : 'Padrão das Configurações'}
+              </option>
+              {(contasIxc.data ?? [])
+                .filter((c) => c.usual || c.ativa)
+                .map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nome}
+                  </option>
+                ))}
+            </select>
           </div>
         </div>
+
+        {/* O que vai acontecer, em uma linha, antes de confirmar. */}
+        <p
+          className={`mt-3 text-sm ${
+            soAprova
+              ? 'text-amber-700 dark:text-amber-300'
+              : 'text-emerald-700 dark:text-emerald-300'
+          }`}
+        >
+          {soAprova
+            ? `Pelo ${escolhida?.nome ?? 'ModoBank'} a conta só é aprovada aqui — o pagamento sai na tela dele, no IXC.`
+            : `Aprova e dá baixa no IXC: a conta fica paga, saindo de ${escolhida?.nome ?? 'conta escolhida'}. Não precisa repetir lá.`}
+        </p>
       </div>
 
       <div className="mt-4 max-h-[40vh] overflow-y-auto rolagem-fina rounded-xl border border-tinta-100">
@@ -178,24 +239,28 @@ export function PagarEmMaos({
         </table>
       </div>
 
-      <div className="mt-4 max-w-[200px]">
-        <label className="rotulo" htmlFor="data-pagamento-lote">
-          Dia em que saiu
-        </label>
-        <input
-          id="data-pagamento-lote"
-          type="date"
-          value={data}
-          onChange={(e) => setData(e.target.value)}
-          className="campo"
-        />
-      </div>
+      {!soAprova && (
+        <div className="mt-4 max-w-[200px]">
+          <label className="rotulo" htmlFor="data-pagamento-lote">
+            Dia em que saiu
+          </label>
+          <input
+            id="data-pagamento-lote"
+            type="date"
+            value={data}
+            onChange={(e) => setData(e.target.value)}
+            className="campo"
+          />
+        </div>
+      )}
 
       {pagar.isError && <Aviso tom="erro">{mensagemErro(pagar.error)}</Aviso>}
 
       <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
         <span className="mr-auto text-xs text-tinta-400">
-          Cada conta é aprovada na auditoria e baixada no IXC.
+          {contas.length > 1
+            ? `${contas.length} contas, uma de cada vez no IXC.`
+            : 'A conta é aprovada na auditoria do IXC.'}
         </span>
         <button onClick={onFechar} className="btn btn-neutro">
           Cancelar
@@ -206,8 +271,10 @@ export function PagarEmMaos({
           className="btn btn-primario"
         >
           {pagar.isPending
-            ? 'Pagando no IXC…'
-            : `Confirmar pagamento de ${formatBRL(total)}`}
+            ? 'Enviando ao IXC…'
+            : soAprova
+              ? `Aprovar ${formatBRL(total)} para o banco pagar`
+              : `Confirmar pagamento de ${formatBRL(total)}`}
         </button>
       </div>
     </Janela>

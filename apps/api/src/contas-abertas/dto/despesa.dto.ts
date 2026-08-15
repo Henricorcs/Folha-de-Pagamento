@@ -24,17 +24,28 @@ import {
  * `EM_MAOS` aprova e dá a baixa na conta do caixa, deixando-a quitada no ato.
  */
 export class PagarTituloDto {
-  @IsIn(['BANCO', 'EM_MAOS'])
-  forma!: 'BANCO' | 'EM_MAOS';
+  /**
+   * Conta de onde o dinheiro sai. É ela que decide o que acontece: a do
+   * ModoBank só é aprovada (o pagamento sai pela tela dele no IXC); qualquer
+   * outra é aprovada e baixada aqui.
+   */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value == null ? undefined : Number(value)))
+  @IsInt()
+  @Min(1)
+  contaPagamento?: number;
 
-  /** Dia do pagamento (AAAA-MM-DD). Vazio = hoje. Só vale para em mãos. */
+  /** Dia do pagamento (AAAA-MM-DD). Vazio = hoje. */
   @IsOptional() @IsISO8601() data?: string;
 
   /** O que aparece no histórico do lançamento no IXC. */
   @IsOptional() @IsString() @MaxLength(200) historico?: string;
+
+  /** @deprecated A conta escolhida manda; fica por compatibilidade. */
+  @IsOptional() @IsIn(['BANCO', 'EM_MAOS']) forma?: 'BANCO' | 'EM_MAOS';
 }
 
-/** Pagar várias contas de uma vez, todas pela mesma forma. */
+/** Pagar várias contas de uma vez, todas pela mesma conta. */
 export class PagarLoteDto {
   @IsArray()
   @ArrayMinSize(1)
@@ -44,11 +55,18 @@ export class PagarLoteDto {
   @Type(() => Number)
   idsFnApagar!: number[];
 
-  @IsIn(['BANCO', 'EM_MAOS'])
-  forma!: 'BANCO' | 'EM_MAOS';
+  /** De onde sai o dinheiro de todas elas. Ver `PagarTituloDto`. */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value == null ? undefined : Number(value)))
+  @IsInt()
+  @Min(1)
+  contaPagamento?: number;
 
-  /** Dia do pagamento (AAAA-MM-DD). Vazio = hoje. Só vale para em mãos. */
+  /** Dia do pagamento (AAAA-MM-DD). Vazio = hoje. */
   @IsOptional() @IsISO8601() data?: string;
+
+  /** @deprecated A conta escolhida manda; fica por compatibilidade. */
+  @IsOptional() @IsIn(['BANCO', 'EM_MAOS']) forma?: 'BANCO' | 'EM_MAOS';
 }
 
 /** O que dá para mudar num título que ainda está em aberto no IXC. */

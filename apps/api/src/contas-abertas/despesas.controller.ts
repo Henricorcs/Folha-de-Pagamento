@@ -59,7 +59,7 @@ export class DespesasController {
   pagarLote(@Body() dto: PagarLoteDto, @Req() req: Request) {
     return this.pagamentos.pagarEmLote(
       dto.idsFnApagar,
-      { forma: dto.forma, data: dto.data },
+      { contaPagamento: dto.contaPagamento, data: dto.data },
       usuarioNome(req),
     );
   }

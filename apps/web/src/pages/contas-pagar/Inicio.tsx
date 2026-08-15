@@ -47,11 +47,7 @@ export function Inicio() {
   /** Títulos marcados para receber a mesma etiqueta de uma vez. */
   const [marcados, setMarcados] = useState<Set<number>>(new Set());
   const [categoriaLote, setCategoriaLote] = useState('');
-  /** Título que está sendo aprovado ou pago direto da lista. */
-  const [pagandoDaLista, setPagandoDaLista] = useState<number | null>(null);
-  const [avisoPagamento, setAvisoPagamento] = useState<string | null>(null);
-  const [erroPagamento, setErroPagamento] = useState(false);
-  /** Contas na janela de pagamento em mãos — uma, ou as marcadas. */
+  /** Contas na janela de pagamento — uma, ou as marcadas. */
   const [pagandoEmMaos, setPagandoEmMaos] = useState<ContaAberta[] | null>(null);
   const [editando, setEditando] = useState<ContaAberta | null>(null);
   const [excluindo, setExcluindo] = useState<ContaAberta | null>(null);
@@ -98,43 +94,6 @@ export function Inicio() {
       void queryClient.invalidateQueries({ queryKey: ['categorias-despesa'] });
       setMarcados(new Set());
       setCategoriaLote('');
-    },
-  });
-
-  /**
-   * Aprova (ou aprova e paga) direto da lista, sem abrir a ficha.
-   *
-   * Aprovar é o passo que faltava para o título aparecer no IXC pronto para o
-   * banco pagar: conta criada por API nasce sem auditoria, e enquanto ela não
-   * passa por ali, o pagamento não existe para o financeiro de lá.
-   */
-  const pagarDaLista = useMutation({
-    mutationFn: async (args: { conta: ContaAberta; forma: 'BANCO' | 'EM_MAOS' }) => {
-      const { data } = await api.post<{
-        aprovada: boolean;
-        paga: boolean;
-        valor: number;
-        avisos: string[];
-      }>(`/contas-abertas/${args.conta.idFnApagar}/pagar`, {
-        forma: args.forma,
-      });
-      return { ...data, conta: args.conta };
-    },
-    onMutate: (args) => setPagandoDaLista(args.conta.idFnApagar),
-    onSettled: () => setPagandoDaLista(null),
-    onSuccess: (r) => {
-      setErroPagamento(r.avisos.length > 0);
-      setAvisoPagamento(
-        (r.paga
-          ? `${r.conta.fornecedor.nome}: ${formatBRL(r.valor)} baixado no IXC.`
-          : `${r.conta.fornecedor.nome}: aprovado no IXC, pronto para o banco pagar.`) +
-          (r.avisos.length ? ` ${r.avisos.join(' ')}` : ''),
-      );
-      void queryClient.invalidateQueries({ queryKey: ['contas-abertas'] });
-    },
-    onError: (err) => {
-      setErroPagamento(true);
-      setAvisoPagamento(mensagemErro(err));
     },
   });
 
@@ -204,22 +163,6 @@ export function Inicio() {
           {consulta.data
             ? ' Os números abaixo são da última leitura que deu certo.'
             : ''}
-        </Aviso>
-      )}
-
-      {avisoPagamento && (
-        <Aviso
-          tom={erroPagamento ? 'erro' : 'pago'}
-          acao={
-            <button
-              onClick={() => setAvisoPagamento(null)}
-              className="btn btn-sutil btn-p"
-            >
-              Fechar
-            </button>
-          }
-        >
-          {avisoPagamento}
         </Aviso>
       )}
 
@@ -435,10 +378,8 @@ export function Inicio() {
                     key={c.idFnApagar}
                     conta={c}
                     marcado={marcados.has(c.idFnApagar)}
-                    ocupado={pagandoDaLista === c.idFnApagar}
                     onMarcar={() => alternarMarcado(c.idFnApagar)}
                     onVerDados={() => setDetalhando(c)}
-                    onPagar={(forma) => pagarDaLista.mutate({ conta: c, forma })}
                     onPagarEmMaos={() => setPagandoEmMaos([c])}
                     onEditar={() => setEditando(c)}
                     onExcluir={() => setExcluindo(c)}
@@ -483,21 +424,17 @@ export function Inicio() {
 function Linha({
   conta,
   marcado,
-  ocupado,
   onMarcar,
   onVerDados,
-  onPagar,
   onPagarEmMaos,
   onEditar,
   onExcluir,
 }: {
   conta: ContaAberta;
   marcado: boolean;
-  /** Este título está indo para o IXC agora. */
-  ocupado: boolean;
   onMarcar: () => void;
   onVerDados: () => void;
-  onPagar: (forma: 'BANCO' | 'EM_MAOS') => void;
+  /** Abre a janela de pagamento desta conta. */
   onPagarEmMaos: () => void;
   onEditar: () => void;
   onExcluir: () => void;
@@ -592,29 +529,25 @@ function Linha({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-end gap-1.5">
-          <button
-            onClick={() => onPagar('BANCO')}
-            disabled={ocupado || conta.statusAuditoria === 'A'}
-            title={
-              conta.statusAuditoria === 'A'
-                ? 'Já aprovado no IXC — o pagamento sai pelo banco, por lá'
-                : 'Aprova na auditoria do IXC e deixa pronta para o banco pagar'
-            }
-            className="btn btn-p btn-neutro"
-          >
-            {ocupado ? '…' : conta.statusAuditoria === 'A' ? 'Aprovada' : 'Aprovar'}
-          </button>
+          {/* Um botão só: a conta escolhida na janela é que decide se o IXC
+              recebe a aprovação e a baixa, ou só a aprovação (ModoBank). */}
           <button
             onClick={onPagarEmMaos}
-            disabled={ocupado}
-            title="Pagar em dinheiro, saindo do caixa — a conta fica quitada no IXC"
+            title="Escolher de onde sai e pagar — aprova no IXC junto"
             className="btn btn-p bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40"
           >
             Pagar
           </button>
+          {conta.statusAuditoria === 'A' && (
+            <span
+              className="self-center text-[11px] text-emerald-700 dark:text-emerald-300"
+              title="Já passou pela auditoria do IXC"
+            >
+              aprovada
+            </span>
+          )}
           <button
             onClick={onEditar}
-            disabled={ocupado}
             title="Mudar meio de pagamento, valor, vencimento…"
             className="btn btn-sutil btn-p"
           >
@@ -622,7 +555,6 @@ function Linha({
           </button>
           <button
             onClick={onExcluir}
-            disabled={ocupado}
             title="Apagar este título no IXC"
             className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10"
           >

@@ -34,6 +34,13 @@ export interface ResultadoDoPagamento {
   /** Deu baixa: o IXC passa a considerar a conta quitada. */
   paga: boolean;
   valor: number;
+  /** Conta de onde o dinheiro saiu (ou vai sair, no caso do ModoBank). */
+  contaPagamento: number;
+  /**
+   * A conta ficou aprovada esperando o banco pagar, em vez de baixada aqui. É
+   * o caso do ModoBank, que paga pela tela dele no IXC.
+   */
+  aguardandoBanco: boolean;
   /** O que não impediu o pagamento, mas quem clicou precisa saber. */
   avisos: string[];
 }
@@ -66,7 +73,22 @@ export class PagamentosService {
 
   async pagar(
     idFnApagar: number,
-    opcoes: { forma: FormaDePagar; data?: string; historico?: string },
+    opcoes: {
+      /**
+       * Conta de onde o dinheiro sai. Vazio = a que o título já traz, e na
+       * falta dela a padrão da configuração.
+       *
+       * É ela que decide o resto: a conta do ModoBank só é aprovada, porque o
+       * pagamento sai pela tela dele no IXC — este app não tem permissão para
+       * acionar aquele botão. Qualquer outra conta é aprovada **e** baixada
+       * aqui, que é o que evita ter de repetir o pagamento à mão lá.
+       */
+      contaPagamento?: number;
+      data?: string;
+      historico?: string;
+      /** @deprecated A conta escolhida é quem manda; fica por compatibilidade. */
+      forma?: FormaDePagar;
+    },
     usuarioNome?: string,
   ): Promise<ResultadoDoPagamento> {
     const avisos: string[] = [];
@@ -130,24 +152,41 @@ export class PagamentosService {
       this.logger.log(`Título ${idFnApagar} aprovado na auditoria do IXC.`);
     }
 
-    // --- 2. Baixa, só no pagamento em mãos ---
-    if (opcoes.forma === 'BANCO') {
-      return { idFnApagar, aprovada, paga: false, valor, avisos };
-    }
-
+    // --- 2. De onde o dinheiro sai, que é o que decide se há baixa ---
     const cfg = await this.config.obter();
     const contaPagamentoId =
-      parseIxcId(raw.id_contas) ?? cfg.contaPagamentoCaixaId;
+      opcoes.contaPagamento ??
+      parseIxcId(raw.id_contas) ??
+      cfg.contaPagamentoId;
     const contaContabilId = parseIxcId(raw.id_conta) ?? cfg.contaContabilAvulso;
     const filialId = parseIxcId(raw.filial_id) ?? cfg.filialId;
 
+    /*
+     * A conta do banco que paga por integração — o ModoBank — para no aprovar.
+     * O pagamento dela sai pela tela do IXC, com um botão que este app não tem
+     * permissão para acionar; dar baixa aqui marcaria como paga uma conta que o
+     * banco ainda não pagou, e o dinheiro sairia depois, sem registro do outro
+     * lado batendo.
+     */
+    if (contaPagamentoId === cfg.contaPagamentoId) {
+      return {
+        idFnApagar,
+        aprovada,
+        paga: false,
+        valor,
+        contaPagamento: contaPagamentoId,
+        aguardandoBanco: true,
+        avisos,
+      };
+    }
+
+    // Qualquer outra conta é dinheiro que sai por fora da integração — caixa,
+    // outro banco, cartão. Aqui a baixa é a mesma que se daria à mão no IXC.
     await this.ixc.create(
       'fn_apagar_pagamentos_baixas',
       buildBaixaContaPagarPayload({
         idFnApagar,
-        // Em mãos sai do caixa configurado, não da conta do banco que o título
-        // trazia — é essa a diferença entre as duas formas.
-        contaPagamentoId: cfg.contaPagamentoCaixaId || contaPagamentoId,
+        contaPagamentoId,
         contaContabilId,
         filialId,
         valor,
@@ -155,12 +194,12 @@ export class PagamentosService {
         documento: textoOuNull(raw.documento),
         historico:
           opcoes.historico?.trim() ||
-          `Pagamento em mãos pelo ILNET FINANCE${usuarioNome ? ` (${usuarioNome})` : ''}`,
+          `Pagamento pelo ILNET FINANCE${usuarioNome ? ` (${usuarioNome})` : ''}`,
       }),
     );
 
     this.logger.log(
-      `Título ${idFnApagar} baixado no IXC: ${valor} pela conta ${cfg.contaPagamentoCaixaId}.`,
+      `Título ${idFnApagar} baixado no IXC: ${valor} pela conta ${contaPagamentoId}.`,
     );
 
     // O IXC aceita a baixa e devolve o id do movimento; conferir a situação de
@@ -177,7 +216,15 @@ export class PagamentosService {
       );
     }
 
-    return { idFnApagar, aprovada, paga, valor, avisos };
+    return {
+      idFnApagar,
+      aprovada,
+      paga,
+      valor,
+      contaPagamento: contaPagamentoId,
+      aguardandoBanco: false,
+      avisos,
+    };
   }
 
   /**
@@ -190,7 +237,7 @@ export class PagamentosService {
    */
   async pagarEmLote(
     ids: number[],
-    opcoes: { forma: FormaDePagar; data?: string },
+    opcoes: { contaPagamento?: number; data?: string; forma?: FormaDePagar },
     usuarioNome?: string,
   ): Promise<{
     pagas: ResultadoDoPagamento[];

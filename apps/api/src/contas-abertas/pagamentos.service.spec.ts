@@ -19,6 +19,7 @@ import { PagamentosService } from './pagamentos.service';
  */
 
 const CFG = {
+  contaPagamentoId: 18,
   contaPagamentoCaixaId: 23,
   contaContabilAvulso: 324,
   filialId: 1,
@@ -85,21 +86,28 @@ function montarServico(
 }
 
 describe('PagamentosService.pagar', () => {
-  it('pelo banco: aprova na auditoria e não dá baixa', async () => {
+  it('pela conta do ModoBank: só aprova, sem baixa', async () => {
     const { service, criados } = montarServico();
 
-    const r = await service.pagar(4242, { forma: 'BANCO' }, 'Aurelio');
+    // 18 é a `contaPagamentoId` da configuração — a conta que o banco paga
+    // sozinho, pela tela do IXC.
+    const r = await service.pagar(4242, { contaPagamento: 18 }, 'Aurelio');
 
-    expect(r).toMatchObject({ aprovada: true, paga: false, valor: 1500 });
+    expect(r).toMatchObject({
+      aprovada: true,
+      paga: false,
+      aguardandoBanco: true,
+      valor: 1500,
+    });
     expect(criados.map((c) => c.recurso)).toEqual(['fn_apagar_auditoria']);
   });
 
-  it('em mãos: aprova e dá a baixa na conta do caixa', async () => {
+  it('por qualquer outra conta: aprova e dá a baixa nela', async () => {
     const { service, criados } = montarServico();
 
     const r = await service.pagar(
       4242,
-      { forma: 'EM_MAOS', data: '2026-08-15' },
+      { contaPagamento: CFG.contaPagamentoCaixaId, data: '2026-08-15' },
       'Aurelio',
     );
 
@@ -132,7 +140,7 @@ describe('PagamentosService.pagar', () => {
       },
     });
 
-    await expect(service.pagar(4242, { forma: 'EM_MAOS' })).rejects.toBeInstanceOf(
+    await expect(service.pagar(4242, { contaPagamento: CFG.contaPagamentoCaixaId })).rejects.toBeInstanceOf(
       BadRequestException,
     );
     expect(criados).toHaveLength(0);
@@ -143,7 +151,7 @@ describe('PagamentosService.pagar', () => {
       titulo: { id: '4242', status: 'C', valor: '1500.00', valor_aberto: '1500.00' },
     });
 
-    await expect(service.pagar(4242, { forma: 'BANCO' })).rejects.toBeInstanceOf(
+    await expect(service.pagar(4242, { contaPagamento: 18 })).rejects.toBeInstanceOf(
       BadRequestException,
     );
     expect(criados).toHaveLength(0);
@@ -160,7 +168,7 @@ describe('PagamentosService.pagar', () => {
       },
     });
 
-    await expect(service.pagar(4242, { forma: 'BANCO' })).rejects.toBeInstanceOf(
+    await expect(service.pagar(4242, { contaPagamento: 18 })).rejects.toBeInstanceOf(
       BadRequestException,
     );
     expect(criados).toHaveLength(0);
@@ -177,7 +185,7 @@ describe('PagamentosService.pagar', () => {
       },
     });
 
-    const r = await service.pagar(4242, { forma: 'EM_MAOS' });
+    const r = await service.pagar(4242, { contaPagamento: CFG.contaPagamentoCaixaId });
 
     expect(r.aprovada).toBe(true);
     expect(criados.map((c) => c.recurso)).toEqual(['fn_apagar_pagamentos_baixas']);
@@ -195,7 +203,7 @@ describe('PagamentosService.pagar', () => {
       },
     });
 
-    const r = await service.pagar(4242, { forma: 'EM_MAOS' });
+    const r = await service.pagar(4242, { contaPagamento: CFG.contaPagamentoCaixaId });
 
     expect(r.valor).toBe(500);
     expect(criados[1].payload).toMatchObject({ valor_total_pago: '500,00' });
@@ -211,7 +219,7 @@ describe('PagamentosService.pagar', () => {
       },
     });
 
-    const r = await service.pagar(4242, { forma: 'EM_MAOS' });
+    const r = await service.pagar(4242, { contaPagamento: CFG.contaPagamentoCaixaId });
 
     expect(r.paga).toBe(false);
     expect(r.avisos.join(' ')).toContain('continua aparecendo como aberto');
