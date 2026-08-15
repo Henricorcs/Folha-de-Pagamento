@@ -113,6 +113,7 @@ export function Bloco({
   acao,
   className = '',
   semPadding = false,
+  esticado = false,
   children,
 }: {
   titulo?: string;
@@ -120,17 +121,29 @@ export function Bloco({
   className?: string;
   /** Para tabelas, que sangram até a borda do cartão. */
   semPadding?: boolean;
+  /**
+   * O conteúdo cresce até o pé do cartão. Serve a quem está lado a lado com um
+   * bloco mais alto: sem isto, um gráfico de altura fixa deixa meio cartão
+   * vazio só porque o vizinho tem muitas linhas.
+   */
+  esticado?: boolean;
   children: ReactNode;
 }) {
     return (
-    <section className={`card ${className}`}>
+    <section className={`card ${esticado ? 'flex h-full flex-col' : ''} ${className}`}>
       {titulo && (
         <div className="flex items-center justify-between gap-3 px-4 pb-2.5 pt-4 sm:px-5">
           <h2 className="titulo-bloco">{titulo}</h2>
           {acao}
         </div>
       )}
-      <div className={semPadding ? '' : `px-4 pb-4 sm:px-5 sm:pb-5 ${titulo ? '' : 'pt-4 sm:pt-5'}`}>
+      <div
+        className={`${esticado ? 'flex min-h-0 flex-1 flex-col' : ''} ${
+          semPadding
+            ? ''
+            : `px-4 pb-4 sm:px-5 sm:pb-5 ${titulo ? '' : 'pt-4 sm:pt-5'}`
+        }`}
+      >
         {children}
       </div>
     </section>

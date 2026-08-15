@@ -235,9 +235,13 @@ export function Painel() {
             <Bloco
               titulo={`Agenda dos próximos ${DIAS_NA_AGENDA} dias`}
               className="surgir surgir-2 xl:col-span-3"
+              esticado
             >
+              {/* O gráfico cresce até o pé do cartão: ao lado dele fica a fila,
+                  que é alta, e barras maiores se comparam melhor do que um
+                  gráfico baixinho com meio cartão vazio embaixo. */}
               <AgendaDosDias dias={agenda} />
-              <p className="ajuda">
+              <p className="ajuda shrink-0">
                 Cada coluna é um dia. Sábado e domingo aparecem apagados: o
                 banco não paga neles, então o que vence no fim de semana precisa
                 sair antes.
@@ -404,7 +408,7 @@ function AgendaDosDias({ dias }: { dias: DiaDaAgenda[] }) {
 
   if (vazio) {
     return (
-      <div className="flex h-44 flex-col justify-center">
+      <div className="flex min-h-44 flex-1 flex-col justify-center">
         <p className="text-sm text-tinta-400">
           Nada vence nos próximos {DIAS_NA_AGENDA} dias.
         </p>
@@ -416,7 +420,9 @@ function AgendaDosDias({ dias }: { dias: DiaDaAgenda[] }) {
   }
 
   return (
-    <div className="flex h-44 items-end gap-1.5">
+    // `min-h` segura o piso num cartão sozinho; o `flex-1` cresce quando há
+    // espaço, que é o caso ao lado da fila de pagamento.
+    <div className="flex min-h-44 flex-1 items-end gap-1.5">
       {dias.map((d) => (
         <div
           key={d.dia}
