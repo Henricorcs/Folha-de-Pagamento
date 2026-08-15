@@ -19,6 +19,8 @@ import type {
   BeneficiarioAvulso,
   BeneficiarioComResumo,
   BeneficiarioSalvo,
+  CategoriaDespesa,
+  ConfigFinanceira,
   ConsultaCpfCnpj,
   FormaPagamento,
   PaginaFornecedoresParaPagar,
@@ -320,17 +322,46 @@ export function Avulsos({ doIxc = false }: { doIxc?: boolean } = {}) {
     mutationFn: async (args: {
       beneficiarioId: string;
       body: Record<string, unknown>;
-    }) =>
-      (
-        await api.post<PagamentoAvulso>(
-          `/avulsos/beneficiarios/${args.beneficiarioId}/pagamentos`,
-          args.body,
-        )
-      ).data,
-    onSuccess: (p) => {
+    }) => {
+      // A categoria é etiqueta desta casa e mora fora do pagamento: ela se
+      // prende ao número do título, que só existe depois que o IXC responde.
+      const { categoriaId, ...body } = args.body as {
+        categoriaId?: string;
+      } & Record<string, unknown>;
+
+      const { data: p } = await api.post<PagamentoAvulso>(
+        `/avulsos/beneficiarios/${args.beneficiarioId}/pagamentos`,
+        body,
+      );
+
+      let avisoCategoria: string | null = null;
+      if (categoriaId && p.contaPagar?.idFnApagarIxc) {
+        try {
+          await api.put(
+            `/contas-abertas/${p.contaPagar.idFnApagarIxc}/categoria`,
+            { categoriaId },
+          );
+        } catch (err) {
+          // O pagamento já saiu; a etiqueta que faltou se resolve na lista.
+          avisoCategoria = `O pagamento saiu, mas a categoria não ficou (${mensagemErro(err)}).`;
+        }
+      } else if (categoriaId) {
+        avisoCategoria =
+          'O pagamento saiu, mas o IXC não devolveu o número do título, então ' +
+          'a categoria não pôde ser gravada.';
+      }
+
+      return { pagamento: p, avisoCategoria };
+    },
+    onSuccess: ({ pagamento: p, avisoCategoria }) => {
       setPagando(null);
       setAberto(p.beneficiarioId);
-      avisar(resumoDoPagamento(p), !!p.erroIxc || p.contaPagar?.status === 'ERRO');
+      avisar(
+        avisoCategoria
+          ? `${resumoDoPagamento(p)} ${avisoCategoria}`
+          : resumoDoPagamento(p),
+        !!p.erroIxc || p.contaPagar?.status === 'ERRO' || !!avisoCategoria,
+      );
       invalidar();
     },
     onError: (err) => avisar(mensagemErro(err), true),
@@ -1219,6 +1250,8 @@ function FormularioPagamento({
   onConfirmar: (body: Record<string, unknown>) => void;
 }) {
   const [data, setData] = useState(hojeISO());
+  const [categoriaId, setCategoriaId] = useState('');
+  const [tipoPagamento, setTipoPagamento] = useState('');
   const [valorServico, setValorServico] = useState('');
   const [vendas, setVendas] = useState('');
   const [valorPorVenda, setValorPorVenda] = useState(
@@ -1234,12 +1267,48 @@ function FormularioPagamento({
   );
   const [contaContabil, setContaContabil] = useState('');
 
+  const categorias = useQuery({
+    queryKey: ['categorias-despesa'],
+    queryFn: async () =>
+      (await api.get<CategoriaDespesa[]>('/categorias-despesa')).data,
+  });
+
+  const config = useQuery({
+    queryKey: ['config-financeira'],
+    queryFn: async () =>
+      (await api.get<ConfigFinanceira>('/config-financeira')).data,
+  });
+
+  const plano = useQuery({
+    queryKey: ['plano-de-contas'],
+    queryFn: async () =>
+      (
+        await api.get<Array<{ id: number; nome: string }>>(
+          '/contas-abertas/plano-de-contas',
+        )
+      ).data,
+  });
+
+  // O tipo de pagamento começa no padrão das Configurações e é editável: nem
+  // todo fornecedor recebe por PIX, e era isso que travava o pagamento de quem
+  // manda boleto.
+  useEffect(() => {
+    if (config.data && !tipoPagamento) {
+      setTipoPagamento(config.data.tipoPagamentoPadrao);
+    }
+  }, [config.data, tipoPagamento]);
+
   const servico = Number(valorServico) || 0;
   const comissao = (Number(vendas) || 0) * (Number(valorPorVenda) || 0);
   const extra = Number(valorExtra) || 0;
   const total = servico + comissao + extra;
-  const semPix = forma === 'IXC' && !chavePix.trim();
+  const vaiDePix = /pix/i.test(tipoPagamento);
+  const semPix = forma === 'IXC' && vaiDePix && !chavePix.trim();
   const valido = total >= 0.01 && descricao.trim().length >= 3 && !semPix;
+
+  /** A conta contábil que vai valer: a escolhida, ou a padrão da configuração. */
+  const contaEmUso = Number(contaContabil) || config.data?.contaContabilAvulso;
+  const nomeDaConta = plano.data?.find((c) => c.id === contaEmUso)?.nome;
 
   return (
     <Janela titulo={`Pagar — ${beneficiario.nome}`} onFechar={onCancelar}>
@@ -1262,15 +1331,83 @@ function FormularioPagamento({
             <option value="EM_MAOS">Em mãos (desconta do caixa)</option>
           </select>
         </Campo>
-        <Campo label="Conta contábil — vazio usa a padrão">
-          <input
-            type="number"
+        <Campo label="Conta contábil no IXC">
+          <select
             value={contaContabil}
             onChange={(e) => setContaContabil(e.target.value)}
             className="campo"
-            placeholder="324"
-          />
+            disabled={plano.isLoading}
+          >
+            <option value="">
+              {config.data
+                ? `Padrão — ${config.data.contaContabilAvulso}${
+                    plano.data?.find(
+                      (c) => c.id === config.data!.contaContabilAvulso,
+                    )?.nome
+                      ? ` · ${plano.data.find((c) => c.id === config.data!.contaContabilAvulso)!.nome}`
+                      : ''
+                  }`
+                : 'Padrão das Configurações'}
+            </option>
+            {(plano.data ?? []).map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.id} · {c.nome}
+              </option>
+            ))}
+          </select>
+          <p className="ajuda">
+            {plano.error
+              ? 'Não deu para ler o plano de contas do IXC — o padrão vale.'
+              : nomeDaConta
+                ? `Vai lançar em "${nomeDaConta}".`
+                : 'É a conta do plano de contas do IXC onde a despesa entra.'}
+          </p>
         </Campo>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Campo label="A que se refere — categoria daqui">
+          <select
+            value={categoriaId}
+            onChange={(e) => setCategoriaId(e.target.value)}
+            className="campo"
+            disabled={categorias.isLoading}
+          >
+            <option value="">Sem classificação</option>
+            {(categorias.data ?? []).map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nome}
+              </option>
+            ))}
+          </select>
+          <p className="ajuda">
+            É por ela que o painel separa os gastos. Fica guardada aqui — o IXC
+            não tem onde recebê-la.
+          </p>
+        </Campo>
+
+        {forma === 'IXC' && (
+          <Campo label="Como o IXC vai pagar">
+            <input
+              list="tipos-pagamento-avulso"
+              value={tipoPagamento}
+              onChange={(e) => setTipoPagamento(e.target.value)}
+              className="campo"
+              placeholder="Pix"
+            />
+            <datalist id="tipos-pagamento-avulso">
+              <option value="Pix" />
+              <option value="Boleto" />
+              <option value="Dinheiro" />
+              <option value="Transferência" />
+              <option value="Cartão" />
+            </datalist>
+            <p className="ajuda">
+              O rótulo tem de ser o mesmo do seu IXC. Fora do PIX, a chave não é
+              exigida.
+            </p>
+          </Campo>
+        )}
       </div>
 
       <Parte titulo="Valor" valor={servico}>
@@ -1391,7 +1528,10 @@ function FormularioPagamento({
               descricao,
               forma,
               contaContabil: contaContabil || undefined,
-              ...(forma === 'IXC' ? { chavePix, tipoChavePix } : {}),
+              categoriaId: categoriaId || undefined,
+              ...(forma === 'IXC'
+                ? { chavePix, tipoChavePix, tipoPagamento: tipoPagamento || undefined }
+                : {}),
             })
           }
           disabled={!valido || ocupado}
@@ -1404,7 +1544,8 @@ function FormularioPagamento({
         </button>
         {semPix ? (
           <span className="text-sm text-rose-600">
-            Sem chave PIX o banco não paga — informe a chave ou pague em mãos.
+            Sem chave PIX o banco não paga por PIX — informe a chave, escolha
+            outro tipo de pagamento (boleto, transferência) ou pague em mãos.
           </span>
         ) : (
           <span className="ml-auto text-sm text-tinta-500">

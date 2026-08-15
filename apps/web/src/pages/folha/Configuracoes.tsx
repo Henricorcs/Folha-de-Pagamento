@@ -64,7 +64,7 @@ export function Configuracoes() {
 
       {feedback && <Aviso tom={erro ? 'erro' : 'marca'}>{feedback}</Aviso>}
 
-      <div className="max-w-3xl space-y-6">
+      <div className="max-w-3xl space-y-4">
         <Bloco titulo="IDs da integração" className="surgir surgir-1">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <CampoNum

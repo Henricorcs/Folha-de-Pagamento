@@ -168,7 +168,7 @@ export function Inicio() {
       ))}
 
       {resumo && (
-        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Indicador
             rotulo="Total em aberto"
             valor={formatBRL(resumo.total)}

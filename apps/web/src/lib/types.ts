@@ -289,6 +289,8 @@ export interface ConfigFinanceira {
   contaContabilAdiantamento: number;
   contaContabilBonus: number;
   contaContabilDiaria: number;
+  /** Pagamentos avulsos (mão de obra, serviço pontual, patrocínio) */
+  contaContabilAvulso: number;
   cidadePadraoId: number;
   /** Quem paga, como sai impresso no recibo assinado da diária */
   empresaNome: string;
@@ -641,6 +643,31 @@ export interface ContaAberta {
    */
   classificacao: { id: string; nome: string } | null;
   origem: OrigemNaFolha | null;
+}
+
+/** Por onde o dinheiro sai ao pagar um título do IXC. */
+export type FormaDePagar = 'BANCO' | 'EM_MAOS';
+
+/** O que aconteceu com o título no IXC depois de pagar. */
+export interface ResultadoDoPagamento {
+  idFnApagar: number;
+  /** Passou pela auditoria agora, ou já estava aprovado antes. */
+  aprovada: boolean;
+  /** O IXC passou a considerar a conta quitada. */
+  paga: boolean;
+  valor: number;
+  avisos: string[];
+}
+
+/** Quanto a empresa já pagou no mês, pelo contas a pagar do IXC. */
+export interface PagamentosDoMes {
+  /** "AAAA-MM" */
+  mes: string;
+  total: number;
+  quantidade: number;
+  lidoEm: string;
+  /** false = a leitura bateu no teto e o total pode faltar coisa. */
+  completo: boolean;
 }
 
 /** Uma categoria de despesa do cadastro daqui. */

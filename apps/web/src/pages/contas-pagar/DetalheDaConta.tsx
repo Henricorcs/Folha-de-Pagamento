@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
-import { Carregando, Janela, Selo } from '../../components/ui';
+import { Aviso, Carregando, Janela, Selo } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
 import { formatBRL, formatData } from '../../lib/format';
 import { TIPO_LABEL } from '../../lib/status';
@@ -8,6 +8,8 @@ import type {
   CategoriaDespesa,
   ContaAberta,
   DetalheDoTitulo,
+  FormaDePagar,
+  ResultadoDoPagamento,
 } from '../../lib/types';
 
 /**
@@ -103,6 +105,8 @@ export function DetalheDaConta({
             <PrazoDoDebito conta={conta} />
           </div>
         </div>
+
+        <PagarConta conta={conta} onPago={onFechar} />
 
         <div className="mt-5 grid grid-cols-1 gap-x-6 sm:grid-cols-2">
           <Dado rotulo="Vencimento">
@@ -270,6 +274,195 @@ export function DetalheDaConta({
       </div>
     </Janela>
   );
+}
+
+/**
+ * Pagar esta conta, daqui.
+ *
+ * São dois caminhos, e a diferença é de onde sai o dinheiro. **Pelo banco**
+ * aprova o título na auditoria do IXC e o deixa pronto para o pagamento sair
+ * por lá — nada se move agora. **Em mãos** aprova e dá a baixa na conta do
+ * caixa: a conta fica paga no IXC no ato, porque o dinheiro já saiu da gaveta.
+ *
+ * O botão pede confirmação antes de mandar. É a única tela do app que tira
+ * dinheiro do caixa da empresa sem passar pelo IXC, e um clique errado aqui
+ * custa uma ida ao IXC para estornar.
+ */
+function PagarConta({
+  conta,
+  onPago,
+}: {
+  conta: ContaAberta;
+  onPago: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [forma, setForma] = useState<FormaDePagar>('BANCO');
+  const [data, setData] = useState(hojeISO);
+  const [confirmando, setConfirmando] = useState(false);
+  const [feito, setFeito] = useState<ResultadoDoPagamento | null>(null);
+
+  const pagar = useMutation({
+    mutationFn: async () => {
+      const { data: r } = await api.post<ResultadoDoPagamento>(
+        `/contas-abertas/${conta.idFnApagar}/pagar`,
+        { forma, ...(forma === 'EM_MAOS' ? { data } : {}) },
+      );
+      return r;
+    },
+    onSuccess: (r) => {
+      setFeito(r);
+      setConfirmando(false);
+      void queryClient.invalidateQueries({ queryKey: ['contas-abertas'] });
+    },
+    onError: () => setConfirmando(false),
+  });
+
+  if (feito) {
+    return (
+      <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+        <p className="font-semibold text-emerald-800 dark:text-emerald-200">
+          {feito.paga
+            ? `Pago — ${formatBRL(feito.valor)} baixado no IXC`
+            : 'Aprovado no IXC, pronto para o banco pagar'}
+        </p>
+        <p className="mt-1 text-sm text-emerald-700 dark:text-emerald-300">
+          {feito.paga
+            ? 'O título consta quitado no IXC. Estornar, se precisar, é por lá.'
+            : 'O título passou pela auditoria e está liberado. O pagamento em si sai no fluxo do banco, no IXC.'}
+        </p>
+        {feito.avisos.map((a) => (
+          <p key={a} className="mt-2 text-sm text-amber-700 dark:text-amber-300">
+            {a}
+          </p>
+        ))}
+        <button onClick={onPago} className="btn btn-neutro btn-p mt-3">
+          Fechar
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-5 rounded-2xl border border-tinta-100 p-4">
+      <div className="rotulo">Pagar esta conta</div>
+
+      <div className="mt-1 flex flex-wrap gap-2">
+        <BotaoForma
+          ativo={forma === 'BANCO'}
+          onClick={() => {
+            setForma('BANCO');
+            setConfirmando(false);
+          }}
+          titulo="Pelo banco"
+          nota="Aprova no IXC e deixa pronta"
+        />
+        <BotaoForma
+          ativo={forma === 'EM_MAOS'}
+          onClick={() => {
+            setForma('EM_MAOS');
+            setConfirmando(false);
+          }}
+          titulo="Em mãos"
+          nota="Sai do caixa e já quita no IXC"
+        />
+      </div>
+
+      {forma === 'EM_MAOS' && (
+        <div className="mt-3 max-w-[200px]">
+          <label className="rotulo" htmlFor="data-pagamento">
+            Dia em que saiu
+          </label>
+          <input
+            id="data-pagamento"
+            type="date"
+            value={data}
+            onChange={(e) => setData(e.target.value)}
+            className="campo"
+          />
+        </div>
+      )}
+
+      {pagar.isError && (
+        <Aviso tom="erro">{mensagemErro(pagar.error)}</Aviso>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {confirmando ? (
+          <>
+            <button
+              onClick={() => pagar.mutate()}
+              disabled={pagar.isPending}
+              className="btn btn-p bg-rose-600 text-white hover:bg-rose-500"
+            >
+              {pagar.isPending
+                ? 'Enviando ao IXC…'
+                : forma === 'EM_MAOS'
+                  ? `Confirmar: pagar ${formatBRL(conta.valorAberto)} do caixa`
+                  : `Confirmar: aprovar ${formatBRL(conta.valorAberto)}`}
+            </button>
+            <button
+              onClick={() => setConfirmando(false)}
+              className="btn btn-sutil btn-p"
+            >
+              Cancelar
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => setConfirmando(true)}
+            className="btn btn-primario btn-p"
+          >
+            Pagar {formatBRL(conta.valorAberto)}
+          </button>
+        )}
+        <span className="text-xs text-tinta-400">
+          {forma === 'EM_MAOS'
+            ? 'O dinheiro sai da conta de caixa configurada e a conta fica paga no IXC.'
+            : 'Só aprova na auditoria do IXC. O dinheiro sai pelo banco, por lá.'}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function BotaoForma({
+  ativo,
+  onClick,
+  titulo,
+  nota,
+}: {
+  ativo: boolean;
+  onClick: () => void;
+  titulo: string;
+  nota: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={ativo}
+      className={`rounded-xl border px-3 py-2 text-left transition ${
+        ativo
+          ? 'border-brand-400 bg-brand-50 dark:bg-brand-500/10'
+          : 'border-tinta-200 hover:border-tinta-300'
+      }`}
+    >
+      <span
+        className={`block text-sm font-semibold ${
+          ativo ? 'text-brand-800 dark:text-brand-200' : 'text-tinta-700'
+        }`}
+      >
+        {titulo}
+      </span>
+      <span className="block text-[11px] text-tinta-400">{nota}</span>
+    </button>
+  );
+}
+
+function hojeISO(): string {
+  const agora = new Date();
+  const mes = String(agora.getMonth() + 1).padStart(2, '0');
+  const dia = String(agora.getDate()).padStart(2, '0');
+  return `${agora.getFullYear()}-${mes}-${dia}`;
 }
 
 function Dado({ rotulo, children }: { rotulo: string; children: ReactNode }) {

@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { IxcClient } from '../ixc/ixc.client';
+import { lerSituacaoContaPagar } from '../ixc/ixc.financeiro';
 import { PrismaService } from '../prisma/prisma.service';
 import { CategoriasService } from './categorias.service';
 import {
@@ -29,6 +30,17 @@ export interface ContasAbertasResposta {
   avisos: string[];
 }
 
+/** Quanto a empresa já pagou num mês, pelo contas a pagar do IXC. */
+export interface PagamentosDoMes {
+  /** "AAAA-MM" */
+  mes: string;
+  total: number;
+  quantidade: number;
+  lidoEm: Date;
+  /** false = a leitura bateu no teto de páginas e o total pode faltar coisa. */
+  completo: boolean;
+}
+
 /**
  * Quantos títulos a lista aceita puxar de uma vez. Um provedor com anos de
  * histórico tem muita conta; o teto existe para uma base grande não travar a
@@ -37,21 +49,66 @@ export interface ContasAbertasResposta {
  */
 const TETO_DE_TITULOS = 3000;
 
+/**
+ * Até onde a busca pelas contas pagas vai antes de desistir. Quinhentos
+ * registros por página cobrem meses de pagamento numa empresa deste tamanho; o
+ * teto existe para uma base com histórico grande não prender a tela.
+ */
+const TETO_DE_PAGINAS_PAGAS = 8;
+
+/**
+ * O nome de uma conta do plano, seja qual for a coluna que a base usa. No
+ * `planejamento_analitico` a coluna tem o mesmo nome da tabela; nas outras
+ * versões conhecidas é `descricao` ou `nome`.
+ */
+function nomeDaConta(raw: Record<string, unknown>, tabela: string): string {
+  return String(
+    raw[tabela] ?? raw.descricao ?? raw.nome ?? raw.conta ?? '',
+  ).trim();
+}
+
+/** "AAAA-MM" do mês corrente. */
+function mesAtual(): string {
+  const agora = new Date();
+  return `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/** "AAAA-MM" de uma data, lida em UTC como o resto das datas do IXC. */
+function mesDaData(data: Date): string {
+  return `${data.getUTCFullYear()}-${String(data.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
 /** De quanto em quanto tempo vale reler os cadastros de apoio. */
 const VALIDADE_DO_INDICE_MS = 5 * 60 * 1000;
 
 /**
- * Onde o plano de contas pode estar. O nome muda entre versões do IXC e a
- * documentação do webservice não fecha a lista, então testa-se um a um até
- * algum responder — o mesmo caminho da tabela de dados bancários.
+ * Onde o plano de contas mora no IXC: a tabela `planejamento_analitico`, que é
+ * para onde o `fn_apagar.id_conta` aponta. O nome do registro vem numa coluna
+ * de mesmo nome da tabela.
+ *
+ * Os outros nomes ficam na lista porque versões diferentes do IXC podem tê-los,
+ * e a documentação do webservice não fecha o assunto — mas nenhum deles existe
+ * nesta base, e enquanto era só por eles que se procurava, a categoria de
+ * despesa aparecia sem nome em toda tela.
  */
 const TABELAS_PLANO_DE_CONTAS = [
+  'planejamento_analitico',
   'fn_classificacao',
   'plano_contas',
   'fn_plano_contas',
   'fn_conta',
   'conta_despesa',
 ] as const;
+
+/**
+ * Que tipos de conta entram no índice de nomes.
+ *
+ * "D" é despesa, "P" é a conta do fornecedor e "R" é receita — juntos, tudo que
+ * uma conta a pagar pode referenciar (uns três mil registros). O tipo "A", de
+ * cliente, fica de fora: são quinze mil que nunca aparecem numa conta a pagar,
+ * e lê-los a cada cinco minutos seria uma varredura inteira do IXC para nada.
+ */
+const TIPOS_DE_CONTA_NO_INDICE = ['D', 'P', 'R'] as const;
 
 /**
  * Conta em texto o que ficou de fora, por motivo e por coluna.
@@ -184,6 +241,81 @@ export class ContasAbertasService {
   }
 
   /**
+   * Quanto a empresa já pagou no mês, lido do IXC.
+   *
+   * É todo o dinheiro que saiu pelo contas a pagar — inclusive o que nasceu na
+   * folha, porque salário, diária e avulso viram `fn_apagar` como qualquer
+   * outra despesa. Sem isto o painel só sabe dizer o que falta pagar, e "quanto
+   * saiu este mês" é metade da pergunta de quem cuida do caixa.
+   *
+   * A busca vai por páginas, da mais recente para a mais antiga, e para assim
+   * que uma página inteira cai antes do mês pedido: o histórico de pagas cresce
+   * para sempre, e lê-lo todo a cada abertura de tela seria pedir ao IXC anos
+   * de dados para somar trinta dias.
+   */
+  async pagasNoMes(mes?: string): Promise<PagamentosDoMes> {
+    const alvo = mes ?? mesAtual();
+    const lidoEm = new Date();
+    let total = 0;
+    let quantidade = 0;
+    let paginasLidas = 0;
+
+    for (let pagina = 1; pagina <= TETO_DE_PAGINAS_PAGAS; pagina++) {
+      const res = await this.ixc.list<Record<string, unknown>>('fn_apagar', {
+        // "P" é pago. A data do pagamento é conferida abaixo, registro a
+        // registro: base que ignore o filtro devolve tudo, e aí seria o mês
+        // inteiro somado errado.
+        qtype: 'fn_apagar.status',
+        query: 'P',
+        oper: '=',
+        page: pagina,
+        rp: 500,
+        sortname: 'fn_apagar.data_pagamento',
+        sortorder: 'desc',
+      });
+      paginasLidas = pagina;
+      if (res.registros.length === 0) break;
+
+      let algumaDoMes = false;
+      let algumaMaisNova = false;
+
+      for (const raw of res.registros) {
+        const situacao = lerSituacaoContaPagar(raw);
+        if (!situacao.pago || !situacao.dataPagamento) continue;
+
+        const mesDoPagamento = mesDaData(situacao.dataPagamento);
+        if (mesDoPagamento === alvo) {
+          algumaDoMes = true;
+          total += situacao.valorPago;
+          quantidade += 1;
+        } else if (mesDoPagamento > alvo) {
+          // Pagamento posterior ao mês pedido: ainda não chegamos nele.
+          algumaMaisNova = true;
+        }
+      }
+
+      // A página inteira ficou antes do mês pedido: como a ordem é da mais
+      // recente para a mais antiga, o que vem depois é mais antigo ainda.
+      if (!algumaDoMes && !algumaMaisNova) break;
+    }
+
+    if (paginasLidas >= TETO_DE_PAGINAS_PAGAS) {
+      this.logger.warn(
+        `A leitura de pagamentos de ${alvo} parou em ${TETO_DE_PAGINAS_PAGAS} ` +
+          'páginas — o total do mês pode estar incompleto.',
+      );
+    }
+
+    return {
+      mes: alvo,
+      total: Math.round(total * 100) / 100,
+      quantidade,
+      lidoEm,
+      completo: paginasLidas < TETO_DE_PAGINAS_PAGAS,
+    };
+  }
+
+  /**
    * O registro do `fn_apagar` como o IXC o devolve, campo por campo.
    *
    * Existe para responder "por que esta conta aparece (ou não) aqui?" sem
@@ -273,6 +405,44 @@ export class ContasAbertasService {
     }
   }
 
+  /**
+   * As contas de despesa do IXC, para a tela mostrar o nome em vez do código
+   * solto — "324" não diz nada a ninguém, e escolher outra conta às cegas era
+   * como se fazia até agora.
+   *
+   * Só as de despesa (tipo "D"): são as 165 que fazem sentido num pagamento. As
+   * de cliente e de fornecedor existem no mesmo cadastro, aos milhares, e
+   * oferecê-las aqui seria oferecer a conta errada com o mesmo destaque da
+   * certa.
+   */
+  async planoDeContas(): Promise<Array<{ id: number; nome: string }>> {
+    for (const tabela of TABELAS_PLANO_DE_CONTAS) {
+      try {
+        const registros = await this.ixc.listAll<Record<string, unknown>>(
+          tabela,
+          { qtype: `${tabela}.tipo`, query: 'D', oper: '=' },
+          { pageSize: 500, maxPages: 4 },
+        );
+        const contas = registros
+          .filter((r) => String(r.ativo ?? 'S').toUpperCase() !== 'N')
+          .map((r) => ({ id: Number(r.id), nome: nomeDaConta(r, tabela) }))
+          .filter((c) => Number.isInteger(c.id) && c.id > 0 && c.nome);
+
+        if (contas.length > 0) {
+          return contas.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    this.logger.warn(
+      'Nenhuma tabela de plano de contas respondeu — a tela vai ficar só com a ' +
+        'conta padrão das Configurações.',
+    );
+    return [];
+  }
+
   private async nomesDasContasDeDespesa(): Promise<Map<number, string>> {
     const agora = Date.now();
     if (
@@ -285,17 +455,20 @@ export class ContasAbertasService {
     const nomes = new Map<number, string>();
     for (const tabela of TABELAS_PLANO_DE_CONTAS) {
       try {
-        const registros = await this.ixc.listAll<Record<string, unknown>>(
-          tabela,
-          { qtype: `${tabela}.id`, query: '0', oper: '>' },
-          { pageSize: 500, maxPages: 10 },
-        );
-        for (const raw of registros) {
-          const id = Number(raw.id);
-          const nome = String(
-            raw.descricao ?? raw.nome ?? raw.conta ?? '',
-          ).trim();
-          if (Number.isInteger(id) && id > 0 && nome) nomes.set(id, nome);
+        // Por tipo, e não a tabela toda: aqui são três mil registros em vez de
+        // dezoito mil, e os quinze mil que ficam de fora são contas de cliente,
+        // que conta a pagar nenhuma usa.
+        for (const tipo of TIPOS_DE_CONTA_NO_INDICE) {
+          const registros = await this.ixc.listAll<Record<string, unknown>>(
+            tabela,
+            { qtype: `${tabela}.tipo`, query: tipo, oper: '=' },
+            { pageSize: 500, maxPages: 10 },
+          );
+          for (const raw of registros) {
+            const id = Number(raw.id);
+            const nome = nomeDaConta(raw, tabela);
+            if (Number.isInteger(id) && id > 0 && nome) nomes.set(id, nome);
+          }
         }
         if (nomes.size > 0) {
           this.logger.log(

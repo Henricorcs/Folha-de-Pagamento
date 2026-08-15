@@ -260,6 +260,81 @@ export function buildContaPagarPayload(
   };
 }
 
+/** Uma baixa manual de conta a pagar — o "paguei" registrado no IXC. */
+export interface BaixaContaPagarInput {
+  /** `fn_apagar.id` do título que está sendo pago. */
+  idFnApagar: number;
+  /** Conta de onde o dinheiro saiu (`id_contas` — o caixa, o banco). */
+  contaPagamentoId: number;
+  /** Conta contábil do título (`id_conta`). */
+  contaContabilId: number;
+  filialId: number;
+  /** Quanto foi pago. Igual ao saldo em aberto quando se quita de uma vez. */
+  valor: number;
+  data: Date;
+  /** Vai para o histórico do lançamento no IXC. */
+  historico: string;
+  /** Número do documento, quando o título tem um. */
+  documento?: string | null;
+  /**
+   * Como se pagou, no código do IXC: "D" dinheiro, "T" transferência, "X" pix.
+   * Dinheiro é o padrão porque esta baixa serve ao pagamento em mãos.
+   */
+  tipoPagamento?: string;
+}
+
+/**
+ * Monta o corpo do POST /fn_apagar_pagamentos_baixas — o pagamento feito à mão,
+ * fora do fluxo do banco.
+ *
+ * Os valores vão com vírgula decimal, ao contrário do resto do webservice: é o
+ * que a tela de baixa do IXC envia, e é o que ela aceita de volta. Mandar
+ * "1234.56" aqui faz o IXC gravar um valor errado sem reclamar, o que é o pior
+ * dos resultados numa baixa — a conta consta paga por outro valor.
+ */
+export function buildBaixaContaPagarPayload(
+  input: BaixaContaPagarInput,
+): Record<string, unknown> {
+  const valor = formatValorBaixaIxc(input.valor);
+  return {
+    id_pagar: input.idFnApagar,
+    id_pagar_label: String(input.idFnApagar),
+    filial: input.filialId,
+    filial_id: input.filialId,
+    // `conta_` é de onde o dinheiro sai; `id_conta` é a conta contábil do
+    // título. Os nomes são parecidos e as duas são obrigatórias.
+    conta_: input.contaPagamentoId,
+    id_conta: input.contaContabilId,
+    tipo_pagamento: input.tipoPagamento ?? 'D',
+    chave_pix: '',
+    cheque_banco: '',
+    cheque_numero: '',
+    cheque_nome: '',
+    cheque_predatado: '',
+    id_conta_class_finan_a: '',
+    data: formatDataIxc(input.data),
+    documento: input.documento ?? '',
+    pdesconto: '',
+    vdesconto: '',
+    pacrescimo: '',
+    vacrescimo: '',
+    // As três dizem a mesma coisa numa quitação de uma vez: o que a parcela
+    // vale, o que se deve dela e o que foi pago.
+    valor_parcela: valor,
+    debito: valor,
+    valor_total_pago: valor,
+    historico: input.historico,
+    tipo_p: 'T',
+    tipo_lanc: 'P',
+    id_operador: '',
+  };
+}
+
+/** Valor como a baixa do IXC espera: vírgula decimal, sem separador de milhar. */
+export function formatValorBaixaIxc(valor: number): string {
+  return (Math.round(valor * 100) / 100).toFixed(2).replace('.', ',');
+}
+
 export type StatusAuditoriaIxc = 'A' | 'R' | 'C';
 
 /** Monta o corpo do POST /fn_apagar_auditoria (aprovar/reprovar). */

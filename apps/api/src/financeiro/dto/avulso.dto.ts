@@ -8,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
   MinLength,
 } from 'class-validator';
@@ -111,6 +112,16 @@ export class PagarAvulsoDto {
 
   /** Vazio = a forma habitual do cadastro. */
   @IsOptional() @IsEnum(FormaPagamento) forma?: FormaPagamento;
+
+  /**
+   * Como o IXC vai pagar: "Pix", "Boleto", "Transferência". Vazio = o padrão
+   * das Configurações.
+   *
+   * Existe porque nem todo fornecedor recebe por PIX — empresa costuma mandar
+   * boleto —, e antes disso o pagamento a quem não tinha chave simplesmente não
+   * saía: a tela exigia a chave para deixar gerar.
+   */
+  @IsOptional() @IsString() @MaxLength(40) tipoPagamento?: string;
 
   /** Vazio = a conta contábil de avulsos da configuração. */
   @IsOptional()

@@ -1,5 +1,6 @@
 import { Transform } from 'class-transformer';
 import {
+  IsIn,
   IsInt,
   IsISO8601,
   IsNumber,
@@ -10,6 +11,23 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+
+/**
+ * Pagar um título que já existe no IXC.
+ *
+ * `BANCO` aprova na auditoria e deixa a conta pronta para o banco pagar;
+ * `EM_MAOS` aprova e dá a baixa na conta do caixa, deixando-a quitada no ato.
+ */
+export class PagarTituloDto {
+  @IsIn(['BANCO', 'EM_MAOS'])
+  forma!: 'BANCO' | 'EM_MAOS';
+
+  /** Dia do pagamento (AAAA-MM-DD). Vazio = hoje. Só vale para em mãos. */
+  @IsOptional() @IsISO8601() data?: string;
+
+  /** O que aparece no histórico do lançamento no IXC. */
+  @IsOptional() @IsString() @MaxLength(200) historico?: string;
+}
 
 /**
  * Uma conta a pagar lançada à mão: energia, aluguel, compra de material.

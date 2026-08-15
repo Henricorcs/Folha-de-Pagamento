@@ -424,9 +424,29 @@ export class AvulsosService {
     const forma = dto.forma ?? beneficiario.formaPagamento;
     const cfg = await this.config.obter();
 
-    if (forma === FormaPagamento.IXC && !beneficiario.chavePix) {
+    // A chave só é obrigatória quando é o PIX que vai pagar. Fornecedor que
+    // manda boleto não tem chave nenhuma, e exigi-la aqui era o que impedia de
+    // gerar a conta a pagar dele — o pagamento simplesmente não saía.
+    //
+    // O que a tela escolheu é o que fica gravado na conta; o resolvido abaixo
+    // serve só para decidir se a chave é exigida. Gravar o padrão por extenso
+    // congelaria na conta um tipo que ninguém escolheu, e mudar o padrão nas
+    // Configurações deixaria de valer para ela.
+    const tipoEscolhido = dto.tipoPagamento?.trim() || undefined;
+    // O "Pix" no fim não é enfeite: sem ele, uma configuração sem tipo padrão
+    // faria a conta a pagar sair sem chave e sem ninguém avisar — e é
+    // justamente a chave que faz o banco pagar.
+    const vaiDePix = /pix/i.test(
+      tipoEscolhido || cfg.tipoPagamentoPadrao || 'Pix',
+    );
+    if (
+      forma === FormaPagamento.IXC &&
+      vaiDePix &&
+      !beneficiario.chavePix
+    ) {
       throw new BadRequestException(
-        'Sem chave PIX o banco não paga. Informe a chave (ou pague em mãos).',
+        'Sem chave PIX o banco não paga por PIX. Informe a chave, escolha ' +
+          'outro tipo de pagamento (boleto, transferência) ou pague em mãos.',
       );
     }
 
@@ -463,7 +483,7 @@ export class AvulsosService {
       criadoPor: usuarioId ?? null,
     };
 
-    return this.pagarPeloIxc(base, partes, cfg, usuarioId);
+    return this.pagarPeloIxc(base, partes, cfg, usuarioId, tipoEscolhido);
   }
 
   /**
@@ -504,6 +524,8 @@ export class AvulsosService {
     partes: PartesDoPagamento,
     cfg: { contaPagamentoCaixaId: number },
     usuarioId?: string,
+    /** Como o IXC vai pagar. Ignorado no pagamento em mãos, que é dinheiro. */
+    tipoPagamento?: string,
   ): Promise<PagamentoAvulso> {
     const emMaos = base.forma === FormaPagamento.EM_MAOS;
     const [conta] = await this.contasPagar.criar(
@@ -519,7 +541,9 @@ export class AvulsosService {
                   contaPagamento: cfg.contaPagamentoCaixaId,
                   tipoPagamentoIxc: TIPO_PAGAMENTO_EM_MAOS,
                 }
-              : {}),
+              : tipoPagamento
+                ? { tipoPagamentoIxc: tipoPagamento }
+                : {}),
             observacao: montarObservacaoPagamento({
               ...partes,
               descricao: base.descricao,

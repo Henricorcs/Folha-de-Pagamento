@@ -115,7 +115,7 @@ export function FuncionarioDetalhe() {
       </header>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <section className="space-y-6 lg:col-span-2">
+        <section className="space-y-4 lg:col-span-2">
           <Bloco titulo="Cadastro no IXC" className="surgir surgir-1">
             <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
               <Campo rotulo="CPF/CNPJ" valor={data.cpfCnpj} mono />
@@ -182,7 +182,7 @@ export function FuncionarioDetalhe() {
           </Bloco>
         </section>
 
-        <section className="space-y-6">
+        <section className="space-y-4">
           <Bloco titulo="Notas internas" className="surgir surgir-2">
             <label className="rotulo" htmlFor="apelido">
               Apelido

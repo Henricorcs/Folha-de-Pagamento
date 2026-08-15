@@ -1,12 +1,13 @@
-import { Controller, Get, Param, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
 import { ContasAbertasService } from './contas-abertas.service';
 
 /**
- * As contas a pagar em aberto da empresa, direto do IXC.
+ * As contas a pagar da empresa, direto do IXC: o que está em aberto e o que já
+ * foi pago no mês.
  *
- * Só leitura, e de propósito: o que se faz com uma conta (aprovar, pagar,
- * cancelar) continua sendo feito onde ela mora. Esta tela é para enxergar o
- * todo — quanto se deve, o que já venceu, o que vence essa semana.
+ * A leitura é a mesma tabela que a folha alimenta — salário, diária e avulso
+ * viram `fn_apagar` como qualquer despesa —, então o que sai daqui é todo o
+ * dinheiro que sai da empresa, e não só o que foi lançado à mão.
  */
 @Controller('contas-abertas')
 export class ContasAbertasController {
@@ -15,6 +16,24 @@ export class ContasAbertasController {
   @Get()
   listar() {
     return this.service.listar();
+  }
+
+  /**
+   * O plano de contas do IXC — o código e o nome de cada conta contábil, para
+   * as telas de pagamento poderem mostrar "Serviços de terceiros" em vez de
+   * "324", e deixar escolher outra.
+   */
+  @Get('plano-de-contas')
+  planoDeContas() {
+    return this.service.planoDeContas();
+  }
+
+  /** Quanto já saiu no mês pelo contas a pagar do IXC. */
+  @Get('pagas-no-mes')
+  pagasNoMes(@Query('mes') mes?: string) {
+    return this.service.pagasNoMes(
+      /^\d{4}-\d{2}$/.test(mes ?? '') ? mes : undefined,
+    );
   }
 
   /**

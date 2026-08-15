@@ -74,7 +74,7 @@ function paraExibicao(valor: string): string {
 export function Pagina({ children }: { children: ReactNode }) {
   return (
     // pt-20 no celular: o conteúdo passa por baixo do botão do menu.
-    <div className="mx-auto w-full max-w-[1400px] px-6 pb-10 pt-20 sm:px-8 lg:px-10 lg:pt-8">
+    <div className="mx-auto w-full max-w-[1600px] px-4 pb-8 pt-20 sm:px-6 lg:px-7 lg:pt-6">
       {children}
     </div>
   );
@@ -93,12 +93,12 @@ export function CabecalhoPagina({
   acoes?: ReactNode;
 }) {
   return (
-    <header className="surgir mb-8 flex flex-wrap items-end justify-between gap-4">
+    <header className="surgir mb-5 flex flex-wrap items-end justify-between gap-3">
       <div className="min-w-0">
-        <p className="eyebrow mb-2">{secao}</p>
+        <p className="eyebrow mb-1">{secao}</p>
         <h1 className="titulo-pagina">{titulo}</h1>
         {descricao && (
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-tinta-500">
+          <p className="mt-1.5 max-w-2xl text-[13px] leading-relaxed text-tinta-500">
             {descricao}
           </p>
         )}
@@ -122,15 +122,15 @@ export function Bloco({
   semPadding?: boolean;
   children: ReactNode;
 }) {
-  return (
+    return (
     <section className={`card ${className}`}>
       {titulo && (
-        <div className="flex items-center justify-between gap-3 px-5 pb-3 pt-5 sm:px-6">
+        <div className="flex items-center justify-between gap-3 px-4 pb-2.5 pt-4 sm:px-5">
           <h2 className="titulo-bloco">{titulo}</h2>
           {acao}
         </div>
       )}
-      <div className={semPadding ? '' : `px-5 pb-5 sm:px-6 sm:pb-6 ${titulo ? '' : 'pt-5 sm:pt-6'}`}>
+      <div className={semPadding ? '' : `px-4 pb-4 sm:px-5 sm:pb-5 ${titulo ? '' : 'pt-4 sm:pt-5'}`}>
         {children}
       </div>
     </section>
@@ -225,14 +225,14 @@ export function Indicador({
         <span className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-brand-500 to-brand-300" />
       )}
       <p className="eyebrow">{rotulo}</p>
-      <p className="mt-2 font-display text-[26px] font-semibold leading-none tracking-tight text-tinta-900 num">
+      <p className="mt-1.5 font-display text-[25px] font-semibold leading-none tracking-tight text-tinta-900 num">
         {valor}
       </p>
       {detalhe && (
-        <p className="mt-2 text-xs leading-snug text-tinta-400">{detalhe}</p>
+        <p className="mt-1.5 text-xs leading-snug text-tinta-400">{detalhe}</p>
       )}
       {alerta && (
-        <p className="mt-1.5 text-xs font-semibold text-rose-600">{alerta}</p>
+        <p className="mt-1 text-xs font-semibold text-rose-600">{alerta}</p>
       )}
       {onClick && (
         <span
@@ -249,7 +249,7 @@ export function Indicador({
     </>
   );
 
-  const estilo = `card relative overflow-hidden p-5 ${
+  const estilo = `card relative overflow-hidden p-4 ${
     acento ? 'ring-1 ring-brand-200' : ''
   } ${aberto ? 'ring-2 ring-brand-400' : ''}`;
 

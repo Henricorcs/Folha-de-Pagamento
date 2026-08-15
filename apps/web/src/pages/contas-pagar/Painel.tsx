@@ -4,7 +4,6 @@ import {
   BarrasComparadas,
   BarrasEmpilhadas,
   CORES_DE_ESTADO,
-  formatCompacto,
   PALETA,
   type SerieGrafico,
 } from '../../components/graficos';
@@ -20,7 +19,11 @@ import {
 } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
 import { formatBRL, formatData } from '../../lib/format';
-import type { ContaAberta, ContasAbertas } from '../../lib/types';
+import type {
+  ContaAberta,
+  ContasAbertas,
+  PagamentosDoMes,
+} from '../../lib/types';
 import { DetalheDaConta } from './DetalheDaConta';
 
 /**
@@ -57,6 +60,18 @@ export function Painel() {
   /** Conta cuja ficha está aberta — a fila daqui abre o mesmo detalhe da lista. */
   const [detalhando, setDetalhando] = useState<ContaAberta | null>(null);
 
+  /**
+   * Quanto já saiu no mês. É outra leitura do IXC porque a lista de abertas,
+   * por definição, não sabe nada do que já foi pago — e sem esse número o
+   * painel só conta metade do mês.
+   */
+  const pagas = useQuery({
+    queryKey: ['pagas-no-mes'],
+    queryFn: async () =>
+      (await api.get<PagamentosDoMes>('/contas-abertas/pagas-no-mes')).data,
+    retry: 0,
+  });
+
   // A lista vazia sai de um `useMemo` para ser sempre o mesmo array: um `[]`
   // criado a cada render refaria todos os agrupamentos abaixo sem nada ter
   // mudado.
@@ -79,6 +94,18 @@ export function Painel() {
   );
   /** O que precisa sair primeiro: o que venceu, depois o que vence antes. */
   const fila = useMemo(() => filaDePagamento(contas), [contas]);
+
+  /**
+   * O que ainda tem de sair até o dia 31. Inclui o que já venceu: atraso não
+   * deixa de ser dívida por ter passado da data, e é dinheiro que o caixa deste
+   * mês precisa cobrir do mesmo jeito.
+   */
+  const aPagarNoMes = useMemo(() => {
+    const fim = ultimoDiaDoMes();
+    return contas.filter(
+      (c) => c.vencimento !== null && String(c.vencimento).slice(0, 10) <= fim,
+    );
+  }, [contas]);
 
   const resumo = consulta.data?.resumo;
   const total = resumo?.total ?? 0;
@@ -126,7 +153,7 @@ export function Painel() {
           </Vazio>
         </Bloco>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {/* --- Os quatro números que se olha primeiro --- */}
           {resumo && (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -173,16 +200,54 @@ export function Painel() {
           </Bloco>
 
           {/* --- O dia de trabalho: o que sai nos próximos dias --- */}
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-5">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
             <Bloco
               titulo={`Agenda dos próximos ${DIAS_NA_AGENDA} dias`}
               className="surgir surgir-2 xl:col-span-3"
             >
               <AgendaDosDias dias={agenda} />
+
+              {/* O fechamento do mês, embaixo da agenda: o que ainda sai e o
+                  que já saiu. Os dois lados vêm do contas a pagar do IXC, que é
+                  por onde passa tudo — inclusive salário, diária e avulso. */}
+              <div className="mt-3 grid grid-cols-2 gap-3 border-t border-tinta-100 pt-3">
+                <div>
+                  <div className="text-[11px] text-tinta-400">
+                    A pagar até o fim do mês
+                  </div>
+                  <div className="valor text-lg">
+                    {formatBRL(somar(aPagarNoMes))}
+                  </div>
+                  <div className="text-[11px] text-tinta-400">
+                    {aPagarNoMes.length} título(s), o atraso incluído
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-tinta-400">
+                    Já pago neste mês
+                  </div>
+                  <div className="valor text-lg">
+                    {pagas.isLoading
+                      ? '…'
+                      : pagas.data
+                        ? formatBRL(pagas.data.total)
+                        : '—'}
+                  </div>
+                  <div className="text-[11px] text-tinta-400">
+                    {pagas.error
+                      ? 'não deu para ler do IXC'
+                      : pagas.data
+                        ? `${pagas.data.quantidade} título(s)${pagas.data.completo ? '' : ' — leitura parcial'}`
+                        : 'lendo o IXC…'}
+                  </div>
+                </div>
+              </div>
+
               <p className="ajuda">
                 Cada coluna é um dia. Sábado e domingo aparecem apagados: o
                 banco não paga neles, então o que vence no fim de semana precisa
-                sair antes.
+                sair antes. Tudo aqui é o que passa pelo contas a pagar do IXC —
+                a folha inclusive.
               </p>
             </Bloco>
 
@@ -369,8 +434,15 @@ function AgendaDosDias({ dias }: { dias: DiaDaAgenda[] }) {
               : `${formatData(d.dia)}: nada vence`
           }
         >
-          <span className="num shrink-0 text-[10px] font-semibold text-tinta-400 opacity-0 transition group-hover:opacity-100">
-            {d.total > 0 ? formatCompacto(d.total) : ''}
+          {/* O valor fica sempre visível, não só no hover: quem confere a
+              semana quer ler os quatorze números de uma vez, e passar o mouse
+              coluna a coluna para descobrir isso não é conferir. */}
+          <span
+            className={`num shrink-0 text-[10px] font-semibold ${
+              d.hoje || d.atrasado ? 'text-tinta-700' : 'text-tinta-400'
+            }`}
+          >
+            {d.total > 0 ? valorDaColuna(d.total) : ''}
           </span>
           <div className="flex w-full flex-1 items-end">
             <div
@@ -686,6 +758,29 @@ function mesesSeguintes(inicio: string, quantos: number): string[] {
     }
   }
   return meses;
+}
+
+/**
+ * Valor de uma coluna da agenda. Não usa o `formatCompacto` dos gráficos ("45,2
+ * mil") porque aqui a coluna tem uns quarenta pixels: o número precisa caber em
+ * três ou quatro caracteres ou vira sopa em cima da barra.
+ */
+function valorDaColuna(valor: number): string {
+  if (valor >= 1_000_000) {
+    return `${(valor / 1_000_000).toFixed(1).replace('.', ',')}M`;
+  }
+  if (valor >= 1_000) return `${Math.round(valor / 1_000)}k`;
+  return String(Math.round(valor));
+}
+
+/** "AAAA-MM-DD" do último dia do mês corrente. */
+function ultimoDiaDoMes(): string {
+  const hoje = new Date();
+  // Dia zero do mês seguinte é o último dia deste — resolve fevereiro e os
+  // meses de 30 sem tabela nenhuma.
+  const ultimo = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
+  const mes = String(ultimo.getMonth() + 1).padStart(2, '0');
+  return `${ultimo.getFullYear()}-${mes}-${String(ultimo.getDate()).padStart(2, '0')}`;
 }
 
 function somar(contas: ContaAberta[]): number {

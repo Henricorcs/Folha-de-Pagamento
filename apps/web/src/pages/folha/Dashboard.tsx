@@ -297,7 +297,7 @@ export function Dashboard() {
       )}
 
       {data && (
-        <div className="space-y-6">
+        <div className="space-y-4">
           <div className="surgir surgir-1 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {cartoes.map((c) => (
               <Indicador
