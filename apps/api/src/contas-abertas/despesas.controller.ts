@@ -17,6 +17,7 @@ import { DespesasService } from './despesas.service';
 import {
   CriarDespesaDto,
   EditarTituloDto,
+  ExcluirLoteDto,
   PagarLoteDto,
   PagarTituloDto,
 } from './dto/despesa.dto';
@@ -72,6 +73,13 @@ export class DespesasController {
     @Body() dto: EditarTituloDto,
   ) {
     return this.pagamentos.editar(idFnApagar, dto);
+  }
+
+  /** Apaga vários títulos de uma vez — só os que não foram pagos. */
+  @Post('contas-abertas/excluir-lote')
+  @HttpCode(200)
+  excluirLote(@Body() dto: ExcluirLoteDto) {
+    return this.pagamentos.excluirEmLote(dto.idsFnApagar);
   }
 
   /** Apaga o título no IXC — só o que ainda não foi pago. */

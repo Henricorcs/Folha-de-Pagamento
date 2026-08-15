@@ -69,6 +69,17 @@ export class PagarLoteDto {
   @IsOptional() @IsIn(['BANCO', 'EM_MAOS']) forma?: 'BANCO' | 'EM_MAOS';
 }
 
+/** Apagar vários títulos de uma vez. */
+export class ExcluirLoteDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Type(() => Number)
+  idsFnApagar!: number[];
+}
+
 /** O que dá para mudar num título que ainda está em aberto no IXC. */
 export class EditarTituloDto {
   @IsOptional()

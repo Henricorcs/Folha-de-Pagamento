@@ -1,0 +1,347 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import {
+  Aviso,
+  Bloco,
+  CabecalhoPagina,
+  CampoDinheiro,
+  Carregando,
+  Pagina,
+  Selo,
+  Vazio,
+} from '../../components/ui';
+import { api, mensagemErro } from '../../lib/api';
+import { formatBRL, formatData } from '../../lib/format';
+
+/** Uma despesa que se repete todo mês, como a API a devolve. */
+interface Recorrente {
+  id: string;
+  idFornecedorIxc: number;
+  fornecedorNome: string;
+  valor: string;
+  observacao: string;
+  proximoVencimento: string;
+  diasDeAntecedencia: number;
+  ativa: boolean;
+  ultimaGeracaoEm: string | null;
+  ultimoErro: string | null;
+}
+
+interface RecorrenteComResumo {
+  recorrente: Recorrente;
+  geradas: number;
+  /** Dias até a próxima nascer no IXC. Negativo = já era para ter nascido. */
+  diasParaGerar: number;
+}
+
+/**
+ * As despesas que se repetem todo mês — internet, aluguel, contabilidade.
+ *
+ * A conta de cada mês não fica pronta com antecedência de propósito: ela nasce
+ * no IXC poucos dias antes de vencer, porque conta a pagar lá é dívida
+ * assumida. O que esta tela mostra é a regra e quando ela vai disparar de novo.
+ */
+export function Recorrentes() {
+  const queryClient = useQueryClient();
+  const [editando, setEditando] = useState<string | null>(null);
+  const [valor, setValor] = useState('');
+  const [vencimento, setVencimento] = useState('');
+  const [aviso, setAviso] = useState<string | null>(null);
+  const [erro, setErro] = useState(false);
+
+  const lista = useQuery({
+    queryKey: ['recorrentes'],
+    queryFn: async () =>
+      (await api.get<RecorrenteComResumo[]>('/recorrentes')).data,
+  });
+
+  function invalidar() {
+    void queryClient.invalidateQueries({ queryKey: ['recorrentes'] });
+    void queryClient.invalidateQueries({ queryKey: ['contas-abertas'] });
+  }
+
+  const salvar = useMutation({
+    mutationFn: async (args: { id: string; dados: Record<string, unknown> }) => {
+      await api.patch(`/recorrentes/${args.id}`, args.dados);
+    },
+    onSuccess: () => {
+      setEditando(null);
+      invalidar();
+    },
+    onError: (err) => {
+      setErro(true);
+      setAviso(mensagemErro(err));
+    },
+  });
+
+  const remover = useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/recorrentes/${id}`);
+    },
+    onSuccess: () => {
+      setErro(false);
+      setAviso('Repetição apagada. As contas que ela já gerou continuam lá.');
+      invalidar();
+    },
+    onError: (err) => {
+      setErro(true);
+      setAviso(mensagemErro(err));
+    },
+  });
+
+  const gerarAgora = useMutation({
+    mutationFn: async () =>
+      (
+        await api.post<{
+          geradas: number;
+          fornecedores: string[];
+          erros: Array<{ fornecedor: string; erro: string }>;
+        }>('/recorrentes/gerar-agora')
+      ).data,
+    onSuccess: (r) => {
+      setErro(r.erros.length > 0);
+      setAviso(
+        (r.geradas > 0
+          ? `${r.geradas} conta(s) geradas no IXC: ${r.fornecedores.join(', ')}.`
+          : 'Nenhuma conta para gerar agora — nenhuma entrou na janela dos dias de antecedência.') +
+          (r.erros.length
+            ? ` Falharam: ${r.erros.map((e) => `${e.fornecedor} (${e.erro})`).join('; ')}`
+            : ''),
+      );
+      invalidar();
+    },
+    onError: (err) => {
+      setErro(true);
+      setAviso(mensagemErro(err));
+    },
+  });
+
+  const itens = lista.data ?? [];
+  const ativas = itens.filter((i) => i.recorrente.ativa);
+  const porMes = ativas.reduce((s, i) => s + Number(i.recorrente.valor), 0);
+
+  return (
+    <Pagina>
+      <CabecalhoPagina
+        secao="Contas a pagar"
+        titulo="Despesas que se repetem"
+        descricao="Serviços pagos todo mês. A conta de cada mês nasce sozinha no IXC poucos dias antes de vencer — e já aprovada."
+        acoes={
+          <button
+            onClick={() => gerarAgora.mutate()}
+            disabled={gerarAgora.isPending}
+            className="btn btn-acao"
+          >
+            {gerarAgora.isPending ? 'Gerando…' : 'Gerar agora'}
+          </button>
+        }
+      />
+
+      {aviso && (
+        <Aviso
+          tom={erro ? 'erro' : 'pago'}
+          acao={
+            <button
+              onClick={() => setAviso(null)}
+              className="btn btn-sutil btn-p"
+            >
+              Fechar
+            </button>
+          }
+        >
+          {aviso}
+        </Aviso>
+      )}
+
+      {ativas.length > 0 && (
+        <p className="mb-4 text-sm text-tinta-500">
+          {ativas.length} despesa(s) ativa(s), somando{' '}
+          <strong className="valor">{formatBRL(porMes)}</strong> por mês.
+        </p>
+      )}
+
+      <Bloco semPadding>
+        {lista.isLoading ? (
+          <Carregando />
+        ) : itens.length === 0 ? (
+          <Vazio titulo="Nenhuma despesa repetida ainda">
+            Ao lançar uma conta, marque "Repetir todo mês" — a partir do mês
+            seguinte ela nasce sozinha aqui.
+          </Vazio>
+        ) : (
+          <div className="overflow-x-auto rolagem-fina">
+            <table className="w-full text-sm">
+              <thead>
+                <tr>
+                  <th className="th">Fornecedor</th>
+                  <th className="th text-right">Por mês</th>
+                  <th className="th">Próxima vence</th>
+                  <th className="th">Nasce no IXC</th>
+                  <th className="th text-right">Ação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {itens.map(({ recorrente: r, geradas, diasParaGerar }) => {
+                  const emEdicao = editando === r.id;
+                  return (
+                    <tr
+                      key={r.id}
+                      className={`linha ${r.ativa ? '' : 'opacity-50'}`}
+                    >
+                      <td className="td">
+                        <div className="text-tinta-800">{r.fornecedorNome}</div>
+                        <div className="text-xs text-tinta-400">
+                          {r.observacao}
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          {!r.ativa && (
+                            <Selo pequeno tom="neutro">
+                              desligada
+                            </Selo>
+                          )}
+                          {geradas > 0 && (
+                            <span className="text-[11px] text-tinta-400">
+                              {geradas} conta(s) geradas
+                            </span>
+                          )}
+                          {r.ultimoErro && (
+                            <Selo pequeno tom="erro" titulo={r.ultimoErro}>
+                              a última falhou
+                            </Selo>
+                          )}
+                        </div>
+                      </td>
+
+                      <td className="td text-right">
+                        {emEdicao ? (
+                          <CampoDinheiro
+                            valor={valor}
+                            onChange={setValor}
+                            className="campo py-1 text-right"
+                          />
+                        ) : (
+                          <span className="valor">
+                            {formatBRL(Number(r.valor))}
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="td num whitespace-nowrap text-tinta-600">
+                        {emEdicao ? (
+                          <input
+                            type="date"
+                            value={vencimento}
+                            onChange={(e) => setVencimento(e.target.value)}
+                            className="campo py-1"
+                          />
+                        ) : (
+                          formatData(r.proximoVencimento)
+                        )}
+                      </td>
+
+                      <td className="td text-tinta-500">
+                        {!r.ativa ? (
+                          '—'
+                        ) : diasParaGerar <= 0 ? (
+                          <Selo pequeno tom="atencao">
+                            na próxima rodada
+                          </Selo>
+                        ) : (
+                          `em ${diasParaGerar} dia(s)`
+                        )}
+                        <div className="text-[11px] text-tinta-400">
+                          {r.diasDeAntecedencia} dias antes de vencer
+                        </div>
+                      </td>
+
+                      <td className="td text-right">
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                          {emEdicao ? (
+                            <>
+                              <button
+                                onClick={() =>
+                                  salvar.mutate({
+                                    id: r.id,
+                                    dados: {
+                                      valor: Number(valor),
+                                      proximoVencimento: vencimento,
+                                    },
+                                  })
+                                }
+                                disabled={salvar.isPending}
+                                className="btn btn-primario btn-p"
+                              >
+                                Salvar
+                              </button>
+                              <button
+                                onClick={() => setEditando(null)}
+                                className="btn btn-sutil btn-p"
+                              >
+                                Cancelar
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setEditando(r.id);
+                                  setValor(String(Number(r.valor)));
+                                  setVencimento(
+                                    String(r.proximoVencimento).slice(0, 10),
+                                  );
+                                }}
+                                className="btn btn-neutro btn-p"
+                              >
+                                Editar
+                              </button>
+                              <button
+                                onClick={() =>
+                                  salvar.mutate({
+                                    id: r.id,
+                                    dados: { ativa: !r.ativa },
+                                  })
+                                }
+                                className="btn btn-sutil btn-p"
+                                title={
+                                  r.ativa
+                                    ? 'Para de gerar; o que já gerou continua lá'
+                                    : 'Volta a gerar todo mês'
+                                }
+                              >
+                                {r.ativa ? 'Desligar' : 'Religar'}
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (
+                                    confirm(
+                                      `Apagar a repetição de ${r.fornecedorNome}? ` +
+                                        'As contas já geradas continuam no IXC.',
+                                    )
+                                  ) {
+                                    remover.mutate(r.id);
+                                  }
+                                }}
+                                className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10"
+                              >
+                                Apagar
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Bloco>
+
+      <p className="ajuda">
+        A verificação roda sozinha a cada seis horas. "Gerar agora" só antecipa
+        essa checagem — nada nasce antes da janela dos dias de antecedência.
+      </p>
+    </Pagina>
+  );
+}

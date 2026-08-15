@@ -273,7 +273,12 @@ export class PagamentosService {
   async editar(
     idFnApagar: number,
     mudancas: EdicaoDoTitulo,
-  ): Promise<{ idFnApagar: number; alterado: string[] }> {
+  ): Promise<{
+    idFnApagar: number;
+    alterado: string[];
+    /** Precisou reprovar e reaprovar para o IXC deixar editar. */
+    reaprovada: boolean;
+  }> {
     const raw = await this.ixc.getById<Record<string, unknown>>(
       'fn_apagar',
       'fn_apagar.id',
@@ -304,16 +309,91 @@ export class PagamentosService {
       throw new BadRequestException('Nada foi alterado.');
     }
 
-    await this.ixc.update(
-      'fn_apagar',
-      idFnApagar,
-      await montarEdicao(raw, mudancas),
-    );
+    /*
+     * O IXC recusa editar conta com auditoria aprovada — e as contas lançadas
+     * daqui nascem aprovadas justamente para o banco poder pagá-las. Sem isto,
+     * toda edição esbarrava em "não é possível editar uma conta a pagar que
+     * esteja com auditoria aprovada".
+     *
+     * Então o ciclo é: reprova, edita, aprova de novo. A reprovação dura o
+     * tempo da escrita e o `finally` garante que ela seja desfeita mesmo se a
+     * edição falhar — deixar a conta reprovada por causa de um erro de rede
+     * seria pior que não ter editado, porque ela pararia de ser pagável.
+     */
+    const estavaAprovada = lerStatusAuditoria(raw) === 'A';
+    if (estavaAprovada) {
+      await this.auditar(idFnApagar, 'R', 'Reaberta para edição pelo ILNET FINANCE');
+    }
+
+    try {
+      await this.ixc.update(
+        'fn_apagar',
+        idFnApagar,
+        await montarEdicao(raw, mudancas),
+      );
+    } finally {
+      if (estavaAprovada) {
+        await this.auditar(
+          idFnApagar,
+          'A',
+          'Reaprovada após edição pelo ILNET FINANCE',
+        ).catch((err: unknown) => {
+          // Aqui não dá para desistir em silêncio: a conta ficaria reprovada.
+          this.logger.error(
+            `Título ${idFnApagar} ficou REPROVADO no IXC — a reaprovação ` +
+              `falhou: ${err instanceof Error ? err.message : String(err)}. ` +
+              'Aprove pela lista.',
+          );
+        });
+      }
+    }
+
     this.logger.log(
       `Título ${idFnApagar} alterado no IXC: ${alterado.join(', ')}.`,
     );
 
-    return { idFnApagar, alterado };
+    return { idFnApagar, alterado, reaprovada: estavaAprovada };
+  }
+
+  /** Um passo de auditoria no IXC: aprovar ou reprovar com o motivo. */
+  private async auditar(
+    idFnApagar: number,
+    status: 'A' | 'R',
+    motivo: string,
+  ): Promise<void> {
+    await this.ixc.create(
+      'fn_apagar_auditoria',
+      buildAuditoriaPayload({ idFnApagar, status, motivo, operador: '' }),
+    );
+  }
+
+  /**
+   * Apaga vários títulos de uma vez. Um que falhe não impede os outros: são
+   * registros independentes no IXC, e parar no primeiro erro deixaria metade
+   * da seleção apagada sem dizer qual metade.
+   */
+  async excluirEmLote(
+    ids: number[],
+  ): Promise<{
+    apagados: number[];
+    falhas: Array<{ idFnApagar: number; erro: string }>;
+  }> {
+    const apagados: number[] = [];
+    const falhas: Array<{ idFnApagar: number; erro: string }> = [];
+
+    for (const id of [...new Set(ids)]) {
+      try {
+        await this.excluir(id);
+        apagados.push(id);
+      } catch (err) {
+        falhas.push({
+          idFnApagar: id,
+          erro: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    return { apagados, falhas };
   }
 
   /**

@@ -74,6 +74,19 @@ export function IconeSol({ className }: IconeProps) {
   );
 }
 
+/** Calendário com a seta que volta: a conta que se repete todo mês. */
+export function IconeCalendarioVolta({ className }: IconeProps) {
+  return (
+    <svg {...base} className={className}>
+      <rect x="3.5" y="4.5" width="17" height="16" rx="2.5" />
+      <path d="M3.5 9.5h17" />
+      <path d="M8 3v3M16 3v3" />
+      <path d="M9 15.5a3 3 0 1 0 1-2.6" />
+      <path d="M9.4 12.2v2.2h2.2" />
+    </svg>
+  );
+}
+
 /** Lua: o tema escuro, para quem fecha o mês depois que o sol se pôs. */
 export function IconeLua({ className }: IconeProps) {
   return (

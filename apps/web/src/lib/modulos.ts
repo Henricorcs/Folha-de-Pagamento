@@ -1,5 +1,6 @@
 import {
   IconeCalculo,
+  IconeCalendarioVolta,
   IconeChave,
   IconeDia,
   IconeEngrenagem,
@@ -84,6 +85,7 @@ const contasPagar: Modulo = {
     // empresa (daqui) e é lançamento que a folha usa (de lá). Duplicar o
     // caminho custa menos que obrigar a trocar de módulo no meio do trabalho.
     { to: 'avulsos', label: 'Pagamentos Avulsos', icone: IconeRecibo },
+    { to: 'recorrentes', label: 'Repetem todo mês', icone: IconeCalendarioVolta },
     { to: 'categorias', label: 'Categorias', icone: IconeEtiqueta },
   ],
 };

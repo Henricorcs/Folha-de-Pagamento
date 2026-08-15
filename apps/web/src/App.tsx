@@ -8,6 +8,7 @@ import { Modulos } from './pages/Modulos';
 import { Inicio as ContasPagarInicio } from './pages/contas-pagar/Inicio';
 import { Categorias as ContasPagarCategorias } from './pages/contas-pagar/Categorias';
 import { Painel as ContasPagarPainel } from './pages/contas-pagar/Painel';
+import { Recorrentes } from './pages/contas-pagar/Recorrentes';
 import { Avulsos } from './pages/folha/Avulsos';
 import { Configuracoes } from './pages/folha/Configuracoes';
 import { ContasPagar } from './pages/folha/ContasPagar';
@@ -115,6 +116,7 @@ export default function App() {
             paga qualquer um deles, e não só quem esta casa já cadastrou. Na
             folha continua sendo a lista de cá. */}
         <Route path="avulsos" element={<Avulsos doIxc />} />
+        <Route path="recorrentes" element={<Recorrentes />} />
         <Route path="categorias" element={<ContasPagarCategorias />} />
       </Route>
 

@@ -8,6 +8,9 @@ import { ContasAbertasService } from './contas-abertas.service';
 import { DespesasController } from './despesas.controller';
 import { DespesasService } from './despesas.service';
 import { PagamentosService } from './pagamentos.service';
+import { RecorrentesPollerService } from './recorrentes-poller.service';
+import { RecorrentesController } from './recorrentes.controller';
+import { RecorrentesService } from './recorrentes.service';
 
 @Module({
   // O financeiro entra por causa da despesa lançada à mão: ela vira conta a
@@ -18,12 +21,15 @@ import { PagamentosService } from './pagamentos.service';
     ContasAbertasController,
     CategoriasController,
     DespesasController,
+    RecorrentesController,
   ],
   providers: [
     ContasAbertasService,
     CategoriasService,
     DespesasService,
     PagamentosService,
+    RecorrentesService,
+    RecorrentesPollerService,
   ],
 })
 export class ContasAbertasModule {}

@@ -1,0 +1,300 @@
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { DespesaRecorrente, Prisma } from '@prisma/client';
+import { ContasPagarService } from '../financeiro/contas-pagar.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { CategoriasService } from './categorias.service';
+
+/** Uma recorrente com o que a tela mostra sem abrir o cadastro. */
+export interface RecorrenteComResumo {
+  recorrente: DespesaRecorrente;
+  /** Quantas contas ela já gerou. */
+  geradas: number;
+  /** Quantos dias faltam para a próxima nascer no IXC (negativo = atrasada). */
+  diasParaGerar: number;
+}
+
+/** O que uma rodada de geração fez. */
+export interface ResultadoDaGeracao {
+  geradas: number;
+  /** Nome de quem ganhou conta agora — para o log e para a tela. */
+  fornecedores: string[];
+  erros: Array<{ recorrenteId: string; fornecedor: string; erro: string }>;
+}
+
+/**
+ * Despesas que se repetem todo mês: internet, aluguel, contabilidade, o serviço
+ * contratado.
+ *
+ * A conta não é criada com meses de antecedência de propósito. Ela nasce no IXC
+ * poucos dias antes de vencer, porque conta a pagar lá é dívida assumida: doze
+ * contas de internet abertas de uma vez fariam o total em aberto da empresa
+ * saltar por algo que ainda nem foi prestado.
+ *
+ * O que se guarda aqui é a regra — quanto, para quem, que dia — e o próximo
+ * vencimento. Cada geração anda um mês, e é isso que impede a mesma conta de
+ * nascer duas vezes se a rotina rodar de novo no mesmo dia.
+ */
+@Injectable()
+export class RecorrentesService {
+  private readonly logger = new Logger(RecorrentesService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly contasPagar: ContasPagarService,
+    private readonly categorias: CategoriasService,
+  ) {}
+
+  async listar(incluirDesligadas = true): Promise<RecorrenteComResumo[]> {
+    const lista = await this.prisma.despesaRecorrente.findMany({
+      where: incluirDesligadas ? undefined : { ativa: true },
+      orderBy: [{ ativa: 'desc' }, { proximoVencimento: 'asc' }],
+      include: { _count: { select: { contas: true } } },
+    });
+
+    const hoje = hojeUtc();
+    return lista.map(({ _count, ...recorrente }) => ({
+      recorrente,
+      geradas: _count.contas,
+      diasParaGerar: diasEntre(
+        hoje,
+        diasAntes(recorrente.proximoVencimento, recorrente.diasDeAntecedencia),
+      ),
+    }));
+  }
+
+  async criar(
+    dados: {
+      idFornecedorIxc: number;
+      fornecedorNome: string;
+      valor: number;
+      observacao: string;
+      /** Vencimento da PRÓXIMA conta (AAAA-MM-DD). */
+      proximoVencimento: string;
+      diasDeAntecedencia?: number;
+      contaContabil?: number;
+      contaPagamento?: number;
+      tipoPagamentoIxc?: string;
+      categoriaId?: string | null;
+    },
+    usuarioId?: string,
+  ): Promise<DespesaRecorrente> {
+    const criada = await this.prisma.despesaRecorrente.create({
+      data: {
+        idFornecedorIxc: dados.idFornecedorIxc,
+        fornecedorNome: dados.fornecedorNome.trim(),
+        valor: new Prisma.Decimal(dados.valor),
+        observacao: dados.observacao.trim(),
+        proximoVencimento: dataUtc(dados.proximoVencimento),
+        diasDeAntecedencia: dados.diasDeAntecedencia ?? 5,
+        contaContabil: dados.contaContabil ?? null,
+        contaPagamento: dados.contaPagamento ?? null,
+        tipoPagamentoIxc: dados.tipoPagamentoIxc ?? null,
+        categoriaId: dados.categoriaId ?? null,
+        criadoPor: usuarioId ?? null,
+      },
+    });
+
+    this.logger.log(
+      `Despesa recorrente criada: ${criada.fornecedorNome}, ` +
+        `${dados.valor} todo mês, próxima em ${dados.proximoVencimento}.`,
+    );
+    return criada;
+  }
+
+  async atualizar(
+    id: string,
+    dados: Partial<{
+      valor: number;
+      observacao: string;
+      proximoVencimento: string;
+      diasDeAntecedencia: number;
+      contaContabil: number;
+      contaPagamento: number;
+      tipoPagamentoIxc: string;
+      categoriaId: string | null;
+      ativa: boolean;
+    }>,
+  ): Promise<DespesaRecorrente> {
+    await this.buscar(id);
+    return this.prisma.despesaRecorrente.update({
+      where: { id },
+      data: {
+        ...(dados.valor === undefined
+          ? {}
+          : { valor: new Prisma.Decimal(dados.valor) }),
+        ...(dados.observacao === undefined
+          ? {}
+          : { observacao: dados.observacao.trim() }),
+        ...(dados.proximoVencimento === undefined
+          ? {}
+          : { proximoVencimento: dataUtc(dados.proximoVencimento) }),
+        ...(dados.diasDeAntecedencia === undefined
+          ? {}
+          : { diasDeAntecedencia: dados.diasDeAntecedencia }),
+        ...(dados.contaContabil === undefined
+          ? {}
+          : { contaContabil: dados.contaContabil }),
+        ...(dados.contaPagamento === undefined
+          ? {}
+          : { contaPagamento: dados.contaPagamento }),
+        ...(dados.tipoPagamentoIxc === undefined
+          ? {}
+          : { tipoPagamentoIxc: dados.tipoPagamentoIxc }),
+        ...(dados.categoriaId === undefined
+          ? {}
+          : { categoriaId: dados.categoriaId }),
+        ...(dados.ativa === undefined ? {} : { ativa: dados.ativa }),
+      },
+    });
+  }
+
+  /**
+   * Apaga a regra. As contas que ela já gerou ficam: são dívidas de verdade no
+   * IXC, e sumir com elas porque alguém cancelou o contrato seria apagar o que
+   * a empresa deve.
+   */
+  async remover(id: string): Promise<void> {
+    await this.buscar(id);
+    await this.prisma.despesaRecorrente.delete({ where: { id } });
+  }
+
+  async buscar(id: string): Promise<DespesaRecorrente> {
+    const r = await this.prisma.despesaRecorrente.findUnique({ where: { id } });
+    if (!r) throw new NotFoundException('Despesa recorrente não encontrada');
+    return r;
+  }
+
+  /**
+   * Gera as contas que já entraram na janela de antecedência.
+   *
+   * Roda sozinha, algumas vezes por dia, e também pelo botão da tela. Uma
+   * recorrente que falha não derruba as outras: o erro fica gravado nela, à
+   * vista de quem abrir a lista, e a próxima rodada tenta de novo — o
+   * vencimento só anda quando a conta de fato nasceu no IXC.
+   */
+  async gerarPendentes(usuarioId?: string): Promise<ResultadoDaGeracao> {
+    const hoje = hojeUtc();
+    const pendentes = await this.prisma.despesaRecorrente.findMany({
+      where: { ativa: true },
+    });
+
+    const resultado: ResultadoDaGeracao = {
+      geradas: 0,
+      fornecedores: [],
+      erros: [],
+    };
+
+    for (const r of pendentes) {
+      const nasceEm = diasAntes(r.proximoVencimento, r.diasDeAntecedencia);
+      if (nasceEm > hoje) continue;
+
+      try {
+        const conta = await this.contasPagar.criarDespesa(
+          {
+            idFornecedorIxc: r.idFornecedorIxc,
+            fornecedorNome: r.fornecedorNome,
+            valor: Number(r.valor),
+            // Emitida hoje, vencendo no dia combinado: é o que a conta seria se
+            // alguém a lançasse à mão nesta manhã.
+            dataEmissao: hoje,
+            dataVencimento: r.proximoVencimento,
+            observacao: r.observacao,
+            contaContabil: r.contaContabil ?? undefined,
+            contaPagamento: r.contaPagamento ?? undefined,
+            tipoPagamentoIxc: r.tipoPagamentoIxc ?? undefined,
+          },
+          usuarioId,
+        );
+
+        // A etiqueta desta casa se prende ao número do título, que só existe
+        // depois que o IXC responde.
+        if (r.categoriaId && conta.idFnApagarIxc) {
+          await this.categorias
+            .classificar(conta.idFnApagarIxc, r.categoriaId, usuarioId)
+            .catch((err: unknown) => {
+              this.logger.warn(
+                `Conta ${conta.idFnApagarIxc} nasceu sem categoria: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+            });
+        }
+
+        await this.prisma.despesaRecorrente.update({
+          where: { id: r.id },
+          data: {
+            // Só agora o vencimento anda: se a criação tivesse falhado, o mês
+            // seguinte teria pulado uma conta sem ninguém notar.
+            proximoVencimento: mesSeguinte(r.proximoVencimento),
+            ultimaGeracaoEm: new Date(),
+            ultimoErro: null,
+            contas: { connect: { id: conta.id } },
+          },
+        });
+
+        resultado.geradas += 1;
+        resultado.fornecedores.push(r.fornecedorNome);
+        this.logger.log(
+          `Recorrente: conta de ${r.fornecedorNome} gerada no IXC ` +
+            `(título ${conta.idFnApagarIxc ?? '?'}), vence ${formatarDia(r.proximoVencimento)}.`,
+        );
+      } catch (err) {
+        const erro = err instanceof Error ? err.message : String(err);
+        this.logger.error(
+          `Recorrente de ${r.fornecedorNome} falhou: ${erro}`,
+        );
+        await this.prisma.despesaRecorrente.update({
+          where: { id: r.id },
+          data: { ultimoErro: erro },
+        });
+        resultado.erros.push({
+          recorrenteId: r.id,
+          fornecedor: r.fornecedorNome,
+          erro,
+        });
+      }
+    }
+
+    return resultado;
+  }
+}
+
+/** Hoje à meia-noite em UTC, como o resto das datas desta base. */
+function hojeUtc(): Date {
+  const agora = new Date();
+  return new Date(
+    Date.UTC(agora.getFullYear(), agora.getMonth(), agora.getDate()),
+  );
+}
+
+function dataUtc(iso: string): Date {
+  const [ano, mes, dia] = iso.slice(0, 10).split('-').map(Number);
+  return new Date(Date.UTC(ano, mes - 1, dia));
+}
+
+function diasAntes(data: Date, dias: number): Date {
+  return new Date(data.getTime() - dias * 24 * 60 * 60 * 1000);
+}
+
+function diasEntre(de: Date, ate: Date): number {
+  return Math.round((ate.getTime() - de.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+/**
+ * O mesmo dia do mês que vem. Dia 31 em mês de 30 cai no último dia dele — e
+ * não no dia 1º do mês seguinte, que é o que `setMonth` faria sozinho e
+ * jogaria a conta de janeiro para março.
+ */
+export function mesSeguinte(data: Date): Date {
+  const ano = data.getUTCFullYear();
+  const mes = data.getUTCMonth();
+  const dia = data.getUTCDate();
+  const ultimoDoProximo = new Date(Date.UTC(ano, mes + 2, 0)).getUTCDate();
+  return new Date(Date.UTC(ano, mes + 1, Math.min(dia, ultimoDoProximo)));
+}
+
+function formatarDia(data: Date): string {
+  return `${String(data.getUTCDate()).padStart(2, '0')}/${String(
+    data.getUTCMonth() + 1,
+  ).padStart(2, '0')}/${data.getUTCFullYear()}`;
+}

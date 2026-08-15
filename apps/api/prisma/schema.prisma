@@ -715,6 +715,56 @@ model AssinaturaDiaria {
 // ---------------------------------------------------------------------------
 // Conta a pagar (espelho local do fn_apagar do IXC) com o fluxo de aprovação
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Despesa que se repete todo mês: internet, aluguel, contabilidade, o serviço
+// contratado. Lançada uma vez, ela mesma gera a conta a pagar dos meses
+// seguintes — ver `RecorrentesService`.
+// ---------------------------------------------------------------------------
+model DespesaRecorrente {
+  id String @id @default(uuid())
+
+  /// Quem recebe, no cadastro de fornecedores do IXC
+  idFornecedorIxc Int    @map("id_fornecedor_ixc")
+  fornecedorNome  String @map("fornecedor_nome")
+
+  /// O que se paga todo mês. Muda pouco; quando muda, edita-se aqui.
+  valor      Decimal @db.Decimal(14, 2)
+  /// O que vai na observação do IXC ("Internet do escritório")
+  observacao String
+
+  /// Vencimento da próxima conta a ser gerada. Anda um mês a cada geração.
+  proximoVencimento DateTime @map("proximo_vencimento")
+
+  /// Com quantos dias de antecedência a conta nasce no IXC
+  diasDeAntecedencia Int @default(5) @map("dias_de_antecedencia")
+
+  // --- Como a conta sai (o mesmo do lançamento avulso) ---
+  contaContabil    Int?    @map("conta_contabil")
+  contaPagamento   Int?    @map("conta_pagamento")
+  tipoPagamentoIxc String? @map("tipo_pagamento_ixc")
+
+  /// Etiqueta desta casa, aplicada a cada conta gerada
+  categoria   CategoriaDespesa? @relation(fields: [categoriaId], references: [id], onDelete: SetNull)
+  categoriaId String?           @map("categoria_id")
+
+  /// Desligada, para de gerar — o histórico do que já gerou continua de pé
+  ativa Boolean @default(true)
+
+  /// Quando a última conta foi gerada, e qual foi
+  ultimaGeracaoEm DateTime? @map("ultima_geracao_em")
+  /// O que o IXC respondeu quando a geração falhou (null = correu bem)
+  ultimoErro      String?   @map("ultimo_erro")
+
+  contas ContaPagar[]
+
+  criadoPor String?  @map("criado_por")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([ativa, proximoVencimento])
+  @@map("despesas_recorrentes")
+}
+
 enum StatusContaPagar {
   RASCUNHO // criada localmente, ainda não enviada ao IXC
   AGUARDANDO_APROVACAO // salva no IXC (fn_apagar criado), pendente auditoria
@@ -782,6 +832,10 @@ model ContaPagar {
   chavePix         String?  @map("chave_pix")
   /// Tipo da chave acima, como o IXC o nomeia ("Código copia e cola", "CPF/CNPJ"…)
   tipoChavePix     String?  @map("tipo_chave_pix")
+
+  /// A despesa recorrente que gerou esta conta, quando foi o caso
+  recorrente   DespesaRecorrente? @relation(fields: [recorrenteId], references: [id], onDelete: SetNull)
+  recorrenteId String?            @map("recorrente_id")
 
   status StatusContaPagar @default(RASCUNHO)
   erro   String?
@@ -1020,6 +1074,7 @@ model CategoriaDespesa {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   classificacoes ClassificacaoConta[]
+  recorrentes    DespesaRecorrente[]
 
   @@map("categorias_despesa")
 }

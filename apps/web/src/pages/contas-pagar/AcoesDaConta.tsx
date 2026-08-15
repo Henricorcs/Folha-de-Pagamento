@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Aviso, CampoDinheiro, Janela } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
 import { formatBRL, formatData } from '../../lib/format';
@@ -311,8 +311,41 @@ export function EditarConta({
         .data,
   });
 
+  /*
+   * Os campos crus do título, para os seletores abrirem no que está lá — e não
+   * num "como está no IXC" que esconde justamente o que se quer conferir antes
+   * de mudar.
+   */
+  const bruto = useQuery({
+    queryKey: ['conta-bruta', conta.idFnApagar],
+    queryFn: async () =>
+      (
+        await api.get<{ campos: Record<string, unknown> }>(
+          `/contas-abertas/${conta.idFnApagar}/bruto`,
+        )
+      ).data,
+    retry: 0,
+  });
+
+  const campos = bruto.data?.campos;
+  const tipoAtual = String(campos?.tipo_pagamento ?? '').trim();
+  const contaAtual = String(campos?.id_contas ?? '').trim();
+  const chaveAtual = String(campos?.chave_pix ?? '').trim();
+  const boletoAtual = String(campos?.codigo_barras ?? '').trim();
+
+  // O que veio do IXC vira o valor inicial dos campos, uma vez só.
+  useEffect(() => {
+    if (!campos) return;
+    setTipoPagamento((v) => v || tipoAtual);
+    setContaPagamento((v) => v || contaAtual);
+    setChavePix((v) => v || chaveAtual);
+    setCodigoBarras((v) => v || boletoAtual);
+  }, [campos, tipoAtual, contaAtual, chaveAtual, boletoAtual]);
+
   const salvar = useMutation({
     mutationFn: async () => {
+      // Só o que de fato mudou: mandar tudo de volta faria o IXC reprovar e
+      // reaprovar a conta por causa de uma edição que não mudou nada.
       const mudancas: Record<string, unknown> = {};
       if (Number(valor) !== conta.valorAberto) mudancas.valor = Number(valor);
       if (vencimento !== String(conta.vencimento ?? '').slice(0, 10)) {
@@ -321,10 +354,16 @@ export function EditarConta({
       if (observacao !== (conta.observacao ?? '')) {
         mudancas.observacao = observacao;
       }
-      if (tipoPagamento) mudancas.tipoPagamento = tipoPagamento;
-      if (contaPagamento) mudancas.contaPagamento = Number(contaPagamento);
-      if (chavePix) mudancas.chavePix = chavePix;
-      if (codigoBarras) mudancas.codigoBarras = codigoBarras;
+      if (tipoPagamento && tipoPagamento !== tipoAtual) {
+        mudancas.tipoPagamento = tipoPagamento;
+      }
+      if (contaPagamento && contaPagamento !== contaAtual) {
+        mudancas.contaPagamento = Number(contaPagamento);
+      }
+      if (chavePix && chavePix !== chaveAtual) mudancas.chavePix = chavePix;
+      if (codigoBarras && codigoBarras !== boletoAtual) {
+        mudancas.codigoBarras = codigoBarras;
+      }
 
       await api.patch(`/contas-abertas/${conta.idFnApagar}`, mudancas);
     },
@@ -337,8 +376,15 @@ export function EditarConta({
   return (
     <Janela titulo={`Editar — ${conta.fornecedor.nome}`} onFechar={onFechar}>
       <p className="mb-4 text-sm text-tinta-500">
-        A mudança vai direto para o título nº {conta.idFnApagar} no IXC. O que
-        for deixado em branco fica como está.
+        A mudança vai direto para o título nº {conta.idFnApagar} no IXC. Os
+        campos abrem com o que está lá agora.
+        {conta.statusAuditoria === 'A' && (
+          <>
+            {' '}
+            Como ela já está aprovada, o IXC não deixa editar direto: a conta é
+            reprovada, alterada e aprovada de novo — sozinha, sem sair daqui.
+          </>
+        )}
       </p>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -374,9 +420,23 @@ export function EditarConta({
               }
             }}
             className="campo"
+            disabled={bruto.isLoading}
           >
-            <option value="">Como está no IXC</option>
-            {TIPOS_DE_PAGAMENTO.map((t) => (
+            <option value="">
+              {bruto.isLoading ? 'lendo do IXC…' : 'sem tipo definido'}
+            </option>
+            {/* O tipo que está no IXC entra na lista mesmo se for um rótulo que
+                a tela não conhece — senão ele sumiria do seletor e a edição o
+                trocaria sem ninguém pedir. */}
+            {[
+              ...TIPOS_DE_PAGAMENTO,
+              ...(tipoAtual &&
+              !TIPOS_DE_PAGAMENTO.includes(
+                tipoAtual as (typeof TIPOS_DE_PAGAMENTO)[number],
+              )
+                ? [tipoAtual]
+                : []),
+            ].map((t) => (
               <option key={t} value={t}>
                 {t === 'Dinheiro' ? 'Em mãos (dinheiro)' : t}
               </option>
@@ -392,13 +452,19 @@ export function EditarConta({
             value={contaPagamento}
             onChange={(e) => setContaPagamento(e.target.value)}
             className="campo"
+            disabled={bruto.isLoading || contasIxc.isLoading}
           >
-            <option value="">Como está no IXC</option>
+            <option value="">
+              {bruto.isLoading ? 'lendo do IXC…' : 'sem conta definida'}
+            </option>
             {(contasIxc.data ?? [])
-              .filter((c) => c.usual || c.ativa)
+              // A conta que o título usa hoje aparece mesmo se estiver inativa:
+              // é o valor atual, e escondê-lo faria a edição trocá-la sozinha.
+              .filter((c) => c.usual || c.ativa || String(c.id) === contaAtual)
               .map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.nome}
+                  {c.ativa ? '' : ' (inativa)'}
                 </option>
               ))}
           </select>

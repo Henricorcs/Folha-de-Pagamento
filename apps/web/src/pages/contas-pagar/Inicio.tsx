@@ -47,6 +47,8 @@ export function Inicio() {
   /** Títulos marcados para receber a mesma etiqueta de uma vez. */
   const [marcados, setMarcados] = useState<Set<number>>(new Set());
   const [categoriaLote, setCategoriaLote] = useState('');
+  const [avisoLote, setAvisoLote] = useState<string | null>(null);
+  const [erroLote, setErroLote] = useState(false);
   /** Contas na janela de pagamento — uma, ou as marcadas. */
   const [pagandoEmMaos, setPagandoEmMaos] = useState<ContaAberta[] | null>(null);
   const [editando, setEditando] = useState<ContaAberta | null>(null);
@@ -94,6 +96,37 @@ export function Inicio() {
       void queryClient.invalidateQueries({ queryKey: ['categorias-despesa'] });
       setMarcados(new Set());
       setCategoriaLote('');
+    },
+  });
+
+  /**
+   * Apaga no IXC tudo o que está marcado. Uma que falhe não impede as outras —
+   * conta já paga, por exemplo, é recusada e a tela diz quantas ficaram.
+   */
+  const excluirLote = useMutation({
+    mutationFn: async (ids: number[]) => {
+      const { data } = await api.post<{
+        apagados: number[];
+        falhas: Array<{ idFnApagar: number; erro: string }>;
+      }>('/contas-abertas/excluir-lote', { idsFnApagar: ids });
+      return data;
+    },
+    onSuccess: (r) => {
+      setMarcados(new Set());
+      setAvisoLote(
+        `${r.apagados.length} título(s) apagados no IXC.` +
+          (r.falhas.length
+            ? ` ${r.falhas.length} não puderam ser apagados: ${r.falhas
+                .map((f) => `nº ${f.idFnApagar} (${f.erro})`)
+                .join('; ')}`
+            : ''),
+      );
+      setErroLote(r.falhas.length > 0);
+      void queryClient.invalidateQueries({ queryKey: ['contas-abertas'] });
+    },
+    onError: (err) => {
+      setErroLote(true);
+      setAvisoLote(mensagemErro(err));
     },
   });
 
@@ -163,6 +196,22 @@ export function Inicio() {
           {consulta.data
             ? ' Os números abaixo são da última leitura que deu certo.'
             : ''}
+        </Aviso>
+      )}
+
+      {avisoLote && (
+        <Aviso
+          tom={erroLote ? 'erro' : 'pago'}
+          acao={
+            <button
+              onClick={() => setAvisoLote(null)}
+              className="btn btn-sutil btn-p"
+            >
+              Fechar
+            </button>
+          }
+        >
+          {avisoLote}
         </Aviso>
       )}
 
@@ -311,6 +360,27 @@ export function Inicio() {
             className="btn btn-p bg-brand-600 text-white hover:bg-brand-700"
           >
             Pagar em mãos
+          </button>
+          <button
+            onClick={() => {
+              const alvos = (consulta.data?.contas ?? []).filter((c) =>
+                marcados.has(c.idFnApagar),
+              );
+              const total = alvos.reduce((s, c) => s + c.valorAberto, 0);
+              if (
+                confirm(
+                  `Apagar ${alvos.length} título(s) no IXC, somando ` +
+                    `${formatBRL(total)}? As contas já pagas são puladas. ` +
+                    'Não dá para desfazer.',
+                )
+              ) {
+                excluirLote.mutate(alvos.map((c) => c.idFnApagar));
+              }
+            }}
+            disabled={excluirLote.isPending}
+            className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10"
+          >
+            {excluirLote.isPending ? 'Apagando…' : 'Excluir'}
           </button>
           <button
             onClick={() => setMarcados(new Set())}

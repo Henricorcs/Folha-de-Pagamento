@@ -103,6 +103,9 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
   /** Qual leitor está aberto: o do boleto, o do QR do PIX, ou nenhum. */
   const [lendo, setLendo] = useState<'boleto' | 'pix' | null>(null);
 
+  /** Repetir todo mês: esta conta vira uma regra, e as próximas nascem sozinhas. */
+  const [recorrente, setRecorrente] = useState(false);
+
   // --- Parcelamento ---
   const [parcelado, setParcelado] = useState(false);
   const [quantasParcelas, setQuantasParcelas] = useState('2');
@@ -182,12 +185,31 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
             : undefined,
         },
       );
+      /*
+       * A repetição guarda a regra a partir do MÊS SEGUINTE: a conta deste mês
+       * é a que acabou de ser lançada. Registrar a partir do mesmo vencimento
+       * faria a rotina gerar hoje mesmo uma segunda conta igual.
+       */
+      if (recorrente) {
+        await api.post('/recorrentes', {
+          idFornecedorIxc: fornecedor!.idFornecedor,
+          fornecedorNome: fornecedor!.nome,
+          valor: Number(valor),
+          observacao: observacao.trim(),
+          proximoVencimento: mesSeguinte(vencimento),
+          contaPagamento: contaPagamento ? Number(contaPagamento) : undefined,
+          tipoPagamentoIxc: tipoPagamento.trim() || undefined,
+          categoriaId: categoriaId || undefined,
+        });
+      }
+
       return data;
     },
     onSuccess: (data) => {
       setLancada(data);
       void queryClient.invalidateQueries({ queryKey: ['contas-abertas'] });
       void queryClient.invalidateQueries({ queryKey: ['categorias-despesa'] });
+      void queryClient.invalidateQueries({ queryKey: ['recorrentes'] });
     },
   });
 
@@ -650,7 +672,33 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
           </p>
         </div>
 
+        {/* --- Serviço que se repete todo mês --- */}
+        {!parcelado && (
+          <div className="sm:col-span-2">
+            <label className="flex items-center gap-2 text-sm text-tinta-700">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-brand-600"
+                checked={recorrente}
+                onChange={(e) => setRecorrente(e.target.checked)}
+              />
+              Repetir todo mês — internet, aluguel, contabilidade
+            </label>
+            {recorrente && (
+              <p className="ajuda">
+                Esta conta é lançada agora, vencendo em{' '}
+                {vencimento ? formatarDia(vencimento) : '—'}. Daí em diante, todo
+                mês uma nova nasce sozinha no IXC{' '}
+                <strong>5 dias antes de vencer</strong>, com o mesmo valor e a
+                mesma categoria. Dá para mudar o valor, desligar ou apagar a
+                repetição na aba Recorrentes.
+              </p>
+            )}
+          </div>
+        )}
+
         {/* --- Parcelamento --- */}
+        {!recorrente && (
         <div className="sm:col-span-2">
           <label className="flex items-center gap-2 text-sm text-tinta-700">
             <input
@@ -781,6 +829,7 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
             </div>
           )}
         </div>
+        )}
 
         <div className="sm:col-span-2">
           <label className="rotulo" htmlFor="observacao">
@@ -874,6 +923,20 @@ function digitos(valor: string): string {
 function somarDias(iso: string, dias: number): string {
   const [ano, mes, dia] = iso.slice(0, 10).split('-').map(Number);
   const d = new Date(Date.UTC(ano, mes - 1, dia + dias));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(
+    d.getUTCDate(),
+  ).padStart(2, '0')}`;
+}
+
+/**
+ * O mesmo dia do mês que vem, em "AAAA-MM-DD". Dia 31 em mês de 30 cai no
+ * último dia dele — pular para o dia 1º do mês seguinte jogaria a conta de
+ * janeiro para março.
+ */
+function mesSeguinte(iso: string): string {
+  const [ano, mes, dia] = iso.slice(0, 10).split('-').map(Number);
+  const ultimoDoProximo = new Date(Date.UTC(ano, mes + 1, 0)).getUTCDate();
+  const d = new Date(Date.UTC(ano, mes, Math.min(dia, ultimoDoProximo)));
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(
     d.getUTCDate(),
   ).padStart(2, '0')}`;
