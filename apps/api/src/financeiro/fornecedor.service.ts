@@ -218,6 +218,98 @@ export class FornecedorService {
   }
 
   /**
+   * Fornecedores do IXC cujo nome contém o termo — a busca de quem vai lançar
+   * uma despesa à mão. A conta de energia é da Cemar e o financiamento é do
+   * banco: ninguém sabe o código desses cadastros de cabeça, e o IXC exige o
+   * código para aceitar a conta a pagar.
+   *
+   * Procura por razão social e por nome fantasia, e antes disso por CPF/CNPJ
+   * quando o que foi digitado parece um documento — quem cola um CNPJ está
+   * procurando exatamente aquele cadastro, e a busca por documento é a única
+   * que confere os dígitos do que voltou.
+   *
+   * Fornecedor inativo fica de fora: lançar conta nova para um cadastro que a
+   * empresa aposentou é quase sempre engano, e o que já existe continua
+   * aparecendo nas contas em aberto de qualquer jeito.
+   */
+  async buscarNoIxcPorNome(
+    termo: string,
+    limite = 20,
+  ): Promise<FornecedorNoIxc[]> {
+    const busca = termo.trim();
+    if (busca.length < 2) return [];
+
+    const achados = new Map<number, FornecedorNoIxc>();
+
+    // Documento colado: a busca exata vale mais que a textual, e é a que
+    // confere se o registro devolvido é mesmo daquele CPF/CNPJ.
+    if (somenteDigitos(busca).length >= 11) {
+      const porDocumento = await this.procurarNoIxcPorCpfCnpj(busca).catch(
+        () => null,
+      );
+      if (porDocumento) achados.set(porDocumento.idFornecedor, porDocumento);
+    }
+
+    let ultimoErro: unknown = null;
+    let algumaRespondeu = false;
+
+    for (const campo of ['razao', 'fantasia'] as const) {
+      if (achados.size >= limite) break;
+      let res;
+      try {
+        res = await this.ixc.list<Record<string, unknown>>('fornecedor', {
+          qtype: `fornecedor.${campo}`,
+          query: busca,
+          // "L" é o LIKE do webservice: quem digita "cemar" não quer só o
+          // fornecedor chamado exatamente "cemar".
+          oper: 'L',
+          rp: limite,
+          sortname: `fornecedor.${campo}`,
+          sortorder: 'asc',
+        });
+      } catch (err) {
+        // A coluna pode não existir nesta base; tenta a próxima.
+        ultimoErro = err;
+        continue;
+      }
+      algumaRespondeu = true;
+
+      for (const bruto of res.registros) {
+        const id = Number(bruto.id);
+        if (!Number.isInteger(id) || id <= 0) continue;
+        if (achados.has(id)) continue;
+        if (String(bruto.ativo ?? '').toUpperCase() === 'N') continue;
+
+        achados.set(id, {
+          idFornecedor: id,
+          nome:
+            texto(bruto.razao) ?? texto(bruto.fantasia) ?? `Fornecedor ${id}`,
+          nomeFantasia: texto(bruto.fantasia),
+          cpfCnpj: texto(bruto.cnpj_cpf) ?? texto(bruto.cpf_cnpj),
+          tipoPessoa: texto(bruto.tipo_pessoa),
+          email: texto(bruto.email),
+          telefone: texto(bruto.celular) ?? texto(bruto.telefone),
+          cidadeIxc: Number(bruto.cidade) || null,
+          ativo: true,
+          // Os dados bancários ficam noutra tabela e custam uma consulta por
+          // fornecedor. Numa lista de busca isso seria uma rajada no IXC para
+          // dados que a tela nem mostra — quem escolhe um fornecedor aqui vai
+          // lançar uma despesa, não pagar por PIX daqui.
+          banco: null,
+          agencia: null,
+          conta: null,
+          chavePix: null,
+          tipoChavePix: null,
+        });
+      }
+    }
+
+    if (!algumaRespondeu && ultimoErro && achados.size === 0) throw ultimoErro;
+
+    return [...achados.values()].slice(0, limite);
+  }
+
+  /**
    * Espelha a chave PIX na aba "Dados bancários" do fornecedor no IXC. É o que
    * faz o próximo pagamento não precisar da chave digitada de novo — e o que
    * deixa a tela de contas a pagar do IXC preencher sozinha quando alguém

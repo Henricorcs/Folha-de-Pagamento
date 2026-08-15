@@ -137,6 +137,55 @@ export class CategoriasService {
     });
   }
 
+  /**
+   * A mesma etiqueta em vários títulos de uma vez.
+   *
+   * Apagar as antigas e regravar num lote só, dentro de uma transação, em vez
+   * de um upsert por título: são duas idas ao banco em vez de duas por conta, e
+   * ninguém lê o meio do caminho — a lista que esta tela classifica é a mesma
+   * que alimenta o painel, e metade classificada seria número errado nos dois
+   * lugares. Devolve quantos títulos ficaram etiquetados.
+   */
+  async classificarEmLote(
+    idsFnApagar: number[],
+    categoriaId: string | null,
+    usuarioId?: string,
+  ): Promise<number> {
+    const ids = [...new Set(idsFnApagar)];
+    if (ids.length === 0) return 0;
+
+    if (!categoriaId) {
+      const { count } = await this.prisma.classificacaoConta.deleteMany({
+        where: { idFnApagar: { in: ids } },
+      });
+      this.logger.log(`Etiqueta retirada de ${count} conta(s).`);
+      return count;
+    }
+
+    const categoria = await this.prisma.categoriaDespesa.findUnique({
+      where: { id: categoriaId },
+    });
+    if (!categoria) throw new NotFoundException('Categoria não encontrada');
+
+    await this.prisma.$transaction([
+      this.prisma.classificacaoConta.deleteMany({
+        where: { idFnApagar: { in: ids } },
+      }),
+      this.prisma.classificacaoConta.createMany({
+        data: ids.map((idFnApagar) => ({
+          idFnApagar,
+          categoriaId,
+          classificadoPor: usuarioId ?? null,
+        })),
+      }),
+    ]);
+
+    this.logger.log(
+      `${ids.length} conta(s) classificadas como "${categoria.nome}".`,
+    );
+    return ids.length;
+  }
+
   /** As etiquetas de um punhado de títulos, para a listagem. */
   async dosTitulos(ids: number[]): Promise<Map<number, CategoriaDespesa>> {
     if (ids.length === 0) return new Map();

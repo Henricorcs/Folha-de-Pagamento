@@ -296,6 +296,12 @@ enum TipoLancamento {
   AVULSO
   /// Diária de quem trabalha por dia (ver `Diarista`)
   DIARIA
+  /// Conta a pagar lançada à mão: energia, aluguel, compra. Não é pagamento a
+  /// pessoa — é despesa da empresa para um fornecedor do IXC, e por isso não
+  /// tem funcionário, diarista nem beneficiário do lado de cá. Separada de
+  /// AVULSO de propósito: as duas viram fn_apagar, mas só AVULSO conta como
+  /// pagamento de alguém nos resumos e na tela de Pagamentos Avulsos.
+  DESPESA
 }
 
 model Lancamento {

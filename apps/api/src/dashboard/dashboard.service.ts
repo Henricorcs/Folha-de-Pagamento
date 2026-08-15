@@ -78,6 +78,11 @@ export class DashboardService {
       // data de emissão.
       this.prisma.contaPagar.findMany({
         where: {
+          // Despesa lançada à mão (energia, aluguel, material) é conta a pagar
+          // da empresa, não custo de folha. Ela nasce sem competência, então
+          // entraria pela data de emissão e inflaria justamente o número que
+          // este painel existe para responder: quanto custou a folha do mês.
+          tipo: { not: TipoLancamento.DESPESA },
           OR: [
             { competencia: { in: competenciasLidas } },
             { competencia: null, dataEmissao: { gte: inicio, lt: fim } },
@@ -119,7 +124,11 @@ export class DashboardService {
         },
       }),
       this.impostos.resumo(meses),
-      this.prisma.contaPagar.findMany({ orderBy: { createdAt: 'desc' }, take: 8 }),
+      this.prisma.contaPagar.findMany({
+        where: { tipo: { not: TipoLancamento.DESPESA } },
+        orderBy: { createdAt: 'desc' },
+        take: 8,
+      }),
       this.prisma.syncLog.findFirst({ orderBy: { iniciadoEm: 'desc' } }),
     ]);
 
@@ -303,8 +312,9 @@ function montarSerieContas(meses: string[], contas: ContaDaSerie[]) {
     if (conta.status === StatusContaPagar.PAGO) mes.pago += valor;
 
     // Reprovada e cancelada não são gasto: nunca viraram dinheiro.
-    if (!SEM_SAIDA.includes(conta.status)) {
-      tipos[CHAVE_DO_TIPO[conta.tipo]] += valor;
+    const chave = CHAVE_DO_TIPO[conta.tipo];
+    if (chave && !SEM_SAIDA.includes(conta.status)) {
+      tipos[chave] += valor;
     }
   }
 
@@ -600,7 +610,13 @@ export interface PorTipo {
   desconto: number;
 }
 
-const CHAVE_DO_TIPO: Record<TipoLancamento, keyof PorTipo> = {
+/**
+ * Parcial de propósito: o que não está aqui não é custo de folha e fica de
+ * fora da repartição — é o caso de DESPESA, a conta lançada à mão. Um tipo
+ * novo que ninguém mapear some da conta em vez de entrar por engano em alguma
+ * fatia, e a consulta acima já o exclui antes de chegar aqui.
+ */
+const CHAVE_DO_TIPO: Partial<Record<TipoLancamento, keyof PorTipo>> = {
   SALARIO: 'salario',
   ADIANTAMENTO: 'adiantamento',
   BONUS: 'bonus',

@@ -328,6 +328,62 @@ export class ContasPagarService {
   }
 
   /**
+   * Uma conta a pagar lançada à mão: energia, aluguel, material de construção.
+   *
+   * É o mesmo caminho da folha até o IXC — vira `fn_apagar` pelo `enviarIxc`,
+   * com a mesma auditoria e o mesmo acompanhamento de pagamento —, mas sem
+   * pessoa nenhuma do lado de cá: quem recebe é um fornecedor que já existe no
+   * IXC, escolhido na tela. Por isso o `idFornecedorIxc` vem preenchido e o
+   * tipo é DESPESA, que é o que a impede de ser contada como pagamento de
+   * alguém nos resumos da folha.
+   *
+   * As datas vêm de fora, ao contrário da folha, onde emissão e vencimento são
+   * sempre hoje: conta que chega pelo correio venceu (ou vence) num dia que não
+   * é o de hoje, e mentir a data aqui é mentir o fluxo de caixa lá na frente.
+   */
+  async criarDespesa(
+    dados: {
+      idFornecedorIxc: number;
+      fornecedorNome: string;
+      valor: number;
+      dataEmissao: Date;
+      dataVencimento: Date;
+      observacao: string;
+      contaContabil?: number;
+      contaPagamento?: number;
+      tipoPagamentoIxc?: string;
+    },
+    usuarioId?: string,
+  ): Promise<ContaPagar> {
+    const cfg = await this.config.obter();
+
+    const conta = await this.prisma.contaPagar.create({
+      data: {
+        tipo: TipoLancamento.DESPESA,
+        competencia: null,
+        beneficiarioNome: dados.fornecedorNome,
+        idFornecedorIxc: dados.idFornecedorIxc,
+        valor: new Prisma.Decimal(dados.valor),
+        contaContabil: dados.contaContabil ?? cfg.contaContabilAvulso,
+        contaPagamento: dados.contaPagamento ?? cfg.contaPagamentoId,
+        tipoPagamentoIxc: dados.tipoPagamentoIxc ?? null,
+        filialId: cfg.filialId,
+        dataEmissao: dados.dataEmissao,
+        dataVencimento: dados.dataVencimento,
+        observacao: dados.observacao,
+        status: StatusContaPagar.RASCUNHO,
+        criadoPor: usuarioId ?? null,
+      },
+    });
+
+    this.logger.log(
+      `Despesa lançada à mão para o fornecedor ${dados.idFornecedorIxc} ` +
+        `(${dados.fornecedorNome}): ${dados.valor}`,
+    );
+    return this.enviarIxc(conta.id);
+  }
+
+  /**
    * Fecha as parcelas de vale que entraram nos salários recém-gerados,
    * guardando qual conta consumiu cada uma. A partir daí a parcela sai do
    * cálculo — gerar a folha de novo não desconta o mesmo vale duas vezes.
@@ -849,7 +905,18 @@ export class ContasPagarService {
     funcionarioId: string | null;
     beneficiarioAvulsoId: string | null;
     diaristaId: string | null;
+    idFornecedorIxc?: number | null;
   }): Promise<number> {
+    // Despesa lançada à mão já nasce apontando para um fornecedor escolhido no
+    // IXC — não há pessoa daqui de quem derivar o cadastro.
+    if (
+      conta.idFornecedorIxc &&
+      !conta.funcionarioId &&
+      !conta.diaristaId &&
+      !conta.beneficiarioAvulsoId
+    ) {
+      return conta.idFornecedorIxc;
+    }
     if (conta.funcionarioId) {
       return this.fornecedores.garantirParaFuncionario(conta.funcionarioId);
     }

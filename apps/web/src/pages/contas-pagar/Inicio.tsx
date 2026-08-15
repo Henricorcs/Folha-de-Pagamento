@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import {
   Aviso,
@@ -14,8 +14,13 @@ import {
 import { api, mensagemErro } from '../../lib/api';
 import { formatBRL, formatData } from '../../lib/format';
 import { TIPO_LABEL } from '../../lib/status';
-import type { ContaAberta, ContasAbertas } from '../../lib/types';
+import type {
+  CategoriaDespesa,
+  ContaAberta,
+  ContasAbertas,
+} from '../../lib/types';
 import { DetalheDaConta } from './DetalheDaConta';
+import { NovaDespesa } from './NovaDespesa';
 
 /**
  * O que a empresa deve hoje, lido do IXC na hora de abrir.
@@ -30,10 +35,17 @@ import { DetalheDaConta } from './DetalheDaConta';
 type Recorte = 'todas' | 'vencidas' | 'semana' | 'demais' | 'sem-data';
 
 export function Inicio() {
+  const queryClient = useQueryClient();
   const [recorte, setRecorte] = useState<Recorte>('todas');
   const [busca, setBusca] = useState('');
+  /** Mostrar só o que ninguém etiquetou ainda — a fila de trabalho. */
+  const [soSemCategoria, setSoSemCategoria] = useState(false);
   /** Título cujos campos crus do IXC estamos olhando. */
   const [detalhando, setDetalhando] = useState<ContaAberta | null>(null);
+  const [lancando, setLancando] = useState(false);
+  /** Títulos marcados para receber a mesma etiqueta de uma vez. */
+  const [marcados, setMarcados] = useState<Set<number>>(new Set());
+  const [categoriaLote, setCategoriaLote] = useState('');
 
   const consulta = useQuery({
     queryKey: ['contas-abertas'],
@@ -47,10 +59,71 @@ export function Inicio() {
     retry: 0,
   });
 
+  const categorias = useQuery({
+    queryKey: ['categorias-despesa'],
+    queryFn: async () =>
+      (await api.get<CategoriaDespesa[]>('/categorias-despesa')).data,
+  });
+
   const contas = useMemo(
-    () => filtrar(consulta.data?.contas ?? [], recorte, busca),
-    [consulta.data, recorte, busca],
+    () => filtrar(consulta.data?.contas ?? [], recorte, busca, soSemCategoria),
+    [consulta.data, recorte, busca, soSemCategoria],
   );
+
+  /**
+   * Etiqueta tudo que está marcado de uma vez. A lista inteira é recarregada
+   * depois — é dela que o painel tira os agrupamentos, e as duas telas
+   * discordarem sobre em que categoria está um gasto é pior que não ter
+   * categoria nenhuma.
+   */
+  const classificarLote = useMutation({
+    mutationFn: async (categoriaId: string | null) => {
+      const { data } = await api.put<{ classificadas: number }>(
+        '/contas-abertas/categoria-lote',
+        { idsFnApagar: [...marcados], categoriaId },
+      );
+      return data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['contas-abertas'] });
+      void queryClient.invalidateQueries({ queryKey: ['categorias-despesa'] });
+      setMarcados(new Set());
+      setCategoriaLote('');
+    },
+  });
+
+  function alternarMarcado(idFnApagar: number) {
+    setMarcados((atual) => {
+      const proximo = new Set(atual);
+      if (!proximo.delete(idFnApagar)) proximo.add(idFnApagar);
+      return proximo;
+    });
+  }
+
+  /**
+   * O checkbox do cabeçalho vale para o que está na tela, não para a base
+   * inteira: marcar 528 títulos porque alguém clicou num quadradinho depois de
+   * filtrar por um fornecedor seria classificar a empresa toda sem querer.
+   */
+  const visiveisMarcados = contas.filter((c) => marcados.has(c.idFnApagar));
+  const todosVisiveisMarcados =
+    contas.length > 0 && visiveisMarcados.length === contas.length;
+
+  function alternarTodosVisiveis() {
+    setMarcados((atual) => {
+      const proximo = new Set(atual);
+      if (todosVisiveisMarcados) {
+        contas.forEach((c) => proximo.delete(c.idFnApagar));
+      } else {
+        contas.forEach((c) => proximo.add(c.idFnApagar));
+      }
+      return proximo;
+    });
+  }
+
+  const semCategoria = (consulta.data?.contas ?? []).filter(
+    (c) => !c.classificacao,
+  ).length;
 
   const resumo = consulta.data?.resumo;
 
@@ -61,13 +134,21 @@ export function Inicio() {
         titulo="Contas a Pagar"
         descricao="Tudo que está em aberto no IXC, do jeito que está lá agora. Esta tela é de leitura: aprovar, pagar e cancelar continua sendo no IXC."
         acoes={
-          <button
-            onClick={() => consulta.refetch()}
-            disabled={consulta.isFetching}
-            className="btn btn-acao"
-          >
-            {consulta.isFetching ? 'Lendo o IXC…' : 'Atualizar'}
-          </button>
+          <>
+            <button
+              onClick={() => setLancando(true)}
+              className="btn btn-primario"
+            >
+              Lançar conta
+            </button>
+            <button
+              onClick={() => consulta.refetch()}
+              disabled={consulta.isFetching}
+              className="btn btn-acao"
+            >
+              {consulta.isFetching ? 'Lendo o IXC…' : 'Atualizar'}
+            </button>
+          </>
         }
       />
 
@@ -136,6 +217,21 @@ export function Inicio() {
           placeholder="Buscar por fornecedor, documento ou observação"
           className="campo max-w-md"
         />
+        <button
+          onClick={() => setSoSemCategoria((s) => !s)}
+          aria-pressed={soSemCategoria}
+          title="Mostrar só os débitos que ninguém etiquetou ainda"
+          className={
+            soSemCategoria
+              ? 'btn btn-p bg-amber-100 text-amber-800 hover:bg-amber-200'
+              : 'btn btn-neutro btn-p'
+          }
+        >
+          Sem categoria
+          {semCategoria > 0 && (
+            <span className="num opacity-70">· {semCategoria}</span>
+          )}
+        </button>
         {recorte !== 'todas' && (
           <button
             onClick={() => setRecorte('todas')}
@@ -150,6 +246,66 @@ export function Inicio() {
           </span>
         )}
       </div>
+
+      {/*
+        A barra só existe quando há algo marcado, e some sozinha ao terminar.
+        Ela fica acima da tabela de propósito: é onde o olho está depois de
+        marcar as linhas, e no rodapé de uma lista de 500 títulos ninguém a
+        encontraria.
+      */}
+      {marcados.size > 0 && (
+        <div className="surgir mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3">
+          <span className="text-sm font-semibold text-brand-900">
+            {marcados.size} título(s) marcado(s)
+          </span>
+          {marcados.size > visiveisMarcados.length && (
+            <span
+              className="text-xs text-brand-700"
+              title="A marcação continua valendo para o que o filtro escondeu"
+            >
+              ({visiveisMarcados.length} na tela agora)
+            </span>
+          )}
+          <select
+            className="campo max-w-xs py-1.5 text-sm"
+            value={categoriaLote}
+            disabled={categorias.isLoading || classificarLote.isPending}
+            onChange={(e) => setCategoriaLote(e.target.value)}
+          >
+            <option value="">Escolha a categoria…</option>
+            {(categorias.data ?? []).map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nome}
+              </option>
+            ))}
+            <option value="__limpar">— tirar a categoria —</option>
+          </select>
+          <button
+            onClick={() =>
+              classificarLote.mutate(
+                categoriaLote === '__limpar' ? null : categoriaLote,
+              )
+            }
+            disabled={!categoriaLote || classificarLote.isPending}
+            className="btn btn-primario btn-p"
+          >
+            {classificarLote.isPending
+              ? 'Aplicando…'
+              : `Aplicar a ${marcados.size}`}
+          </button>
+          <button
+            onClick={() => setMarcados(new Set())}
+            className="btn btn-sutil btn-p"
+          >
+            Limpar seleção
+          </button>
+          {classificarLote.isError && (
+            <span className="w-full text-sm text-rose-700">
+              {mensagemErro(classificarLote.error)}
+            </span>
+          )}
+        </div>
+      )}
 
       <Bloco semPadding>
         {/*
@@ -180,6 +336,16 @@ export function Inicio() {
             <table className="w-full text-sm">
               <thead>
                 <tr>
+                  <th className="th w-10">
+                    <input
+                      type="checkbox"
+                      checked={todosVisiveisMarcados}
+                      onChange={alternarTodosVisiveis}
+                      aria-label={`Marcar os ${contas.length} títulos desta lista`}
+                      title={`Marcar os ${contas.length} títulos que o filtro está mostrando`}
+                      className="h-4 w-4 cursor-pointer accent-brand-600"
+                    />
+                  </th>
                   <th className="th">Vencimento</th>
                   <th className="th">Fornecedor</th>
                   <th className="th">Documento</th>
@@ -191,6 +357,8 @@ export function Inicio() {
                   <Linha
                     key={c.idFnApagar}
                     conta={c}
+                    marcado={marcados.has(c.idFnApagar)}
+                    onMarcar={() => alternarMarcado(c.idFnApagar)}
                     onVerDados={() => setDetalhando(c)}
                   />
                 ))}
@@ -206,15 +374,21 @@ export function Inicio() {
           onFechar={() => setDetalhando(null)}
         />
       )}
+
+      {lancando && <NovaDespesa onFechar={() => setLancando(false)} />}
     </Pagina>
   );
 }
 
 function Linha({
   conta,
+  marcado,
+  onMarcar,
   onVerDados,
 }: {
   conta: ContaAberta;
+  marcado: boolean;
+  onMarcar: () => void;
   onVerDados: () => void;
 }) {
   const urgencia = urgenciaDaConta(conta);
@@ -231,8 +405,21 @@ function Linha({
         }
       }}
       title="Abrir o detalhe deste débito"
-      className="linha cursor-pointer focus:bg-brand-50 focus:outline-none"
+      className={`linha cursor-pointer focus:bg-brand-50 focus:outline-none ${
+        marcado ? 'bg-brand-50/60' : ''
+      }`}
     >
+      {/* O clique aqui morre no checkbox: marcar para classificar em lote e
+          abrir a ficha do débito são dois gestos diferentes na mesma linha. */}
+      <td className="td" onClick={(e) => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={marcado}
+          onChange={onMarcar}
+          aria-label={`Marcar o título ${conta.idFnApagar} de ${conta.fornecedor.nome}`}
+          className="h-4 w-4 cursor-pointer accent-brand-600"
+        />
+      </td>
       <td
         className={`td whitespace-nowrap border-l-4 ${urgencia.barra}`}
       >
@@ -346,10 +533,12 @@ function filtrar(
   contas: ContaAberta[],
   recorte: Recorte,
   busca: string,
+  soSemCategoria: boolean,
 ): ContaAberta[] {
   const termo = busca.trim().toLowerCase();
 
   return contas.filter((c) => {
+    if (soSemCategoria && c.classificacao) return false;
     const dias = c.diasParaVencer;
     const passaRecorte =
       recorte === 'todas' ||

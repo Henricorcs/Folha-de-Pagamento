@@ -37,6 +37,7 @@ export const TIPO_LABEL: Record<TipoLancamento, string> = {
   DESCONTO: 'Desconto',
   AVULSO: 'Avulso',
   DIARIA: 'Diária',
+  DESPESA: 'Despesa',
 };
 
 /** Por onde o dinheiro sai — vale para diária e para pagamento avulso. */

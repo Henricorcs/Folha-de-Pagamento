@@ -87,7 +87,9 @@ export type TipoLancamento =
   | 'BONUS'
   | 'DESCONTO'
   | 'AVULSO'
-  | 'DIARIA';
+  | 'DIARIA'
+  /** Conta a pagar lançada à mão (energia, aluguel): despesa, não pagamento a alguém */
+  | 'DESPESA';
 
 export interface Lancamento {
   id: string;

@@ -17,6 +17,7 @@ import { CategoriasService } from './categorias.service';
 import {
   AtualizarCategoriaDto,
   ClassificarContaDto,
+  ClassificarLoteDto,
   CriarCategoriaDto,
 } from './dto/categoria.dto';
 
@@ -50,6 +51,25 @@ export class CategoriasController {
   async remover(@Param('id') id: string) {
     await this.service.remover(id);
     return { ok: true };
+  }
+
+  /**
+   * A mesma etiqueta em vários débitos de uma vez, para classificar o que já
+   * está em aberto sem abrir um por um. `categoriaId` vazio tira a etiqueta de
+   * todos eles.
+   */
+  @Put('contas-abertas/categoria-lote')
+  @HttpCode(200)
+  async classificarEmLote(
+    @Body() dto: ClassificarLoteDto,
+    @Req() req: Request,
+  ) {
+    const classificadas = await this.service.classificarEmLote(
+      dto.idsFnApagar,
+      dto.categoriaId ?? null,
+      usuarioId(req),
+    );
+    return { ok: true, classificadas };
   }
 
   /** A que se refere este débito. Corpo vazio tira a etiqueta. */
