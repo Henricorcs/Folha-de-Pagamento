@@ -8,9 +8,23 @@ import {
   lerStatusAuditoria,
 } from '../ixc/ixc.financeiro';
 import { parseIxcId } from '../ixc/ixc.parse';
+import { PrismaService } from '../prisma/prisma.service';
 
 /** Por onde o dinheiro sai. */
 export type FormaDePagar = 'BANCO' | 'EM_MAOS';
+
+/** O que dá para mudar num título que ainda está em aberto. */
+export interface EdicaoDoTitulo {
+  valor?: number;
+  dataVencimento?: string;
+  observacao?: string;
+  tipoPagamento?: string;
+  contaPagamento?: number;
+  contaContabil?: number;
+  chavePix?: string;
+  codigoBarras?: string;
+  documento?: string;
+}
 
 /** O que aconteceu com o título no IXC. */
 export interface ResultadoDoPagamento {
@@ -47,6 +61,7 @@ export class PagamentosService {
   constructor(
     private readonly ixc: IxcClient,
     private readonly config: ConfigFinanceiraService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async pagar(
@@ -164,6 +179,183 @@ export class PagamentosService {
 
     return { idFnApagar, aprovada, paga, valor, avisos };
   }
+
+  /**
+   * Paga várias contas em mãos de uma vez.
+   *
+   * Uma a uma, e o que já saiu fica de pé se a seguinte falhar: são pagamentos
+   * de verdade, e desfazer os que deram certo por causa do que não deu seria
+   * tirar dinheiro do caixa duas vezes para depois devolver. Quem clicou vê
+   * quais passaram e quais não.
+   */
+  async pagarEmLote(
+    ids: number[],
+    opcoes: { forma: FormaDePagar; data?: string },
+    usuarioNome?: string,
+  ): Promise<{
+    pagas: ResultadoDoPagamento[];
+    falhas: Array<{ idFnApagar: number; erro: string }>;
+    total: number;
+  }> {
+    const pagas: ResultadoDoPagamento[] = [];
+    const falhas: Array<{ idFnApagar: number; erro: string }> = [];
+
+    for (const id of [...new Set(ids)]) {
+      try {
+        pagas.push(await this.pagar(id, opcoes, usuarioNome));
+      } catch (err) {
+        const erro = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Título ${id} não foi pago no lote: ${erro}`);
+        falhas.push({ idFnApagar: id, erro });
+      }
+    }
+
+    return {
+      pagas,
+      falhas,
+      total: Math.round(pagas.reduce((s, p) => s + p.valor, 0) * 100) / 100,
+    };
+  }
+
+  /**
+   * Muda um título em aberto no IXC — o meio de pagamento, a data, o valor.
+   *
+   * Conta paga não se edita: o dinheiro já saiu, e mudar o valor de um
+   * pagamento feito é reescrever o passado. O caminho é estornar no IXC.
+   */
+  async editar(
+    idFnApagar: number,
+    mudancas: EdicaoDoTitulo,
+  ): Promise<{ idFnApagar: number; alterado: string[] }> {
+    const raw = await this.ixc.getById<Record<string, unknown>>(
+      'fn_apagar',
+      'fn_apagar.id',
+      idFnApagar,
+    );
+    if (!raw) {
+      throw new BadRequestException(
+        `O título ${idFnApagar} não existe mais no IXC.`,
+      );
+    }
+
+    const situacao = lerSituacaoContaPagar(raw);
+    if (situacao.pago) {
+      throw new BadRequestException(
+        `O título ${idFnApagar} já está pago — estorne no IXC antes de mudar.`,
+      );
+    }
+    if (situacao.cancelada) {
+      throw new BadRequestException(
+        `O título ${idFnApagar} está cancelado no IXC.`,
+      );
+    }
+
+    const alterado = Object.entries(mudancas)
+      .filter(([, v]) => v !== undefined && v !== '')
+      .map(([k]) => k);
+    if (alterado.length === 0) {
+      throw new BadRequestException('Nada foi alterado.');
+    }
+
+    await this.ixc.update(
+      'fn_apagar',
+      idFnApagar,
+      await montarEdicao(raw, mudancas),
+    );
+    this.logger.log(
+      `Título ${idFnApagar} alterado no IXC: ${alterado.join(', ')}.`,
+    );
+
+    return { idFnApagar, alterado };
+  }
+
+  /**
+   * Apaga um título do IXC.
+   *
+   * Só o que ainda não foi pago: apagar uma conta paga sumiria com o registro
+   * de uma saída de dinheiro que existiu. Se ela nasceu aqui, o registro deste
+   * lado vai junto — deixá-lo apontando para um título que não existe mais
+   * faria a conferência de pagamentos procurar um fantasma.
+   */
+  async excluir(idFnApagar: number): Promise<{ idFnApagar: number }> {
+    const raw = await this.ixc.getById<Record<string, unknown>>(
+      'fn_apagar',
+      'fn_apagar.id',
+      idFnApagar,
+    );
+    if (!raw) {
+      throw new BadRequestException(
+        `O título ${idFnApagar} não existe mais no IXC.`,
+      );
+    }
+
+    const situacao = lerSituacaoContaPagar(raw);
+    if (situacao.pago) {
+      throw new BadRequestException(
+        `O título ${idFnApagar} já foi pago. Apagar sumiria com o registro de ` +
+          'um dinheiro que saiu — estorne no IXC, se for o caso.',
+      );
+    }
+
+    await this.ixc.remove('fn_apagar', idFnApagar);
+    await this.prisma.contaPagar.deleteMany({
+      where: { idFnApagarIxc: idFnApagar },
+    });
+    this.logger.log(`Título ${idFnApagar} apagado do IXC.`);
+
+    return { idFnApagar };
+  }
+}
+
+/**
+ * Muda um título que ainda está em aberto no IXC.
+ *
+ * O registro é lido antes e devolvido inteiro, com as mudanças por cima: o
+ * `PUT` do webservice reescreve a linha, e mandar só o campo alterado apaga o
+ * resto — a conta perderia fornecedor, valor e vencimento de uma vez.
+ */
+export async function montarEdicao(
+  atual: Record<string, unknown>,
+  mudancas: EdicaoDoTitulo,
+): Promise<Record<string, unknown>> {
+  const texto = (v: unknown) => String(v ?? '').trim();
+
+  return {
+    id_fornecedor: texto(atual.id_fornecedor),
+    data_emissao: formatDataIxcDeIso(texto(atual.data_emissao)),
+    data_vencimento: mudancas.dataVencimento
+      ? formatDataIxcDeIso(mudancas.dataVencimento)
+      : formatDataIxcDeIso(texto(atual.data_vencimento)),
+    valor:
+      mudancas.valor !== undefined
+        ? mudancas.valor.toFixed(2)
+        : texto(atual.valor),
+    id_contas: String(mudancas.contaPagamento ?? texto(atual.id_contas)),
+    id_conta: String(mudancas.contaContabil ?? texto(atual.id_conta)),
+    filial_id: texto(atual.filial_id) || '1',
+    tipo_pagamento: mudancas.tipoPagamento ?? texto(atual.tipo_pagamento),
+    chave_pix: mudancas.chavePix ?? texto(atual.chave_pix),
+    codigo_barras:
+      mudancas.codigoBarras !== undefined
+        ? mudancas.codigoBarras.replace(/\D/g, '')
+        : texto(atual.codigo_barras),
+    documento: mudancas.documento ?? texto(atual.documento),
+    numero_nota: texto(atual.numero_nota),
+    obs: mudancas.observacao ?? texto(atual.obs),
+    // O que decide se a conta existe para o financeiro do IXC não é mexido
+    // aqui: uma edição de meio de pagamento não pode cancelar nem "desliberar"
+    // o título.
+    previsao: texto(atual.previsao) || 'N',
+    liberado: texto(atual.liberado) || 'S',
+  };
+}
+
+/** "AAAA-MM-DD" (como o IXC devolve na leitura) → "DD/MM/AAAA" (como ele aceita). */
+function formatDataIxcDeIso(valor: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(valor);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  // Já veio no formato brasileiro (ou vazio): devolve como está.
+  return valor;
 }
 
 /** "AAAA-MM-DD" → meia-noite em UTC, como o resto das datas desta base. */

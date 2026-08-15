@@ -2,6 +2,7 @@ import { Transform, Type } from 'class-transformer';
 import { TIPOS_CHAVE_PIX } from '../../ixc/ixc.financeiro';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsIn,
   IsInt,
@@ -31,6 +32,56 @@ export class PagarTituloDto {
 
   /** O que aparece no histórico do lançamento no IXC. */
   @IsOptional() @IsString() @MaxLength(200) historico?: string;
+}
+
+/** Pagar várias contas de uma vez, todas pela mesma forma. */
+export class PagarLoteDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Type(() => Number)
+  idsFnApagar!: number[];
+
+  @IsIn(['BANCO', 'EM_MAOS'])
+  forma!: 'BANCO' | 'EM_MAOS';
+
+  /** Dia do pagamento (AAAA-MM-DD). Vazio = hoje. Só vale para em mãos. */
+  @IsOptional() @IsISO8601() data?: string;
+}
+
+/** O que dá para mudar num título que ainda está em aberto no IXC. */
+export class EditarTituloDto {
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value == null ? undefined : Number(value)))
+  @IsNumber()
+  @Min(0.01)
+  valor?: number;
+
+  @IsOptional() @IsISO8601() dataVencimento?: string;
+
+  @IsOptional() @IsString() @MaxLength(500) observacao?: string;
+
+  @IsOptional() @IsString() @MaxLength(40) tipoPagamento?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value == null ? undefined : Number(value)))
+  @IsInt()
+  @Min(1)
+  contaPagamento?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value == null ? undefined : Number(value)))
+  @IsInt()
+  @Min(1)
+  contaContabil?: number;
+
+  @IsOptional() @IsString() @MaxLength(600) chavePix?: string;
+
+  @IsOptional() @IsString() @MaxLength(60) codigoBarras?: string;
+
+  @IsOptional() @IsString() @MaxLength(40) documento?: string;
 }
 
 /**

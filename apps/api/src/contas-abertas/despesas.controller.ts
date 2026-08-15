@@ -1,10 +1,12 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Query,
   Req,
@@ -12,7 +14,12 @@ import {
 import type { Request } from 'express';
 import { FornecedorService } from '../financeiro/fornecedor.service';
 import { DespesasService } from './despesas.service';
-import { CriarDespesaDto, PagarTituloDto } from './dto/despesa.dto';
+import {
+  CriarDespesaDto,
+  EditarTituloDto,
+  PagarLoteDto,
+  PagarTituloDto,
+} from './dto/despesa.dto';
 import { PagamentosService } from './pagamentos.service';
 
 function usuarioId(req: Request): string | undefined {
@@ -44,6 +51,34 @@ export class DespesasController {
     @Req() req: Request,
   ) {
     return this.pagamentos.pagar(idFnApagar, dto, usuarioNome(req));
+  }
+
+  /** Paga várias de uma vez, todas pela mesma forma. */
+  @Post('contas-abertas/pagar-lote')
+  @HttpCode(200)
+  pagarLote(@Body() dto: PagarLoteDto, @Req() req: Request) {
+    return this.pagamentos.pagarEmLote(
+      dto.idsFnApagar,
+      { forma: dto.forma, data: dto.data },
+      usuarioNome(req),
+    );
+  }
+
+  /** Muda o que dá para mudar num título ainda em aberto. */
+  @Patch('contas-abertas/:idFnApagar')
+  @HttpCode(200)
+  editar(
+    @Param('idFnApagar', ParseIntPipe) idFnApagar: number,
+    @Body() dto: EditarTituloDto,
+  ) {
+    return this.pagamentos.editar(idFnApagar, dto);
+  }
+
+  /** Apaga o título no IXC — só o que ainda não foi pago. */
+  @Delete('contas-abertas/:idFnApagar')
+  @HttpCode(200)
+  excluir(@Param('idFnApagar', ParseIntPipe) idFnApagar: number) {
+    return this.pagamentos.excluir(idFnApagar);
   }
 
   /**

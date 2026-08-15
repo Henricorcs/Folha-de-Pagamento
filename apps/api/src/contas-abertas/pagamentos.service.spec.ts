@@ -73,8 +73,15 @@ function montarServico(
   };
 
   const config = { obter: jest.fn().mockResolvedValue(CFG) };
-  const service = new PagamentosService(ixc as never, config as never);
-  return { service, ixc, criados };
+  const prisma = {
+    contaPagar: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+  };
+  const service = new PagamentosService(
+    ixc as never,
+    config as never,
+    prisma as never,
+  );
+  return { service, ixc, criados, prisma };
 }
 
 describe('PagamentosService.pagar', () => {

@@ -19,6 +19,7 @@ import type {
   ContaAberta,
   ContasAbertas,
 } from '../../lib/types';
+import { EditarConta, ExcluirConta, PagarEmMaos } from './AcoesDaConta';
 import { DetalheDaConta } from './DetalheDaConta';
 import { NovaDespesa } from './NovaDespesa';
 
@@ -50,6 +51,10 @@ export function Inicio() {
   const [pagandoDaLista, setPagandoDaLista] = useState<number | null>(null);
   const [avisoPagamento, setAvisoPagamento] = useState<string | null>(null);
   const [erroPagamento, setErroPagamento] = useState(false);
+  /** Contas na janela de pagamento em mãos — uma, ou as marcadas. */
+  const [pagandoEmMaos, setPagandoEmMaos] = useState<ContaAberta[] | null>(null);
+  const [editando, setEditando] = useState<ContaAberta | null>(null);
+  const [excluindo, setExcluindo] = useState<ContaAberta | null>(null);
 
   const consulta = useQuery({
     queryKey: ['contas-abertas'],
@@ -350,6 +355,20 @@ export function Inicio() {
               ? 'Aplicando…'
               : `Aplicar a ${marcados.size}`}
           </button>
+          {/* Pagar o que está marcado, tudo numa janela só: quem separa dez
+              contas para pagar em dinheiro não quer dez confirmações. */}
+          <button
+            onClick={() =>
+              setPagandoEmMaos(
+                (consulta.data?.contas ?? []).filter((c) =>
+                  marcados.has(c.idFnApagar),
+                ),
+              )
+            }
+            className="btn btn-p bg-brand-600 text-white hover:bg-brand-700"
+          >
+            Pagar em mãos
+          </button>
           <button
             onClick={() => setMarcados(new Set())}
             className="btn btn-sutil btn-p"
@@ -420,6 +439,9 @@ export function Inicio() {
                     onMarcar={() => alternarMarcado(c.idFnApagar)}
                     onVerDados={() => setDetalhando(c)}
                     onPagar={(forma) => pagarDaLista.mutate({ conta: c, forma })}
+                    onPagarEmMaos={() => setPagandoEmMaos([c])}
+                    onEditar={() => setEditando(c)}
+                    onExcluir={() => setExcluindo(c)}
                   />
                 ))}
               </tbody>
@@ -436,6 +458,24 @@ export function Inicio() {
       )}
 
       {lancando && <NovaDespesa onFechar={() => setLancando(false)} />}
+
+      {pagandoEmMaos && pagandoEmMaos.length > 0 && (
+        <PagarEmMaos
+          contas={pagandoEmMaos}
+          onFechar={() => {
+            setPagandoEmMaos(null);
+            setMarcados(new Set());
+          }}
+        />
+      )}
+
+      {editando && (
+        <EditarConta conta={editando} onFechar={() => setEditando(null)} />
+      )}
+
+      {excluindo && (
+        <ExcluirConta conta={excluindo} onFechar={() => setExcluindo(null)} />
+      )}
     </Pagina>
   );
 }
@@ -447,6 +487,9 @@ function Linha({
   onMarcar,
   onVerDados,
   onPagar,
+  onPagarEmMaos,
+  onEditar,
+  onExcluir,
 }: {
   conta: ContaAberta;
   marcado: boolean;
@@ -455,6 +498,9 @@ function Linha({
   onMarcar: () => void;
   onVerDados: () => void;
   onPagar: (forma: 'BANCO' | 'EM_MAOS') => void;
+  onPagarEmMaos: () => void;
+  onEditar: () => void;
+  onExcluir: () => void;
 }) {
   const urgencia = urgenciaDaConta(conta);
   return (
@@ -559,21 +605,28 @@ function Linha({
             {ocupado ? '…' : conta.statusAuditoria === 'A' ? 'Aprovada' : 'Aprovar'}
           </button>
           <button
-            onClick={() => {
-              if (
-                confirm(
-                  `Pagar ${formatBRL(conta.valorAberto)} de ${conta.fornecedor.nome} ` +
-                    'em dinheiro, saindo do caixa? A conta fica quitada no IXC.',
-                )
-              ) {
-                onPagar('EM_MAOS');
-              }
-            }}
+            onClick={onPagarEmMaos}
             disabled={ocupado}
-            title="Aprova e dá baixa: sai do caixa e a conta fica paga no IXC"
+            title="Pagar em dinheiro, saindo do caixa — a conta fica quitada no IXC"
             className="btn btn-p bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40"
           >
-            Em mãos
+            Pagar
+          </button>
+          <button
+            onClick={onEditar}
+            disabled={ocupado}
+            title="Mudar meio de pagamento, valor, vencimento…"
+            className="btn btn-sutil btn-p"
+          >
+            Editar
+          </button>
+          <button
+            onClick={onExcluir}
+            disabled={ocupado}
+            title="Apagar este título no IXC"
+            className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10"
+          >
+            Excluir
           </button>
         </div>
       </td>
