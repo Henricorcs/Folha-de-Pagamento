@@ -176,7 +176,7 @@ export function Janela({
         aria-modal="true"
         aria-label={titulo}
         onClick={(e) => e.stopPropagation()}
-        className="surgir my-auto h-fit w-full max-w-3xl rounded-2xl bg-papel shadow-2xl"
+        className="surgir my-auto h-fit w-full max-w-5xl rounded-2xl bg-papel shadow-2xl"
       >
         <div className="flex items-start justify-between gap-3 border-b border-tinta-100 px-5 py-4 sm:px-6">
           <h2 className="titulo-bloco">{titulo}</h2>

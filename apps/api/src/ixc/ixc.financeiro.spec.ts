@@ -51,7 +51,7 @@ describe('buildContaPagarPayload', () => {
       obs: 'saldo salarial referente ao mês 07/2026',
       tipo_pagamento: 'Pix', // padrão quando não informado
       chave_pix: '',
-      tipo_chave_pix: '',
+      tipo_pix: '',
     });
   });
 
@@ -72,7 +72,7 @@ describe('buildContaPagarPayload', () => {
     expect(body).toMatchObject({
       tipo_pagamento: 'Pix',
       chave_pix: 'henrico@pix.com',
-      tipo_chave_pix: 'E-mail',
+      tipo_pix: 'EMAIL',
       id_conta: '2662',
     });
   });
@@ -93,7 +93,7 @@ describe('buildContaPagarPayload', () => {
       chavePix: '(99) 98107-4450',
     });
     expect(body).toMatchObject({
-      tipo_chave_pix: 'Celular',
+      tipo_pix: 'CELULAR',
       chave_pix: '(99) 98107-4450',
     });
   });
@@ -120,14 +120,14 @@ describe('tipo da chave PIX vindo do cadastro', () => {
       tipoChavePix: 'Celular',
     });
     expect(body).toMatchObject({
-      tipo_chave_pix: 'Celular',
+      tipo_pix: 'CELULAR',
       chave_pix: '75981074450',
     });
   });
 
   it('sem tipo no cadastro, continua deduzindo pelo formato', () => {
     const body = buildContaPagarPayload({ ...base, chavePix: 'ana@pix.com' });
-    expect(body).toMatchObject({ tipo_chave_pix: 'E-mail' });
+    expect(body).toMatchObject({ tipo_pix: 'EMAIL' });
   });
 
   it('usa a coluna e o código aprendidos desta base do IXC', () => {

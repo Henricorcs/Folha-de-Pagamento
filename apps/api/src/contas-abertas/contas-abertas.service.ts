@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { TipoLancamento } from '@prisma/client';
 import { IxcClient } from '../ixc/ixc.client';
 import { lerSituacaoContaPagar } from '../ixc/ixc.financeiro';
 import { PrismaService } from '../prisma/prisma.service';
@@ -549,7 +550,14 @@ export class ContasAbertasService {
     if (ids.length === 0) return;
 
     const nossas = await this.prisma.contaPagar.findMany({
-      where: { idFnApagarIxc: { in: ids } },
+      where: {
+        idFnApagarIxc: { in: ids },
+        // Despesa lançada aqui no Contas a Pagar não vem da folha, e dizer que
+        // veio é confundir os dois módulos: um é o que a empresa deve, o outro
+        // é o que ela paga a quem trabalha nela. O selo existe justamente para
+        // separar as duas coisas.
+        tipo: { not: TipoLancamento.DESPESA },
+      },
       select: {
         id: true,
         idFnApagarIxc: true,

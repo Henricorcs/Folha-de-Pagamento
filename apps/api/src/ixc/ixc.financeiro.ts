@@ -215,17 +215,42 @@ export function serializarCodigosTipoChavePix(
 }
 
 /**
- * Coluna e valor do rádio "Tipo da chave Pix". Sem mapa aprendido nem
- * configurado, manda o rótulo da tela na coluna mais provável — que é o
- * comportamento antigo.
+ * O jeito conhecido do IXC guardar o rádio "Tipo da chave Pix": coluna
+ * `tipo_pix`, com o tipo escrito por extenso e em maiúsculas.
+ *
+ * Serve de chute inicial para quem ainda não aprendeu nada da própria base. O
+ * chute antigo era a coluna `tipo_chave_pix`, que não existe nas instalações
+ * que se viu até aqui — o IXC ignorava o campo em silêncio, a conta nascia com
+ * a chave preenchida e o tipo em branco, e o banco não pagava.
+ */
+const MAPA_TIPO_PIX_CONHECIDO: MapaTipoChavePix = {
+  campo: 'tipo_pix',
+  codigos: {
+    'CPF/CNPJ': 'CPF_CNPJ',
+    Celular: 'CELULAR',
+    'E-mail': 'EMAIL',
+    Aleatória: 'ALEATORIA',
+    'Código copia e cola': 'COPIA_E_COLA',
+  },
+};
+
+/**
+ * Coluna e valor do rádio "Tipo da chave Pix". O que foi aprendido da própria
+ * base manda; sem isso, vale o jeito conhecido do IXC.
  */
 export function codificarTipoChavePix(
   tipo: TipoChavePix | null,
   mapa?: MapaTipoChavePix | null,
 ): { campo: string; valor: string } {
-  const campo = mapa?.campo || 'tipo_chave_pix';
+  const campo = mapa?.campo || MAPA_TIPO_PIX_CONHECIDO.campo;
   if (!tipo) return { campo, valor: '' };
-  return { campo, valor: mapa?.codigos[tipo] ?? tipo };
+
+  // Base com mapa próprio manda inteira: se ela guarda o tipo numa coluna sua,
+  // com códigos seus, o código conhecido do IXC não vale ali — e o rótulo por
+  // extenso continua sendo o palpite menos errado para o tipo que faltou.
+  if (mapa) return { campo, valor: mapa.codigos[tipo] ?? tipo };
+
+  return { campo, valor: MAPA_TIPO_PIX_CONHECIDO.codigos[tipo] ?? tipo };
 }
 
 /** Monta o corpo do POST /fn_apagar (conta a pagar). */

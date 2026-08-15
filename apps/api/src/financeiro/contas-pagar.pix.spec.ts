@@ -186,7 +186,7 @@ describe('aprender e decorar o tipo da chave Pix', () => {
     });
   });
 
-  it('sem exemplo no IXC daquele tipo, a conta ainda sai — com o rótulo', async () => {
+  it('sem nada aprendido, a conta sai no jeito conhecido do IXC', async () => {
     const { service, ixc, guardarAprendizadoPix } = montarServico({
       registros: [],
     });
@@ -194,9 +194,16 @@ describe('aprender e decorar o tipo da chave Pix', () => {
     const conta = await service.enviarIxc('c1');
 
     expect(guardarAprendizadoPix).not.toHaveBeenCalled();
+    // Coluna `tipo_pix` com o tipo em maiúsculas: é assim que o IXC guarda o
+    // rádio. O palpite antigo era a coluna `tipo_chave_pix`, que não existe —
+    // o IXC engolia o campo calado e a conta nascia com o tipo em branco, que
+    // é o que faz o banco recusar o PIX.
     expect(ixc.create.mock.calls[0][1]).toMatchObject({
-      tipo_chave_pix: 'Celular',
+      tipo_pix: 'CELULAR',
     });
+    expect('tipo_chave_pix' in (ixc.create.mock.calls[0][1] as object)).toBe(
+      false,
+    );
     expect(conta).toMatchObject({
       status: StatusContaPagar.AGUARDANDO_APROVACAO,
     });

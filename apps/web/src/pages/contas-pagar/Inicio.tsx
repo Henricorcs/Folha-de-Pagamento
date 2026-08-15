@@ -46,6 +46,10 @@ export function Inicio() {
   /** Títulos marcados para receber a mesma etiqueta de uma vez. */
   const [marcados, setMarcados] = useState<Set<number>>(new Set());
   const [categoriaLote, setCategoriaLote] = useState('');
+  /** Título que está sendo aprovado ou pago direto da lista. */
+  const [pagandoDaLista, setPagandoDaLista] = useState<number | null>(null);
+  const [avisoPagamento, setAvisoPagamento] = useState<string | null>(null);
+  const [erroPagamento, setErroPagamento] = useState(false);
 
   const consulta = useQuery({
     queryKey: ['contas-abertas'],
@@ -89,6 +93,43 @@ export function Inicio() {
       void queryClient.invalidateQueries({ queryKey: ['categorias-despesa'] });
       setMarcados(new Set());
       setCategoriaLote('');
+    },
+  });
+
+  /**
+   * Aprova (ou aprova e paga) direto da lista, sem abrir a ficha.
+   *
+   * Aprovar é o passo que faltava para o título aparecer no IXC pronto para o
+   * banco pagar: conta criada por API nasce sem auditoria, e enquanto ela não
+   * passa por ali, o pagamento não existe para o financeiro de lá.
+   */
+  const pagarDaLista = useMutation({
+    mutationFn: async (args: { conta: ContaAberta; forma: 'BANCO' | 'EM_MAOS' }) => {
+      const { data } = await api.post<{
+        aprovada: boolean;
+        paga: boolean;
+        valor: number;
+        avisos: string[];
+      }>(`/contas-abertas/${args.conta.idFnApagar}/pagar`, {
+        forma: args.forma,
+      });
+      return { ...data, conta: args.conta };
+    },
+    onMutate: (args) => setPagandoDaLista(args.conta.idFnApagar),
+    onSettled: () => setPagandoDaLista(null),
+    onSuccess: (r) => {
+      setErroPagamento(r.avisos.length > 0);
+      setAvisoPagamento(
+        (r.paga
+          ? `${r.conta.fornecedor.nome}: ${formatBRL(r.valor)} baixado no IXC.`
+          : `${r.conta.fornecedor.nome}: aprovado no IXC, pronto para o banco pagar.`) +
+          (r.avisos.length ? ` ${r.avisos.join(' ')}` : ''),
+      );
+      void queryClient.invalidateQueries({ queryKey: ['contas-abertas'] });
+    },
+    onError: (err) => {
+      setErroPagamento(true);
+      setAvisoPagamento(mensagemErro(err));
     },
   });
 
@@ -158,6 +199,22 @@ export function Inicio() {
           {consulta.data
             ? ' Os números abaixo são da última leitura que deu certo.'
             : ''}
+        </Aviso>
+      )}
+
+      {avisoPagamento && (
+        <Aviso
+          tom={erroPagamento ? 'erro' : 'pago'}
+          acao={
+            <button
+              onClick={() => setAvisoPagamento(null)}
+              className="btn btn-sutil btn-p"
+            >
+              Fechar
+            </button>
+          }
+        >
+          {avisoPagamento}
         </Aviso>
       )}
 
@@ -350,6 +407,7 @@ export function Inicio() {
                   <th className="th">Fornecedor</th>
                   <th className="th">Documento</th>
                   <th className="th text-right">Em aberto</th>
+                  <th className="th text-right">Pagar</th>
                 </tr>
               </thead>
               <tbody>
@@ -358,8 +416,10 @@ export function Inicio() {
                     key={c.idFnApagar}
                     conta={c}
                     marcado={marcados.has(c.idFnApagar)}
+                    ocupado={pagandoDaLista === c.idFnApagar}
                     onMarcar={() => alternarMarcado(c.idFnApagar)}
                     onVerDados={() => setDetalhando(c)}
+                    onPagar={(forma) => pagarDaLista.mutate({ conta: c, forma })}
                   />
                 ))}
               </tbody>
@@ -383,13 +443,18 @@ export function Inicio() {
 function Linha({
   conta,
   marcado,
+  ocupado,
   onMarcar,
   onVerDados,
+  onPagar,
 }: {
   conta: ContaAberta;
   marcado: boolean;
+  /** Este título está indo para o IXC agora. */
+  ocupado: boolean;
   onMarcar: () => void;
   onVerDados: () => void;
+  onPagar: (forma: 'BANCO' | 'EM_MAOS') => void;
 }) {
   const urgencia = urgenciaDaConta(conta);
   return (
@@ -429,13 +494,14 @@ function Linha({
         <PrazoDaConta conta={conta} />
       </td>
       <td className="td">
+        {/* Nome inteiro, sem corte: é por ele que se reconhece a conta, e
+            "Companhia Energética do Mar…" obriga a abrir a ficha para saber de
+            quem é. */}
         <div className="text-tinta-800">
           {conta.fornecedor.nome || `Fornecedor ${conta.fornecedor.id ?? '?'}`}
         </div>
         {conta.observacao && (
-          <div className="mt-0.5 max-w-lg truncate text-xs text-tinta-400">
-            {conta.observacao}
-          </div>
+          <div className="mt-0.5 text-xs text-tinta-400">{conta.observacao}</div>
         )}
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
           {conta.classificacao ? (
@@ -464,7 +530,7 @@ function Linha({
         </div>
       </td>
       <td className="td num text-tinta-500">{conta.documento ?? '—'}</td>
-      <td className="td text-right">
+      <td className="td whitespace-nowrap text-right">
         <span className="valor">{formatBRL(conta.valorAberto)}</span>
         {/* Pagamento parcial: mostrar só o saldo esconderia metade da história. */}
         {conta.valor > conta.valorAberto + 0.005 && (
@@ -472,6 +538,44 @@ function Linha({
             de {formatBRL(conta.valor)}
           </div>
         )}
+      </td>
+
+      {/* O clique aqui não abre a ficha: são ações que mexem no IXC. */}
+      <td
+        className="td whitespace-nowrap text-right"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-end gap-1.5">
+          <button
+            onClick={() => onPagar('BANCO')}
+            disabled={ocupado || conta.statusAuditoria === 'A'}
+            title={
+              conta.statusAuditoria === 'A'
+                ? 'Já aprovado no IXC — o pagamento sai pelo banco, por lá'
+                : 'Aprova na auditoria do IXC e deixa pronta para o banco pagar'
+            }
+            className="btn btn-p btn-neutro"
+          >
+            {ocupado ? '…' : conta.statusAuditoria === 'A' ? 'Aprovada' : 'Aprovar'}
+          </button>
+          <button
+            onClick={() => {
+              if (
+                confirm(
+                  `Pagar ${formatBRL(conta.valorAberto)} de ${conta.fornecedor.nome} ` +
+                    'em dinheiro, saindo do caixa? A conta fica quitada no IXC.',
+                )
+              ) {
+                onPagar('EM_MAOS');
+              }
+            }}
+            disabled={ocupado}
+            title="Aprova e dá baixa: sai do caixa e a conta fica paga no IXC"
+            className="btn btn-p bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40"
+          >
+            Em mãos
+          </button>
+        </div>
       </td>
     </tr>
   );

@@ -33,6 +33,8 @@ export function DetalheDaConta({
   const queryClient = useQueryClient();
   const [copiado, setCopiado] = useState(false);
   const [verTudo, setVerTudo] = useState(false);
+  /** A parte técnica só aparece quando alguém vai investigar. */
+  const [verTecnico, setVerTecnico] = useState(false);
   const [categoriaId, setCategoriaId] = useState(conta.classificacao?.id ?? '');
 
   const categorias = useQuery({
@@ -66,6 +68,9 @@ export function DetalheDaConta({
           `/contas-abertas/${conta.idFnApagar}/bruto`,
         )
       ).data,
+    // Só vai ao IXC quando alguém abre a parte técnica: abrir a ficha para
+    // pagar não precisa de uma leitura a mais num sistema lento.
+    enabled: verTecnico,
     retry: 0,
   });
 
@@ -190,8 +195,26 @@ export function DetalheDaConta({
           </div>
         )}
 
-        {/* --- Por que ele está nesta lista --- */}
-        <div className="mt-6 border-t border-tinta-100 pt-5">
+        {/*
+          Os campos crus do IXC ficam atrás de um botão. Eles existem para
+          responder "por que esta conta aparece aqui?" quando o filtro erra —
+          já salvaram duas investigações —, mas isso é conserto, não trabalho
+          do dia: aberto por padrão, ocupava a ficha inteira com uma tabela
+          técnica entre quem paga e o que ele precisa ver.
+        */}
+        <div className="mt-5 border-t border-tinta-100 pt-4">
+          <button
+            onClick={() => setVerTecnico((v) => !v)}
+            className="btn btn-sutil btn-p"
+          >
+            {verTecnico
+              ? 'Esconder os campos do IXC'
+              : 'Ver os campos crus do IXC (diagnóstico)'}
+          </button>
+        </div>
+
+        {verTecnico && (
+        <div className="mt-4 border-t border-tinta-100 pt-4">
           <div className="rotulo">Por que este débito aparece aqui</div>
 
           {detalhe.isLoading && <Carregando texto="Lendo o título no IXC…" />}
@@ -265,8 +288,9 @@ export function DetalheDaConta({
             </>
           )}
         </div>
+        )}
 
-        <div className="mt-6 flex justify-end">
+        <div className="mt-5 flex justify-end">
           <button onClick={onFechar} className="btn btn-neutro">
             Fechar
           </button>

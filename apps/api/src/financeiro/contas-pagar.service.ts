@@ -1001,10 +1001,10 @@ export class ContasPagarService {
       this.logger.warn(
         'Não achei conta a pagar feita na tela do IXC com PIX e o tipo da ' +
           'chave marcado — é dela que o formato é aprendido. Vou mandar o ' +
-          'rótulo em `tipo_chave_pix`; se o rádio ficar em branco, marque o ' +
-          'tipo à mão numa conta lá (isso destrava aquele pagamento) e a ' +
-          'próxima gerada aqui já sai certa, ou informe a coluna em ' +
-          'Configurações.',
+          'jeito conhecido do IXC (coluna `tipo_pix`, tipo em maiúsculas); se ' +
+          'o rádio ficar em branco, marque o tipo à mão numa conta lá (isso ' +
+          'destrava aquele pagamento) e a próxima gerada aqui já sai certa, ou ' +
+          'informe a coluna em Configurações.',
       );
       return null;
     }
@@ -1122,7 +1122,34 @@ export class ContasPagarService {
     funcionarioId: string | null;
     beneficiarioAvulsoId: string | null;
     diaristaId: string | null;
+    idFornecedorIxc?: number | null;
   }): Promise<{ chave: string | null; tipo: TipoChavePix | null }> {
+    // Conta lançada à mão: não há pessoa deste lado, e a chave está onde
+    // sempre esteve — na aba "Dados bancários" do fornecedor, no IXC. Sem
+    // buscá-la ali, a conta ia para lá com "Pix" no tipo de pagamento e a
+    // chave vazia, e o banco não paga uma conta assim.
+    if (
+      conta.idFornecedorIxc &&
+      !conta.funcionarioId &&
+      !conta.diaristaId &&
+      !conta.beneficiarioAvulsoId
+    ) {
+      const fornecedor = await this.fornecedores
+        .buscarNoIxcPorId(conta.idFornecedorIxc)
+        .catch((err: unknown) => {
+          const motivo = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `Não deu para ler os dados bancários do fornecedor ` +
+              `${conta.idFornecedorIxc}: ${motivo}`,
+          );
+          return null;
+        });
+      return {
+        chave: fornecedor?.chavePix ?? null,
+        tipo: normalizarTipoChavePix(fornecedor?.tipoChavePix),
+      };
+    }
+
     if (conta.funcionarioId) {
       const f = await this.prisma.funcionario.findUnique({
         where: { id: conta.funcionarioId },
