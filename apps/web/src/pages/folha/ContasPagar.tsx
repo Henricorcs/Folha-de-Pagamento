@@ -320,7 +320,7 @@ export function ContasPagar() {
         <ol className="flex flex-wrap gap-x-8 gap-y-4">
           {ETAPAS.map(([nome, oque], i) => (
             <li key={nome} className="flex items-start gap-2.5">
-              <span className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-tinta-900 font-display text-[10px] font-bold text-white">
+              <span className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-barra font-display text-[10px] font-bold text-white">
                 {i + 1}
               </span>
               <div className="leading-tight">
@@ -385,8 +385,8 @@ export function ContasPagar() {
             }}
             className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
               status === s
-                ? 'bg-tinta-900 text-white'
-                : 'border border-tinta-200 bg-white text-tinta-600 hover:border-tinta-300'
+                ? 'bg-barra text-white'
+                : 'border border-tinta-200 bg-papel text-tinta-600 hover:border-tinta-300'
             }`}
           >
             {s === 'todos' ? 'Todas' : STATUS_LABEL[s]}
@@ -395,10 +395,10 @@ export function ContasPagar() {
       </div>
 
       {selecionadas.length > 0 && (
-        <div className="surgir sticky top-3 z-20 mb-4 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl bg-tinta-900 px-4 py-3 text-sm text-white shadow-lg">
+        <div className="surgir sticky top-3 z-20 mb-4 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl bg-barra px-4 py-3 text-sm text-white shadow-lg">
           <span className="font-semibold">
             {selecionadas.length} selecionada(s)
-            <span className="valor ml-2 font-normal text-tinta-300">
+            <span className="valor ml-2 font-normal text-white/70">
               {formatBRL(soma(selecionadas))}
             </span>
           </span>
@@ -407,7 +407,7 @@ export function ContasPagar() {
               onClick={aprovarSelecionadas}
               quantidade={podemAprovar}
               ocupado={lote.isPending}
-              className="bg-brand-500 text-tinta-900 hover:bg-brand-400"
+              className="bg-brand-500 text-barra hover:bg-brand-400"
             >
               Aprovar
             </BotaoLote>
@@ -429,7 +429,7 @@ export function ContasPagar() {
             </BotaoLote>
             <button
               onClick={() => setSelecao([])}
-              className="btn btn-p border border-white/15 text-tinta-300 hover:bg-white/10 hover:text-white"
+              className="btn btn-p border border-white/15 text-white/70 hover:bg-white/10 hover:text-white"
             >
               Limpar
             </button>

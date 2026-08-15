@@ -277,7 +277,7 @@ function Legenda({
 
 function Balao({ children }: { children: ReactNode }) {
   return (
-    <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-max -translate-x-1/2 scale-95 rounded-xl bg-tinta-800 px-3 py-2 text-[11px] leading-relaxed text-tinta-300 opacity-0 shadow-card-hover transition duration-150 group-hover:scale-100 group-hover:opacity-100">
+    <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-max -translate-x-1/2 scale-95 rounded-xl bg-barra px-3 py-2 text-[11px] leading-relaxed text-white/75 opacity-0 shadow-card-hover transition duration-150 group-hover:scale-100 group-hover:opacity-100">
       {children}
     </div>
   );

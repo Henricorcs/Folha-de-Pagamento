@@ -168,7 +168,7 @@ export function Janela({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex justify-center overflow-y-auto rolagem-fina bg-tinta-900/40 p-4 backdrop-blur-sm sm:p-6"
+      className="fixed inset-0 z-50 flex justify-center overflow-y-auto rolagem-fina bg-barra/60 p-4 backdrop-blur-sm sm:p-6"
       onClick={onFechar}
     >
       <div
@@ -176,7 +176,7 @@ export function Janela({
         aria-modal="true"
         aria-label={titulo}
         onClick={(e) => e.stopPropagation()}
-        className="surgir my-auto h-fit w-full max-w-3xl rounded-2xl bg-white shadow-2xl"
+        className="surgir my-auto h-fit w-full max-w-3xl rounded-2xl bg-papel shadow-2xl"
       >
         <div className="flex items-start justify-between gap-3 border-b border-tinta-100 px-5 py-4 sm:px-6">
           <h2 className="titulo-bloco">{titulo}</h2>
@@ -268,13 +268,19 @@ export function Indicador({
   );
 }
 
+/**
+ * As cores de estado não vêm da escala `tinta`, então não viram do avesso
+ * sozinhas: no tema escuro um `bg-emerald-50` seria uma etiqueta quase branca
+ * acesa no meio da tabela. A versão escura troca o fundo sólido por um véu da
+ * própria cor e clareia o texto — a etiqueta continua verde, só que legível.
+ */
 const TONS = {
   neutro: 'bg-tinta-100 text-tinta-600',
-  marca: 'bg-brand-50 text-brand-800',
-  pago: 'bg-emerald-50 text-emerald-700',
-  atencao: 'bg-amber-50 text-amber-700',
-  erro: 'bg-rose-50 text-rose-700',
-  info: 'bg-sky-50 text-sky-700',
+  marca: 'bg-brand-50 text-brand-800 dark:bg-brand-500/15 dark:text-brand-300',
+  pago: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',
+  atencao: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
+  erro: 'bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300',
+  info: 'bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300',
 } as const;
 
 export type Tom = keyof typeof TONS;
@@ -316,12 +322,14 @@ export function Aviso({
   acao?: ReactNode;
 }) {
   const cores: Record<Tom, string> = {
-    neutro: 'border-tinta-200 bg-white text-tinta-600',
-    marca: 'border-brand-200 bg-brand-50 text-brand-900',
-    pago: 'border-emerald-200 bg-emerald-50 text-emerald-800',
-    atencao: 'border-amber-200 bg-amber-50 text-amber-900',
-    erro: 'border-rose-200 bg-rose-50 text-rose-800',
-    info: 'border-sky-200 bg-sky-50 text-sky-900',
+    neutro: 'border-tinta-200 bg-papel text-tinta-600',
+    marca:
+      'border-brand-200 bg-brand-50 text-brand-900 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-200',
+    pago: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200',
+    atencao:
+      'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200',
+    erro: 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200',
+    info: 'border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200',
   };
   return (
     <div

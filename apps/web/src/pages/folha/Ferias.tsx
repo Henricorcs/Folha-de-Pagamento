@@ -322,7 +322,7 @@ export function Ferias() {
 
           <div className="mt-5 max-h-96 overflow-auto rolagem-fina">
             <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-white">
+              <thead className="sticky top-0 bg-papel">
                 <tr className="border-y border-tinta-100">
                   <th className="th">Empregado</th>
                   <th className="th">Admissão</th>

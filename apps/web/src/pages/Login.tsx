@@ -28,7 +28,7 @@ export function Login() {
   return (
     <div className="flex min-h-screen">
       {/* Painel da marca: fibra óptica é luz dentro de vidro escuro. */}
-      <div className="relative hidden overflow-hidden bg-tinta-900 lg:flex lg:w-[46%] lg:flex-col lg:justify-between">
+      <div className="relative hidden overflow-hidden bg-barra lg:flex lg:w-[46%] lg:flex-col lg:justify-between">
         <div
           aria-hidden
           className="pointer-events-none absolute -left-32 top-1/4 h-[520px] w-[520px] rounded-full opacity-40 blur-3xl"
@@ -45,7 +45,7 @@ export function Login() {
             height={81}
             className="h-auto w-[116px]"
           />
-          <div className="mt-2.5 text-[10px] font-medium uppercase tracking-[0.18em] text-tinta-400">
+          <div className="mt-2.5 text-[10px] font-medium uppercase tracking-[0.18em] text-white/45">
             Finance
           </div>
         </div>
@@ -55,7 +55,7 @@ export function Login() {
           <h2 className="max-w-md font-display text-[38px] font-semibold leading-[1.1] tracking-[-0.03em] text-white">
             Todo pagamento conferido antes de sair.
           </h2>
-          <p className="mt-5 max-w-sm text-sm leading-relaxed text-tinta-300">
+          <p className="mt-5 max-w-sm text-sm leading-relaxed text-white/70">
             Salário, adiantamento, comissão, horas extras e vales calculados por
             competência e enviados ao IXC como contas a pagar.
           </p>
@@ -70,7 +70,7 @@ export function Login() {
               <div className="font-display text-sm font-semibold text-white">
                 {q}
               </div>
-              <div className="text-[11px] uppercase tracking-[0.14em] text-tinta-400">
+              <div className="text-[11px] uppercase tracking-[0.14em] text-white/45">
                 {o}
               </div>
             </div>

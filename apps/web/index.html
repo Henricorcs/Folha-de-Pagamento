@@ -15,6 +15,31 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
       rel="stylesheet"
     />
+    <!--
+      O tema é decidido antes de qualquer pintura. Se esperasse o React, quem
+      escolheu o escuro veria a tela branca piscar a cada carregamento — e
+      quem trabalha aqui de madrugada veria isso o tempo todo.
+    -->
+    <script>
+      (function () {
+        try {
+          var escolha = localStorage.getItem('ilnet:tema');
+          var escuro =
+            escolha === 'escuro' ||
+            (escolha !== 'claro' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (escuro) {
+            document.documentElement.classList.add('dark');
+            // A barra do navegador no celular nasce com a cor do tema, e não
+            // só depois que alguém clica no botão.
+            var meta = document.querySelector('meta[name="theme-color"]');
+            if (meta) meta.setAttribute('content', '#0F1626');
+          }
+        } catch (e) {
+          /* localStorage bloqueado: fica no tema claro, que é o padrão. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

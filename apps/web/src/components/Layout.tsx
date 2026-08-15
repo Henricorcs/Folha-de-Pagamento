@@ -2,17 +2,23 @@ import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import type { Modulo } from '../lib/modulos';
-import { IconeGrade } from './icones';
+import { useTema } from '../lib/tema';
+import { IconeGrade, IconeLua, IconeSol } from './icones';
 
 /**
  * Casca de um módulo. A barra lateral é tinta escura para o conteúdo — onde
  * moram os números — ficar sendo a única coisa clara e disputada da tela. Os
  * itens vêm do módulo: a casca é a mesma para todos.
+ *
+ * Ela continua escura no tema escuro, e por isso usa branco com transparência
+ * em vez da escala `tinta`: essa escala vira do avesso lá, e o que aqui é
+ * texto legível sobre fundo escuro viraria escuro sobre escuro.
  */
 export function Layout({ modulo }: { modulo: Modulo }) {
   const { usuario, logout } = useAuth();
   const navigate = useNavigate();
   const [menuAberto, setMenuAberto] = useState(false);
+  const { escuro, trocar } = useTema();
 
   function sair() {
     logout();
@@ -24,7 +30,7 @@ export function Layout({ modulo }: { modulo: Modulo }) {
       {/* Faixa de menu no celular */}
       <button
         onClick={() => setMenuAberto((a) => !a)}
-        className="fixed left-4 top-4 z-50 rounded-xl bg-tinta-900 p-2.5 text-white shadow-lg lg:hidden"
+        className="fixed left-4 top-4 z-50 rounded-xl bg-barra p-2.5 text-white shadow-lg lg:hidden"
         aria-label={menuAberto ? 'Fechar menu' : 'Abrir menu'}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
@@ -46,12 +52,12 @@ export function Layout({ modulo }: { modulo: Modulo }) {
       {menuAberto && (
         <div
           onClick={() => setMenuAberto(false)}
-          className="fixed inset-0 z-30 bg-tinta-900/40 backdrop-blur-sm lg:hidden"
+          className="fixed inset-0 z-30 bg-barra/50 backdrop-blur-sm lg:hidden"
         />
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-[248px] flex-col bg-tinta-900 transition-transform duration-300 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-[248px] flex-col bg-barra transition-transform duration-300 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0 ${
           menuAberto ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -65,7 +71,7 @@ export function Layout({ modulo }: { modulo: Modulo }) {
             height={74}
             className="h-auto w-[104px]"
           />
-          <div className="mt-2.5 text-[10px] font-medium uppercase tracking-[0.18em] text-tinta-400">
+          <div className="mt-2.5 text-[10px] font-medium uppercase tracking-[0.18em] text-white/45">
             {modulo.nome}
           </div>
         </div>
@@ -73,9 +79,9 @@ export function Layout({ modulo }: { modulo: Modulo }) {
         <NavLink
           to="/modulos"
           onClick={() => setMenuAberto(false)}
-          className="mx-3 mb-3 flex items-center gap-2.5 rounded-xl border border-white/10 px-3 py-2 text-[12px] font-medium text-tinta-300 transition hover:border-white/20 hover:bg-white/5 hover:text-white"
+          className="mx-3 mb-3 flex items-center gap-2.5 rounded-xl border border-white/10 px-3 py-2 text-[12px] font-medium text-white/70 transition hover:border-white/20 hover:bg-white/5 hover:text-white"
         >
-          <IconeGrade className="text-tinta-500" />
+          <IconeGrade className="text-white/40" />
           Trocar de módulo
         </NavLink>
 
@@ -91,7 +97,7 @@ export function Layout({ modulo }: { modulo: Modulo }) {
                 `group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition duration-150 ${
                   isActive
                     ? 'bg-white/[0.07] text-white'
-                    : 'text-tinta-300 hover:bg-white/[0.04] hover:text-white'
+                    : 'text-white/70 hover:bg-white/[0.04] hover:text-white'
                 }`
               }
             >
@@ -106,7 +112,7 @@ export function Layout({ modulo }: { modulo: Modulo }) {
                     className={
                       isActive
                         ? 'text-brand-400'
-                        : 'text-tinta-500 group-hover:text-tinta-300'
+                        : 'text-white/40 group-hover:text-white/70'
                     }
                   />
                   {item.label}
@@ -130,17 +136,36 @@ export function Layout({ modulo }: { modulo: Modulo }) {
               <div className="truncate text-[13px] font-medium text-white">
                 {usuario?.nome}
               </div>
-              <div className="truncate text-[11px] text-tinta-400">
+              <div className="truncate text-[11px] text-white/45">
                 {usuario?.email}
               </div>
             </div>
           </NavLink>
-          <button
-            onClick={sair}
-            className="mt-3 w-full rounded-lg border border-white/10 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-tinta-300 transition hover:border-white/20 hover:bg-white/5 hover:text-white"
-          >
-            Sair
-          </button>
+          <div className="mt-3 flex gap-2">
+            <button
+              onClick={sair}
+              className="flex-1 rounded-lg border border-white/10 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/70 transition hover:border-white/20 hover:bg-white/5 hover:text-white"
+            >
+              Sair
+            </button>
+            {/* A escolha fica gravada neste navegador. Quem não escolhe segue o
+                sistema — é o que já está configurado no aparelho. */}
+            <button
+              onClick={() => trocar(escuro ? 'claro' : 'escuro')}
+              aria-pressed={escuro}
+              title={
+                escuro
+                  ? 'Voltar para o tema claro'
+                  : 'Trocar para o tema escuro'
+              }
+              className="rounded-lg border border-white/10 px-2.5 text-white/70 transition hover:border-white/20 hover:bg-white/5 hover:text-white"
+            >
+              {escuro ? <IconeSol /> : <IconeLua />}
+              <span className="sr-only">
+                {escuro ? 'Tema claro' : 'Tema escuro'}
+              </span>
+            </button>
+          </div>
         </div>
       </aside>
 

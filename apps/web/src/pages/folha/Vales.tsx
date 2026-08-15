@@ -383,7 +383,7 @@ function ParcelasTabela({
   onMarcar: (parcelaId: string, descontada: boolean) => void;
 }) {
   return (
-    <div className="overflow-hidden rounded-xl bg-white ring-1 ring-tinta-100">
+    <div className="overflow-hidden rounded-xl bg-papel ring-1 ring-tinta-100">
       <table className="w-full text-sm">
         <thead>
           <tr>
@@ -618,7 +618,7 @@ function BotaoSentido({
       onClick={onClick}
       className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
         ativo
-          ? 'bg-white text-tinta-900 shadow-sm'
+          ? 'bg-papel text-tinta-900 shadow-sm'
           : 'text-tinta-500 hover:text-tinta-800'
       }`}
     >

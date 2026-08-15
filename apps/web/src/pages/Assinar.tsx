@@ -113,7 +113,7 @@ export function Assinar() {
         <Resumo recibo={r} />
 
         {r.assinaturaPng && (
-          <div className="mt-5 rounded-2xl border border-tinta-100 bg-white p-4">
+          <div className="mt-5 rounded-2xl border border-tinta-100 bg-papel p-4">
             <div className="rotulo">Assinatura</div>
             <img
               src={r.assinaturaPng}
@@ -253,7 +253,7 @@ export function Assinar() {
 /** O que o recibo diz, em linhas de conferir. */
 function Resumo({ recibo }: { recibo: ReciboPublico }) {
   return (
-    <dl className="mt-5 space-y-3 rounded-2xl border border-tinta-100 bg-white p-4 text-sm">
+    <dl className="mt-5 space-y-3 rounded-2xl border border-tinta-100 bg-papel p-4 text-sm">
       <Linha rotulo="Serviço" valor={recibo.descricao} />
       {recibo.detalhamento && (
         <Linha rotulo="Composição" valor={recibo.detalhamento} />

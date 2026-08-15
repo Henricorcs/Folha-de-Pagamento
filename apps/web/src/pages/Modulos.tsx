@@ -17,7 +17,7 @@ export function Modulos() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-tinta-900">
+    <div className="relative min-h-screen overflow-hidden bg-barra">
       <div
         aria-hidden
         className="pointer-events-none absolute -top-40 left-1/2 h-[620px] w-[620px] -translate-x-1/2 rounded-full opacity-40 blur-3xl"
@@ -36,7 +36,7 @@ export function Modulos() {
             height={68}
             className="h-auto w-[92px]"
           />
-          <span className="text-[10px] font-medium uppercase tracking-[0.22em] text-tinta-400">
+          <span className="text-[10px] font-medium uppercase tracking-[0.22em] text-white/45">
             Finance
           </span>
         </div>
@@ -56,7 +56,7 @@ export function Modulos() {
           </Link>
           <button
             onClick={sair}
-            className="rounded-lg border border-white/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-tinta-300 transition hover:border-white/20 hover:bg-white/5 hover:text-white"
+            className="rounded-lg border border-white/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/70 transition hover:border-white/20 hover:bg-white/5 hover:text-white"
           >
             Sair
           </button>
@@ -84,7 +84,7 @@ export function Modulos() {
               <h2 className="mt-5 font-display text-[17px] font-semibold text-white">
                 {modulo.nome}
               </h2>
-              <p className="mt-1.5 text-[13px] leading-relaxed text-tinta-400">
+              <p className="mt-1.5 text-[13px] leading-relaxed text-white/45">
                 {modulo.descricao}
               </p>
             </Link>

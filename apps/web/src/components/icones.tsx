@@ -74,6 +74,15 @@ export function IconeSol({ className }: IconeProps) {
   );
 }
 
+/** Lua: o tema escuro, para quem fecha o mês depois que o sol se pôs. */
+export function IconeLua({ className }: IconeProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.5 8.5 0 1 0 10.2 10.2z" />
+    </svg>
+  );
+}
+
 export function IconeCalculo({ className }: IconeProps) {
   return (
     <svg {...base} className={className}>

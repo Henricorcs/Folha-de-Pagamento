@@ -2,8 +2,49 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * A paleta vive aqui, e não no tailwind.config, porque ela troca inteira no
+ * tema escuro. A escala `tinta` é semântica, não literal: `50` é sempre "o
+ * fundo da página" e `900` é sempre "o texto mais forte" — o que muda de um
+ * tema para o outro é qual cor cumpre esse papel.
+ */
 :root {
   color-scheme: light;
+
+  --tinta-50: 241 244 249;
+  --tinta-100: 225 231 240;
+  --tinta-200: 194 204 221;
+  --tinta-300: 147 162 189;
+  --tinta-400: 107 124 156;
+  --tinta-500: 70 88 122;
+  --tinta-600: 42 58 87;
+  --tinta-700: 27 39 64;
+  --tinta-800: 17 26 46;
+  --tinta-900: 10 16 32;
+
+  --papel: 255 255 255;
+  --barra: 10 16 32;
+}
+
+.dark {
+  color-scheme: dark;
+
+  /* Não é a escala clara invertida na bala: os tons do meio (300–500), que
+     carregam texto secundário, precisam clarear mais do que a simples troca de
+     pontas daria, ou "vence em 3 dias" ficaria ilegível sobre o fundo escuro. */
+  --tinta-50: 15 22 38;
+  --tinta-100: 28 39 61;
+  --tinta-200: 44 60 90;
+  --tinta-300: 95 112 145;
+  --tinta-400: 135 152 184;
+  --tinta-500: 165 180 208;
+  --tinta-600: 195 207 227;
+  --tinta-700: 216 225 240;
+  --tinta-800: 232 238 248;
+  --tinta-900: 245 248 253;
+
+  --papel: 23 33 54;
+  --barra: 10 16 32;
 }
 
 @layer base {
@@ -22,15 +63,16 @@
     @apply bg-brand-200 text-brand-900;
   }
 
+  /* O anel se destaca contra o fundo da página, seja ele claro ou escuro. */
   :focus-visible {
-    @apply outline-none ring-2 ring-brand-500 ring-offset-2 ring-offset-white;
+    @apply outline-none ring-2 ring-brand-500 ring-offset-2 ring-offset-tinta-50;
   }
 }
 
 @layer components {
   /* --- Superfícies --- */
   .card {
-    @apply rounded-2xl border border-tinta-100 bg-white shadow-card;
+    @apply rounded-2xl border border-tinta-100 bg-papel shadow-card;
   }
   .card-hover {
     @apply transition duration-200 hover:-translate-y-0.5 hover:shadow-card-hover;
@@ -61,11 +103,13 @@
   .btn-primario {
     @apply bg-brand-600 text-white shadow-sm hover:bg-brand-700 active:bg-brand-800;
   }
+  /* Escuro com texto branco nos dois temas: é o botão que fecha a ação da
+     tela, e ele não deve trocar de peso quando o resto escurece. */
   .btn-acao {
-    @apply bg-tinta-900 text-white shadow-sm hover:bg-tinta-800 active:bg-tinta-900;
+    @apply bg-barra text-white shadow-sm hover:bg-barra/90 active:bg-barra;
   }
   .btn-neutro {
-    @apply border border-tinta-200 bg-white text-tinta-700 hover:border-tinta-300 hover:bg-tinta-50;
+    @apply border border-tinta-200 bg-papel text-tinta-700 hover:border-tinta-300 hover:bg-tinta-50;
   }
   .btn-sutil {
     @apply text-tinta-500 hover:bg-tinta-100 hover:text-tinta-800;
@@ -76,7 +120,7 @@
 
   /* --- Formulário --- */
   .campo {
-    @apply w-full rounded-xl border border-tinta-200 bg-white px-3.5 py-2.5 text-sm text-tinta-900 transition placeholder:text-tinta-300 hover:border-tinta-300 focus:border-brand-400 focus:outline-none focus:ring-4 focus:ring-brand-100;
+    @apply w-full rounded-xl border border-tinta-200 bg-papel px-3.5 py-2.5 text-sm text-tinta-900 transition placeholder:text-tinta-300 hover:border-tinta-300 focus:border-brand-400 focus:outline-none focus:ring-4 focus:ring-brand-100 dark:focus:ring-brand-900/40;
   }
   .rotulo {
     @apply mb-1.5 block text-xs font-semibold text-tinta-500;

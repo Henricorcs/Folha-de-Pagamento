@@ -1,6 +1,10 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
+  // O tema escuro é ligado por classe no <html> (ver `lib/tema.ts`), e não só
+  // pelo `prefers-color-scheme`: quem trabalha com estas telas o dia inteiro
+  // escolhe o tema uma vez e ele fica — inclusive contrariando o sistema.
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
@@ -22,19 +26,40 @@ export default {
           900: '#10406B',
           950: '#0A2847',
         },
-        // Tinta de livro-caixa: fundo da barra lateral e texto forte.
+        // Tinta de livro-caixa: do fundo da página ao texto forte.
+        //
+        // Os valores moram em variáveis CSS (ver `index.css`) porque a escala
+        // inteira vira do avesso no tema escuro: `tinta-50` deixa de ser o
+        // papel quase branco e passa a ser o fundo quase preto, `tinta-900`
+        // deixa de ser o texto preto e passa a ser o texto quase branco. Assim
+        // todo `text-tinta-700` já escrito nas telas continua querendo dizer a
+        // mesma coisa — "texto de leitura" — nos dois temas, sem precisar de um
+        // `dark:` em cada linha do app.
         tinta: {
-          50: '#F1F4F9',
-          100: '#E1E7F0',
-          200: '#C2CCDD',
-          300: '#93A2BD',
-          400: '#6B7C9C',
-          500: '#46587A',
-          600: '#2A3A57',
-          700: '#1B2740',
-          800: '#111A2E',
-          900: '#0A1020',
+          50: 'rgb(var(--tinta-50) / <alpha-value>)',
+          100: 'rgb(var(--tinta-100) / <alpha-value>)',
+          200: 'rgb(var(--tinta-200) / <alpha-value>)',
+          300: 'rgb(var(--tinta-300) / <alpha-value>)',
+          400: 'rgb(var(--tinta-400) / <alpha-value>)',
+          500: 'rgb(var(--tinta-500) / <alpha-value>)',
+          600: 'rgb(var(--tinta-600) / <alpha-value>)',
+          700: 'rgb(var(--tinta-700) / <alpha-value>)',
+          800: 'rgb(var(--tinta-800) / <alpha-value>)',
+          900: 'rgb(var(--tinta-900) / <alpha-value>)',
         },
+        /**
+         * A superfície onde o conteúdo se apoia: cartão, campo, janela. Era
+         * `bg-white` — que no escuro seria uma folha de papel acesa no meio da
+         * tela.
+         */
+        papel: 'rgb(var(--papel) / <alpha-value>)',
+        /**
+         * A tinta escura que não vira do avesso: barra lateral, botão de ação,
+         * fundo da tela de módulos. São superfícies que já eram escuras no tema
+         * claro e continuam escuras no escuro — com texto branco em cima nos
+         * dois casos.
+         */
+        barra: 'rgb(var(--barra) / <alpha-value>)',
       },
       fontFamily: {
         display: ['"Space Grotesk"', 'ui-sans-serif', 'system-ui', 'sans-serif'],

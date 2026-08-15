@@ -251,7 +251,7 @@ export function AssinaturaCanvas({ controle, onMudou, disabled }: Props) {
         onPointerLeave={terminar}
         onPointerCancel={terminar}
         style={{ height: altura, touchAction: 'none' }}
-        className={`w-full rounded-2xl border-2 border-dashed bg-white ${
+        className={`w-full rounded-2xl border-2 border-dashed bg-papel ${
           disabled
             ? 'cursor-not-allowed border-tinta-100'
             : 'cursor-crosshair border-tinta-200'

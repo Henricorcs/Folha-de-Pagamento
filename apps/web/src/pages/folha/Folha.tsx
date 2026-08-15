@@ -237,7 +237,7 @@ function Regua({ c, reparto }: { c: ComposicaoSalario; reparto: RepartoDia25 }) 
                 {t.sinal}
               </span>
             )}
-            <div className="rounded-lg bg-white px-3 py-2 ring-1 ring-tinta-100">
+            <div className="rounded-lg bg-papel px-3 py-2 ring-1 ring-tinta-100">
               <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-tinta-400">
                 {t.rotulo}
               </div>
@@ -258,7 +258,7 @@ function Regua({ c, reparto }: { c: ComposicaoSalario; reparto: RepartoDia25 }) 
         <span className="flex items-center px-1.5 font-display text-lg font-medium text-tinta-300">
           =
         </span>
-        <div className="rounded-lg bg-tinta-900 px-4 py-2">
+        <div className="rounded-lg bg-barra px-4 py-2">
           <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-brand-300">
             A pagar
           </div>
@@ -293,7 +293,7 @@ function OpcaoDia25({
   const ligado = grupo.descontarAdiantamento;
   const naoGerado = grupo.adiantamento?.situacao === 'NAO_GERADO';
   return (
-    <div className="mb-4 rounded-lg bg-white px-3 py-2 ring-1 ring-tinta-100">
+    <div className="mb-4 rounded-lg bg-papel px-3 py-2 ring-1 ring-tinta-100">
       <label className="flex flex-wrap items-center gap-2 text-xs text-tinta-600">
         <input
           type="checkbox"
@@ -1127,7 +1127,7 @@ export function Folha() {
             </table>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-4 border-t border-tinta-100 bg-white px-5 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-t border-tinta-100 bg-papel px-5 py-4">
             <div>
               <p className="eyebrow">Total selecionado</p>
               <p className="valor mt-1 font-display text-2xl">
@@ -1203,7 +1203,7 @@ function BotaoModo({
       onClick={onClick}
       className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
         ativo
-          ? 'bg-white text-tinta-900 shadow-sm'
+          ? 'bg-papel text-tinta-900 shadow-sm'
           : 'text-tinta-500 hover:text-tinta-800'
       }`}
     >

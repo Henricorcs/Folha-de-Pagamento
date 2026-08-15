@@ -59,8 +59,12 @@ const SERIES_TIPO: SerieGrafico[] = [
 /**
  * Mesma cor para o mesmo tipo em toda a tela: o bônus é azul na barra do mês e
  * azul na repartição. Cor segue a coisa, nunca a posição no ranking.
+ *
+ * Parcial porque este painel é o da folha: a despesa lançada à mão (energia,
+ * aluguel) não é custo de folha e a API já a deixa de fora — se um dia chegar
+ * aqui, sai em cinza em vez de derrubar a tela.
  */
-const COR_DO_TIPO: Record<TipoLancamento, string> = {
+const COR_DO_TIPO: Partial<Record<TipoLancamento, string>> = {
   SALARIO: PALETA[0],
   ADIANTAMENTO: PALETA[1],
   BONUS: PALETA[2],
@@ -68,6 +72,9 @@ const COR_DO_TIPO: Record<TipoLancamento, string> = {
   AVULSO: PALETA[4],
   DESCONTO: PALETA[4],
 };
+
+/** Cinza discreto para tipo sem cor própria nesta tela. */
+const COR_SEM_TIPO = '#93A2BD';
 
 const SERIES_IMPOSTO: SerieGrafico[] = [
   { chave: 'folhaPatronal', rotulo: 'Patronal (custo)', cor: PALETA[0] },
@@ -265,7 +272,7 @@ export function Dashboard() {
                     onClick={() => setMeses(n)}
                     className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                       meses === n
-                        ? 'bg-white text-tinta-800 shadow-aba'
+                        ? 'bg-papel text-tinta-800 shadow-aba'
                         : 'text-tinta-500 hover:text-tinta-700'
                     }`}
                   >
@@ -343,7 +350,7 @@ export function Dashboard() {
                     .map((t) => ({
                       rotulo: TIPO_LABEL[t.tipo],
                       valor: t.valor,
-                      cor: COR_DO_TIPO[t.tipo],
+                      cor: COR_DO_TIPO[t.tipo] ?? COR_SEM_TIPO,
                       detalhe: `${t.quantidade}×`,
                     }))}
                 />
