@@ -29,8 +29,8 @@ import { DetalheDaConta } from './DetalheDaConta';
 /**
  * O dashboard do que a empresa deve, na ordem em que as perguntas aparecem para
  * quem paga: **quanto** está em aberto, **como fecha o mês**, **o que sai nesta
- * semana**, **o que trava**, **com o quê** se está devendo, **quando** vence o
- * resto e **a quem** se deve.
+ * semana**, **com o quê** se está devendo, **quando** vence o resto e **a quem**
+ * se deve.
  *
  * A ordem não é enfeite. As primeiras seções respondem o dia de trabalho — o
  * que precisa sair agora — e as de baixo respondem o mês. Um dashboard que abre
@@ -108,24 +108,6 @@ export function Dashboard() {
     );
   }, [contas]);
 
-  /**
-   * O que já está aprovado no IXC e o que ainda não está.
-   *
-   * É a informação que faltava e que o resto do dashboard não dava: título não
-   * aprovado o banco não paga, por mais perto do vencimento que esteja. Ele
-   * aparece na agenda e na fila como qualquer outro, e no dia do pagamento é o
-   * que trava — sem isto, só se descobre um por um, abrindo a lista.
-   */
-  const auditoria = useMemo(() => partirPorAuditoria(contas), [contas]);
-
-  /**
-   * De onde vem a dívida: o que nasceu na folha (salário, diária, avulso) e o
-   * que é fornecedor. As duas passam pelo contas a pagar do IXC e se somam no
-   * mesmo caixa, mas são dinheiros de natureza diferente — um tem data e valor
-   * mais ou menos sabidos, o outro não.
-   */
-  const origem = useMemo(() => partirPorOrigem(contas), [contas]);
-
   const resumo = consulta.data?.resumo;
   const total = resumo?.total ?? 0;
 
@@ -134,7 +116,7 @@ export function Dashboard() {
       <CabecalhoPagina
         secao="Dashboard"
         titulo="Como está o contas a pagar"
-        descricao="A mesma leitura da lista: como fecha o mês, o que vence nos próximos dias, o que ainda trava no IXC, com o que se está gastando e a quem se deve."
+        descricao="A mesma leitura da lista: como fecha o mês, o que vence nos próximos dias, com o que se está gastando e a quem se deve."
         acoes={
           <button
             onClick={() => consulta.refetch()}
@@ -261,27 +243,6 @@ export function Dashboard() {
                 contas={fila}
                 onAbrir={(c) => setDetalhando(c)}
               />
-            </Bloco>
-          </div>
-
-          {/* --- O que trava e de onde vem --- */}
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <Bloco titulo="Pronto para o banco" className="surgir surgir-3" esticado>
-              <BarraDeFatias fatias={auditoria.fatias} />
-              <p className="ajuda">
-                {auditoria.travado.quantidade > 0
-                  ? `${formatBRL(auditoria.travado.total)} em ${auditoria.travado.quantidade} título(s) ainda sem aprovação no IXC — o banco não paga esses, por mais perto que esteja o vencimento.`
-                  : 'Tudo que está em aberto já passou pela auditoria do IXC.'}
-              </p>
-            </Bloco>
-
-            <Bloco titulo="De onde vem a dívida" className="surgir surgir-3" esticado>
-              <BarraDeFatias fatias={origem.fatias} />
-              <p className="ajuda">
-                A folha entra aqui como qualquer outra conta a pagar: é o mesmo
-                caixa e o mesmo banco. Separá-la mostra quanto do mês já está
-                comprometido antes de qualquer fornecedor.
-              </p>
             </Bloco>
           </div>
 
@@ -722,71 +683,6 @@ function paraFatia(grupo: {
   };
 }
 
-/**
- * O que o banco pode pagar e o que não pode.
- *
- * O IXC só manda para o banco o título com auditoria aprovada — é por isso que
- * as contas lançadas por este app nascem aprovadas. As outras aparecem na
- * agenda e na fila como qualquer uma, e só travam no dia do pagamento.
- *
- * Reprovada e ainda-sem-aprovação ficam separadas porque não são a mesma
- * situação: uma alguém recusou, a outra ninguém olhou ainda.
- */
-function partirPorAuditoria(contas: ContaAberta[]): {
-  fatias: Fatia[];
-  travado: { total: number; quantidade: number };
-} {
-  const grupos = [
-    {
-      rotulo: 'Aprovadas',
-      cor: CORES_DE_ESTADO.prazo,
-      contas: contas.filter((c) => c.statusAuditoria === 'A'),
-    },
-    {
-      rotulo: 'Reprovadas',
-      cor: CORES_DE_ESTADO.vencido,
-      contas: contas.filter((c) => c.statusAuditoria === 'R'),
-    },
-    {
-      rotulo: 'Sem aprovação ainda',
-      cor: CORES_DE_ESTADO.hoje,
-      contas: contas.filter(
-        (c) => c.statusAuditoria !== 'A' && c.statusAuditoria !== 'R',
-      ),
-    },
-  ];
-
-  const presas = [...grupos[1].contas, ...grupos[2].contas];
-  return {
-    fatias: grupos.map(paraFatia),
-    travado: { total: somar(presas), quantidade: presas.length },
-  };
-}
-
-/**
- * Quanto da dívida nasceu na folha e quanto é fornecedor.
- *
- * As duas viram conta a pagar no IXC e saem do mesmo caixa — mas a da folha
- * tem data e valor mais ou menos sabidos de antemão, e a do fornecedor não. Ver
- * as duas separadas diz quanto do mês já está comprometido antes de qualquer
- * negociação.
- */
-function partirPorOrigem(contas: ContaAberta[]): { fatias: Fatia[] } {
-  return {
-    fatias: [
-      {
-        rotulo: 'Fornecedores',
-        cor: PALETA[0],
-        contas: contas.filter((c) => !c.origem),
-      },
-      {
-        rotulo: 'Folha de pagamento',
-        cor: PALETA[1],
-        contas: contas.filter((c) => !!c.origem),
-      },
-    ].map(paraFatia),
-  };
-}
 
 /**
  * Soma por chave e devolve do maior para o menor. O que não cabe nas primeiras
