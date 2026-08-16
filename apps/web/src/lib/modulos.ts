@@ -80,7 +80,7 @@ const contasPagar: Modulo = {
   tom: 'bg-emerald-500/15 text-emerald-300',
   menu: [
     { to: 'inicio', label: 'Em aberto', icone: IconeSaida },
-    { to: 'painel', label: 'Painel', icone: IconePainel },
+    { to: 'dashboard', label: 'Dashboard', icone: IconePainel },
     // Avulsos vive nos dois módulos, com os mesmos dados: é pagamento da
     // empresa (daqui) e é lançamento que a folha usa (de lá). Duplicar o
     // caminho custa menos que obrigar a trocar de módulo no meio do trabalho.

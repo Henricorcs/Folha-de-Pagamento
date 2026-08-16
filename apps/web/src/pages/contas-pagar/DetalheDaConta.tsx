@@ -48,7 +48,7 @@ export function DetalheDaConta({
 
   /**
    * Etiqueta o débito. A lista inteira é recarregada depois porque é dela que
-   * o painel tira os agrupamentos — deixar as duas telas discordando sobre em
+   * o dashboard tira os agrupamentos — deixar as duas telas discordando sobre em
    * que categoria está um gasto seria pior que não ter categoria.
    */
   const classificar = useMutation({
@@ -173,7 +173,7 @@ export function DetalheDaConta({
               ? 'Salvando…'
               : conta.categoria.nome
                 ? `No IXC este título está na conta de despesa "${conta.categoria.nome}".`
-                : 'É por esta escolha que o painel separa os gastos. Ela fica guardada aqui — o IXC não tem onde recebê-la.'}
+                : 'É por esta escolha que o dashboard separa os gastos. Ela fica guardada aqui — o IXC não tem onde recebê-la.'}
           </p>
           {classificar.isError && (
             <p className="mt-2 text-sm text-rose-700">

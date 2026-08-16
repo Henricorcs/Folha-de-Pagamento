@@ -748,7 +748,7 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
             ))}
           </select>
           <p className="ajuda">
-            É por esta escolha que o painel separa os gastos. Ela fica guardada
+            É por esta escolha que o dashboard separa os gastos. Ela fica guardada
             aqui — o IXC não tem onde recebê-la.
           </p>
         </div>

@@ -27,13 +27,14 @@ import type {
 import { DetalheDaConta } from './DetalheDaConta';
 
 /**
- * O painel do que a empresa deve, na ordem em que as perguntas aparecem para
- * quem paga: **quanto** está em aberto, **o que sai nesta semana**, **com o
- * quê** se está devendo, **quando** vence o resto e **a quem** se deve.
+ * O dashboard do que a empresa deve, na ordem em que as perguntas aparecem para
+ * quem paga: **quanto** está em aberto, **como fecha o mês**, **o que sai nesta
+ * semana**, **o que trava**, **com o quê** se está devendo, **quando** vence o
+ * resto e **a quem** se deve.
  *
- * A ordem não é enfeite. As duas primeiras seções respondem o dia de trabalho
- * — o que precisa sair agora — e as três de baixo respondem o mês. Um painel
- * que abre por gráfico anual obriga a rolar para achar a conta que vence hoje.
+ * A ordem não é enfeite. As primeiras seções respondem o dia de trabalho — o
+ * que precisa sair agora — e as de baixo respondem o mês. Um dashboard que abre
+ * por gráfico anual obriga a rolar para achar a conta que vence hoje.
  *
  * Roda sobre a mesma leitura da tela de lista — mesma chave de consulta, mesma
  * resposta do IXC. Trocar de aba não faz o IXC ser consultado de novo, e os
@@ -50,7 +51,7 @@ const DIAS_NA_AGENDA = 14;
 /** Quantas contas a fila de pagamento lista antes de mandar para a lista. */
 const TETO_DA_FILA = 8;
 
-export function Painel() {
+export function Dashboard() {
   const consulta = useQuery({
     queryKey: ['contas-abertas'],
     queryFn: async () => (await api.get<ContasAbertas>('/contas-abertas')).data,
@@ -63,7 +64,7 @@ export function Painel() {
   /**
    * Quanto já saiu no mês. É outra leitura do IXC porque a lista de abertas,
    * por definição, não sabe nada do que já foi pago — e sem esse número o
-   * painel só conta metade do mês.
+   * dashboard só conta metade do mês.
    */
   const pagas = useQuery({
     queryKey: ['pagas-no-mes'],
@@ -107,15 +108,33 @@ export function Painel() {
     );
   }, [contas]);
 
+  /**
+   * O que já está aprovado no IXC e o que ainda não está.
+   *
+   * É a informação que faltava e que o resto do dashboard não dava: título não
+   * aprovado o banco não paga, por mais perto do vencimento que esteja. Ele
+   * aparece na agenda e na fila como qualquer outro, e no dia do pagamento é o
+   * que trava — sem isto, só se descobre um por um, abrindo a lista.
+   */
+  const auditoria = useMemo(() => partirPorAuditoria(contas), [contas]);
+
+  /**
+   * De onde vem a dívida: o que nasceu na folha (salário, diária, avulso) e o
+   * que é fornecedor. As duas passam pelo contas a pagar do IXC e se somam no
+   * mesmo caixa, mas são dinheiros de natureza diferente — um tem data e valor
+   * mais ou menos sabidos, o outro não.
+   */
+  const origem = useMemo(() => partirPorOrigem(contas), [contas]);
+
   const resumo = consulta.data?.resumo;
   const total = resumo?.total ?? 0;
 
   return (
     <Pagina>
       <CabecalhoPagina
-        secao="Painel"
-        titulo="Com o que a empresa está devendo"
-        descricao="A mesma leitura da lista: o que vence nos próximos dias, com o que se está gastando e a quem se deve."
+        secao="Dashboard"
+        titulo="Como está o contas a pagar"
+        descricao="A mesma leitura da lista: como fecha o mês, o que vence nos próximos dias, o que ainda trava no IXC, com o que se está gastando e a quem se deve."
         acoes={
           <button
             onClick={() => consulta.refetch()}
@@ -195,36 +214,21 @@ export function Painel() {
             </div>
           )}
 
-          {/* O fechamento do mês tem cartão próprio: são dois números que se
-              lê de longe, e embaixo do gráfico eles viravam legenda de eixo.
+          {/* O fechamento do mês num bloco só. Antes eram dois números soltos,
+              lado a lado, e faltava justamente o que se pergunta primeiro:
+              quanto o mês inteiro custa e que parte dele já saiu. A barra
+              responde isso de longe; os números embaixo dela dão a conferência.
               Os dois lados saem do contas a pagar do IXC, que é por onde passa
               todo o dinheiro da empresa — a folha inclusive. */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Indicador
-              rotulo="A pagar até o fim do mês"
-              valor={formatBRL(somar(aPagarNoMes))}
-              detalhe={`${aPagarNoMes.length} título(s), o atraso incluído`}
+          <Bloco titulo="O mês" className="surgir surgir-1">
+            <FechamentoDoMes
+              aPagar={somar(aPagarNoMes)}
+              quantidadeAPagar={aPagarNoMes.length}
+              pagas={pagas.data ?? null}
+              carregando={pagas.isLoading}
+              erro={!!pagas.error}
             />
-            <Indicador
-              rotulo="Já pago neste mês"
-              valor={
-                pagas.isLoading
-                  ? '…'
-                  : pagas.data
-                    ? formatBRL(pagas.data.total)
-                    : '—'
-              }
-              detalhe={
-                pagas.error
-                  ? 'não deu para ler do IXC'
-                  : pagas.data
-                    ? `${pagas.data.quantidade} título(s) baixados no IXC${
-                        pagas.data.completo ? '' : ' — leitura parcial'
-                      }`
-                    : 'lendo o IXC…'
-              }
-            />
-          </div>
+          </Bloco>
 
           <Bloco titulo="Por urgência" className="surgir surgir-1">
             <FaixaDeUrgencia contas={contas} />
@@ -260,26 +264,28 @@ export function Painel() {
             </Bloco>
           </div>
 
-          {/* --- O mês: com o quê, quando e a quem --- */}
-          <Bloco titulo="Com o que a empresa está devendo" className="surgir surgir-4">
-            {porCategoria.length === 0 ? (
-              <Vazio titulo="Nada classificado ainda">
-                Este gráfico sai da classificação de cada débito. Marque as
-                contas na aba "Em aberto" e escolha a que elas se referem — a
-                partir da primeira, o gráfico começa a existir.
-              </Vazio>
-            ) : (
-              <BarrasComparadas itens={paraBarras(porCategoria, total)} />
-            )}
-            {semClassificar.length > 0 && (
+          {/* --- O que trava e de onde vem --- */}
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <Bloco titulo="Pronto para o banco" className="surgir surgir-3" esticado>
+              <BarraDeFatias fatias={auditoria.fatias} />
               <p className="ajuda">
-                {formatBRL(somar(semClassificar))} em {semClassificar.length}{' '}
-                título(s) ainda sem classificação — esse dinheiro não está em
-                nenhuma barra acima.
+                {auditoria.travado.quantidade > 0
+                  ? `${formatBRL(auditoria.travado.total)} em ${auditoria.travado.quantidade} título(s) ainda sem aprovação no IXC — o banco não paga esses, por mais perto que esteja o vencimento.`
+                  : 'Tudo que está em aberto já passou pela auditoria do IXC.'}
               </p>
-            )}
-          </Bloco>
+            </Bloco>
 
+            <Bloco titulo="De onde vem a dívida" className="surgir surgir-3" esticado>
+              <BarraDeFatias fatias={origem.fatias} />
+              <p className="ajuda">
+                A folha entra aqui como qualquer outra conta a pagar: é o mesmo
+                caixa e o mesmo banco. Separá-la mostra quanto do mês já está
+                comprometido antes de qualquer fornecedor.
+              </p>
+            </Bloco>
+          </div>
+
+          {/* --- O mês: com o quê, quando e a quem --- */}
           <Bloco titulo="Por mês de vencimento" className="surgir surgir-4">
             <BarrasEmpilhadas meses={porMes} series={SERIES_DO_MES} />
             <p className="ajuda">
@@ -289,10 +295,38 @@ export function Painel() {
             </p>
           </Bloco>
 
-          <Bloco titulo="Maiores credores" className="surgir surgir-4">
-            <BarrasComparadas itens={paraBarras(porFornecedor, total)} />
-            <Concentracao grupos={porFornecedor} total={total} />
-          </Bloco>
+          {/* Estes dois lêem-se em par — "com o quê" e "com quem" —, e são
+              listas de barras curtas: lado a lado numa tela larga cabem sem
+              apertar e poupam uma rolagem inteira. */}
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <Bloco
+              titulo="Com o que a empresa está devendo"
+              className="surgir surgir-4"
+              esticado
+            >
+              {porCategoria.length === 0 ? (
+                <Vazio titulo="Nada classificado ainda">
+                  Este gráfico sai da classificação de cada débito. Marque as
+                  contas na aba "Em aberto" e escolha a que elas se referem — a
+                  partir da primeira, o gráfico começa a existir.
+                </Vazio>
+              ) : (
+                <BarrasComparadas itens={paraBarras(porCategoria, total)} />
+              )}
+              {semClassificar.length > 0 && (
+                <p className="ajuda">
+                  {formatBRL(somar(semClassificar))} em {semClassificar.length}{' '}
+                  título(s) ainda sem classificação — esse dinheiro não está em
+                  nenhuma barra acima.
+                </p>
+              )}
+            </Bloco>
+
+            <Bloco titulo="Maiores credores" className="surgir surgir-4" esticado>
+              <BarrasComparadas itens={paraBarras(porFornecedor, total)} />
+              <Concentracao grupos={porFornecedor} total={total} />
+            </Bloco>
+          </div>
         </div>
       )}
 
@@ -307,16 +341,70 @@ export function Painel() {
 }
 
 /**
- * A régua de cores da casa, na mesma leitura da lista: vermelho já venceu,
- * amarelo vence hoje, verde ainda tem prazo. Uma barra só, proporcional ao
- * dinheiro — não à quantidade de títulos, que esconde uma conta de cem mil no
- * meio de trinta de cinquenta reais.
+ * Uma fatia de uma leitura em barra: um pedaço do dinheiro, com o nome e a cor
+ * que o identificam.
+ */
+interface Fatia {
+  rotulo: string;
+  cor: string;
+  total: number;
+  quantidade: number;
+}
+
+/**
+ * Uma barra só, dividida, com a legenda embaixo — a forma em que este dashboard
+ * responde toda pergunta de "quanto disto é aquilo": urgência, aprovação no
+ * IXC, origem da dívida e fechamento do mês.
  *
- * Os segmentos são separados por um fio da cor do cartão: encostados, duas
- * cores vizinhas viram uma mancha só.
+ * É sempre proporcional ao **dinheiro**, nunca à quantidade de títulos: contar
+ * títulos esconde uma conta de cem mil no meio de trinta de cinquenta reais.
+ *
+ * Os segmentos são separados por um fio da cor do cartão — encostados, duas
+ * cores vizinhas viram uma mancha só. E o valor aparece sempre em número ao
+ * lado do rótulo: cor sozinha não serve a quem não a distingue.
+ */
+function BarraDeFatias({ fatias }: { fatias: Fatia[] }) {
+  const comValor = fatias.filter((f) => f.quantidade > 0);
+  const total = comValor.reduce((s, f) => s + f.total, 0) || 1;
+
+  return (
+    <div>
+      <div className="flex h-4 w-full gap-[2px] overflow-hidden rounded-full bg-tinta-100">
+        {comValor.map((f) => (
+          <div
+            key={f.rotulo}
+            style={{ width: `${(f.total / total) * 100}%`, background: f.cor }}
+            title={`${f.rotulo}: ${formatBRL(f.total)} em ${f.quantidade} título(s)`}
+          />
+        ))}
+      </div>
+      <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2">
+        {comValor.map((f) => (
+          <span key={f.rotulo} className="flex items-center gap-2 text-xs">
+            <span
+              className="h-2.5 w-2.5 shrink-0 rounded-sm"
+              style={{ background: f.cor }}
+            />
+            <span className="text-tinta-500">{f.rotulo}</span>
+            <span className="valor text-[12px] text-tinta-700">
+              {formatBRL(f.total)}
+            </span>
+            <span className="text-tinta-400">
+              ({f.quantidade} · {Math.round((f.total / total) * 100)}%)
+            </span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A régua de cores da casa, na mesma leitura da lista: vermelho já venceu,
+ * amarelo vence hoje, verde ainda tem prazo.
  */
 function FaixaDeUrgencia({ contas }: { contas: ContaAberta[] }) {
-  const fatias = [
+  const grupos: Array<{ rotulo: string; cor: string; contas: ContaAberta[] }> = [
     {
       rotulo: 'Vencidas',
       cor: CORES_DE_ESTADO.vencido,
@@ -337,43 +425,91 @@ function FaixaDeUrgencia({ contas }: { contas: ContaAberta[] }) {
       cor: CORES_DE_ESTADO.semData,
       contas: contas.filter((c) => c.diasParaVencer === null),
     },
-  ]
-    .map((f) => ({
-      ...f,
-      total: somar(f.contas),
-    }))
-    .filter((f) => f.contas.length > 0);
+  ];
 
-  const total = fatias.reduce((s, f) => s + f.total, 0) || 1;
+  return <BarraDeFatias fatias={grupos.map(paraFatia)} />;
+}
+
+/**
+ * Como o mês fecha: o que já saiu e o que ainda tem de sair, na mesma barra.
+ *
+ * Os dois números existiam soltos, um ao lado do outro, e faltava o que se
+ * pergunta primeiro — quanto o mês custa por inteiro e que parte dele já
+ * passou. Somados numa barra, isso se lê sem conta de cabeça; separados em dois
+ * cartões, não se lia.
+ *
+ * O que já venceu e não foi pago entra no "a pagar": atraso não deixa de ser
+ * dívida por ter passado da data, e é dinheiro que este mês precisa cobrir.
+ */
+function FechamentoDoMes({
+  aPagar,
+  quantidadeAPagar,
+  pagas,
+  carregando,
+  erro,
+}: {
+  aPagar: number;
+  quantidadeAPagar: number;
+  pagas: PagamentosDoMes | null;
+  carregando: boolean;
+  erro: boolean;
+}) {
+  // Sem a leitura do que já saiu não dá para desenhar a barra: ela ficaria
+  // dizendo que 100% do mês está por pagar, que é uma afirmação — e errada.
+  if (!pagas) {
+    return (
+      <div>
+        <p className="valor text-[22px] text-tinta-900">{formatBRL(aPagar)}</p>
+        <p className="ajuda">
+          ainda a pagar até o fim do mês, em {quantidadeAPagar} título(s), o
+          atraso incluído.{' '}
+          {erro
+            ? 'Não deu para ler do IXC quanto já saiu neste mês.'
+            : carregando
+              ? 'Lendo do IXC quanto já saiu…'
+              : ''}
+        </p>
+      </div>
+    );
+  }
+
+  const doMes = pagas.total + aPagar;
 
   return (
     <div>
-      <div className="flex h-4 w-full gap-[2px] overflow-hidden rounded-full bg-tinta-100">
-        {fatias.map((f) => (
-          <div
-            key={f.rotulo}
-            style={{ width: `${(f.total / total) * 100}%`, background: f.cor }}
-            title={`${f.rotulo}: ${formatBRL(f.total)} em ${f.contas.length} título(s)`}
-          />
-        ))}
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="eyebrow">O mês inteiro</p>
+          <p className="valor text-[25px] leading-none text-tinta-900">
+            {formatBRL(doMes)}
+          </p>
+        </div>
+        <p className="text-xs text-tinta-400">
+          {doMes > 0 ? Math.round((pagas.total / doMes) * 100) : 0}% já saiu
+          {pagas.completo ? '' : ' — leitura parcial do IXC'}
+        </p>
       </div>
-      <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2">
-        {fatias.map((f) => (
-          <span key={f.rotulo} className="flex items-center gap-2 text-xs">
-            <span
-              className="h-2.5 w-2.5 shrink-0 rounded-sm"
-              style={{ background: f.cor }}
-            />
-            <span className="text-tinta-500">{f.rotulo}</span>
-            <span className="valor text-[12px] text-tinta-700">
-              {formatBRL(f.total)}
-            </span>
-            <span className="text-tinta-400">
-              ({f.contas.length} · {Math.round((f.total / total) * 100)}%)
-            </span>
-          </span>
-        ))}
-      </div>
+
+      <BarraDeFatias
+        fatias={[
+          {
+            rotulo: 'Já pago neste mês',
+            cor: CORES_DE_ESTADO.prazo,
+            total: pagas.total,
+            quantidade: pagas.quantidade,
+          },
+          {
+            rotulo: 'Ainda a pagar',
+            cor: PALETA[0],
+            total: aPagar,
+            quantidade: quantidadeAPagar,
+          },
+        ]}
+      />
+      <p className="ajuda">
+        O que ainda tem de sair inclui o atraso: conta vencida continua sendo
+        dinheiro que este mês precisa cobrir.
+      </p>
     </div>
   );
 }
@@ -570,6 +706,86 @@ interface Grupo {
   rotulo: string;
   total: number;
   quantidade: number;
+}
+
+/** Um conjunto de contas vira a fatia que o representa na barra. */
+function paraFatia(grupo: {
+  rotulo: string;
+  cor: string;
+  contas: ContaAberta[];
+}): Fatia {
+  return {
+    rotulo: grupo.rotulo,
+    cor: grupo.cor,
+    total: somar(grupo.contas),
+    quantidade: grupo.contas.length,
+  };
+}
+
+/**
+ * O que o banco pode pagar e o que não pode.
+ *
+ * O IXC só manda para o banco o título com auditoria aprovada — é por isso que
+ * as contas lançadas por este app nascem aprovadas. As outras aparecem na
+ * agenda e na fila como qualquer uma, e só travam no dia do pagamento.
+ *
+ * Reprovada e ainda-sem-aprovação ficam separadas porque não são a mesma
+ * situação: uma alguém recusou, a outra ninguém olhou ainda.
+ */
+function partirPorAuditoria(contas: ContaAberta[]): {
+  fatias: Fatia[];
+  travado: { total: number; quantidade: number };
+} {
+  const grupos = [
+    {
+      rotulo: 'Aprovadas',
+      cor: CORES_DE_ESTADO.prazo,
+      contas: contas.filter((c) => c.statusAuditoria === 'A'),
+    },
+    {
+      rotulo: 'Reprovadas',
+      cor: CORES_DE_ESTADO.vencido,
+      contas: contas.filter((c) => c.statusAuditoria === 'R'),
+    },
+    {
+      rotulo: 'Sem aprovação ainda',
+      cor: CORES_DE_ESTADO.hoje,
+      contas: contas.filter(
+        (c) => c.statusAuditoria !== 'A' && c.statusAuditoria !== 'R',
+      ),
+    },
+  ];
+
+  const presas = [...grupos[1].contas, ...grupos[2].contas];
+  return {
+    fatias: grupos.map(paraFatia),
+    travado: { total: somar(presas), quantidade: presas.length },
+  };
+}
+
+/**
+ * Quanto da dívida nasceu na folha e quanto é fornecedor.
+ *
+ * As duas viram conta a pagar no IXC e saem do mesmo caixa — mas a da folha
+ * tem data e valor mais ou menos sabidos de antemão, e a do fornecedor não. Ver
+ * as duas separadas diz quanto do mês já está comprometido antes de qualquer
+ * negociação.
+ */
+function partirPorOrigem(contas: ContaAberta[]): { fatias: Fatia[] } {
+  return {
+    fatias: [
+      {
+        rotulo: 'Fornecedores',
+        cor: PALETA[0],
+        contas: contas.filter((c) => !c.origem),
+      },
+      {
+        rotulo: 'Folha de pagamento',
+        cor: PALETA[1],
+        contas: contas.filter((c) => !!c.origem),
+      },
+    ].map(paraFatia),
+  };
 }
 
 /**

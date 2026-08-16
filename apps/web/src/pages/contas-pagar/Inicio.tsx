@@ -82,7 +82,7 @@ export function Inicio() {
 
   /**
    * Etiqueta tudo que está marcado de uma vez. A lista inteira é recarregada
-   * depois — é dela que o painel tira os agrupamentos, e as duas telas
+   * depois — é dela que o dashboard tira os agrupamentos, e as duas telas
    * discordarem sobre em que categoria está um gasto é pior que não ter
    * categoria nenhuma.
    */
@@ -171,9 +171,9 @@ export function Inicio() {
   return (
     <Pagina>
       <CabecalhoPagina
-        secao="Visão geral"
-        titulo="Contas a Pagar"
-        descricao="Tudo que está em aberto no IXC, do jeito que está lá agora. Esta tela é de leitura: aprovar, pagar e cancelar continua sendo no IXC."
+        secao="Em aberto"
+        titulo="O que a empresa deve"
+        descricao="Tudo que está em aberto no IXC, do jeito que está lá agora. Daqui dá para lançar, pagar, editar e apagar — o que for feito aqui é gravado lá."
         acoes={
           <>
             <button
