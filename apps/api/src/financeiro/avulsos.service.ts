@@ -14,7 +14,10 @@ import {
   TipoLancamento,
 } from '@prisma/client';
 import { CaixaService } from '../ixc/caixa.service';
-import { variacoesDocumento } from '../ixc/ixc.fornecedor';
+import {
+  type EdicaoDoFornecedor,
+  variacoesDocumento,
+} from '../ixc/ixc.fornecedor';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConfigFinanceiraService } from './config-financeira.service';
 import { ContasPagarService } from './contas-pagar.service';
@@ -224,6 +227,20 @@ export class AvulsosService {
         };
       }),
     };
+  }
+
+  /**
+   * Muda o cadastro do fornecedor no IXC a partir desta lista.
+   *
+   * Não toca no cadastro daqui de propósito: o nome fantasia é do fornecedor, a
+   * lista o lê do IXC a cada abertura, e guardar uma cópia local só criaria
+   * duas versões do mesmo apelido para divergirem.
+   */
+  async editarFornecedorDoIxc(
+    idFornecedorIxc: number,
+    mudancas: EdicaoDoFornecedor,
+  ): Promise<FornecedorNoIxc> {
+    return this.fornecedores.atualizarNoIxc(idFornecedorIxc, mudancas);
   }
 
   /**

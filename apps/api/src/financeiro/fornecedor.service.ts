@@ -9,15 +9,24 @@ import {
 } from '../ixc/ixc.financeiro';
 import {
   CAMPOS_DOC_FORNECEDOR,
+  type EdicaoDoFornecedor,
   filtrarFornecedores,
   mascararDocumento,
+  montarEdicaoFornecedor,
   parseValores,
   REGRA_ESTRANGEIRO,
   somenteDigitos,
   variacoesDocumento,
 } from '../ixc/ixc.fornecedor';
-import type { IxcFornecedor, IxcListParams } from '../ixc/ixc.types';
+import type { IxcFornecedor } from '../ixc/ixc.types';
 import { ConfigFinanceiraService } from './config-financeira.service';
+
+/**
+ * Quantos fornecedores ler de cada coluna numa busca por nome. A união das duas
+ * é paginada aqui dentro, então este é o fundo do que a tela consegue percorrer
+ * — bem além do que alguém rola atrás de um nome.
+ */
+const TETO_POR_COLUNA = 200;
 
 /**
  * Um fornecedor que já existe no IXC, como a tela precisa vê-lo — inclusive a
@@ -247,15 +256,25 @@ export class FornecedorService {
     const porPagina = Math.min(Math.max(opts.porPagina ?? 25, 1), 100);
     const busca = opts.busca?.trim() ?? '';
 
-    // Com busca, procura pelo nome; sem busca, lista os ativos em ordem. O
-    // filtro do ativo vai no próprio pedido e não aqui: filtrar depois deixaria
-    // páginas curtas e a contagem errada.
-    const params: Pick<IxcListParams, 'qtype' | 'query' | 'oper'> = busca
-      ? { qtype: 'fornecedor.razao', query: busca, oper: 'L' }
-      : { qtype: 'fornecedor.ativo', query: 'S', oper: '=' };
+    return busca
+      ? this.buscarPaginaDoIxc(busca, page, porPagina)
+      : this.paginaDeAtivosDoIxc(page, porPagina);
+  }
 
+  /**
+   * O catálogo inteiro, em ordem alfabética — a tela sem nada digitado.
+   *
+   * O filtro do ativo vai no próprio pedido e não depois: filtrar aqui deixaria
+   * páginas curtas e a contagem errada.
+   */
+  private async paginaDeAtivosDoIxc(
+    page: number,
+    porPagina: number,
+  ): Promise<PaginaFornecedoresIxc> {
     const res = await this.ixc.list<Record<string, unknown>>('fornecedor', {
-      ...params,
+      qtype: 'fornecedor.ativo',
+      query: 'S',
+      oper: '=',
       page,
       rp: porPagina,
       sortname: 'fornecedor.razao',
@@ -263,33 +282,77 @@ export class FornecedorService {
     });
 
     const itens = res.registros
-      .filter((b) => String(b.ativo ?? '').toUpperCase() !== 'N')
-      .map((bruto) => {
-        const id = Number(bruto.id);
-        return {
-          idFornecedor: id,
-          nome:
-            texto(bruto.razao) ?? texto(bruto.fantasia) ?? `Fornecedor ${id}`,
-          nomeFantasia: texto(bruto.fantasia),
-          cpfCnpj: texto(bruto.cnpj_cpf) ?? texto(bruto.cpf_cnpj),
-          tipoPessoa: texto(bruto.tipo_pessoa),
-          email: texto(bruto.email),
-          telefone: texto(bruto.celular) ?? texto(bruto.telefone),
-          cidadeIxc: Number(bruto.cidade) || null,
-          ativo: true,
-          // Dados bancários custam uma consulta por fornecedor, noutra tabela.
-          // Numa lista de vinte linhas seriam vinte idas ao IXC para dados que
-          // só interessam na hora de pagar — e lá eles são lidos.
-          banco: null,
-          agencia: null,
-          conta: null,
-          chavePix: null,
-          tipoChavePix: null,
-        };
-      })
-      .filter((f) => Number.isInteger(f.idFornecedor) && f.idFornecedor > 0);
+      .map(fornecedorAtivoDoIxc)
+      .filter((f): f is FornecedorNoIxc => f !== null);
 
     return { itens, total: res.total, page, porPagina };
+  }
+
+  /**
+   * A página de uma busca por nome — razão social **ou** nome fantasia.
+   *
+   * São duas consultas porque o webservice não aceita OU no filtro, e uma só
+   * não bastava: quem é "Deda pedreiro" no dia a dia está cadastrado como
+   * "Antonio Clebes Alves da Silva", e procurar apenas a razão social nunca o
+   * encontrava. É o mesmo caminho que a busca da tela de Nova Despesa já faz.
+   *
+   * Como o resultado é a união de duas consultas, a página é recortada aqui e
+   * não no IXC: pedir "a página 2" a cada uma delas devolveria dois pedaços que
+   * não se somam. O teto por coluna existe para a união não virar uma leitura
+   * sem fim — a 25 por página ele dá muito mais fundo do que alguém percorre, e
+   * quem esbarrar nele refina o termo.
+   */
+  private async buscarPaginaDoIxc(
+    busca: string,
+    page: number,
+    porPagina: number,
+  ): Promise<PaginaFornecedoresIxc> {
+    const achados = new Map<number, FornecedorNoIxc>();
+    let ultimoErro: unknown = null;
+    let algumaRespondeu = false;
+
+    for (const campo of ['razao', 'fantasia'] as const) {
+      let res;
+      try {
+        res = await this.ixc.list<Record<string, unknown>>('fornecedor', {
+          qtype: `fornecedor.${campo}`,
+          query: busca,
+          // "L" é o LIKE do webservice: quem digita "cemar" não quer só o
+          // fornecedor chamado exatamente "cemar".
+          oper: 'L',
+          rp: TETO_POR_COLUNA,
+          sortname: `fornecedor.${campo}`,
+          sortorder: 'asc',
+        });
+      } catch (err) {
+        // A coluna pode não existir nesta base; tenta a próxima.
+        ultimoErro = err;
+        continue;
+      }
+      algumaRespondeu = true;
+
+      for (const bruto of res.registros) {
+        const f = fornecedorAtivoDoIxc(bruto);
+        if (f && !achados.has(f.idFornecedor)) achados.set(f.idFornecedor, f);
+      }
+    }
+
+    // Nenhuma das duas respondeu: é o IXC fora do ar, não uma busca sem
+    // resultado. Dizer "ninguém com esse nome" aqui mandaria cadastrar de novo
+    // gente que já está lá.
+    if (!algumaRespondeu && ultimoErro) throw ultimoErro;
+
+    const itens = [...achados.values()].sort((a, b) =>
+      a.nome.localeCompare(b.nome, 'pt-BR'),
+    );
+    const inicio = (page - 1) * porPagina;
+
+    return {
+      itens: itens.slice(inicio, inicio + porPagina),
+      total: itens.length,
+      page,
+      porPagina,
+    };
   }
 
   /**
@@ -421,6 +484,54 @@ export class FornecedorService {
       ativo: String(bruto.ativo ?? '').toUpperCase() !== 'N',
       ...banco,
     };
+  }
+
+  /**
+   * Muda o cadastro do fornecedor no próprio IXC e devolve como ele ficou.
+   *
+   * Por ora só o nome fantasia, que é o campo que faltava: é por ele que a
+   * pessoa é conhecida ("Deda pedreiro"), e é ele que faz a busca daqui e a de
+   * lá acharem-na. Antes disto, apelidar alguém obrigava a abrir o IXC.
+   *
+   * O registro é lido antes e devolvido inteiro, com a mudança por cima — ver
+   * `montarEdicaoFornecedor`, que explica por que mandar só o campo alterado
+   * apagaria o cadastro.
+   *
+   * A releitura no fim não é enfeite: ela confirma no próprio IXC o que ficou
+   * gravado, em vez de a tela mostrar o que este app *acha* que gravou.
+   */
+  async atualizarNoIxc(
+    idFornecedor: number,
+    mudancas: EdicaoDoFornecedor,
+  ): Promise<FornecedorNoIxc> {
+    const atual = await this.ixc.getById<Record<string, unknown>>(
+      'fornecedor',
+      'fornecedor.id',
+      idFornecedor,
+    );
+    if (!atual) {
+      throw new NotFoundException(
+        `O fornecedor #${idFornecedor} não existe no IXC.`,
+      );
+    }
+
+    await this.ixc.update(
+      'fornecedor',
+      idFornecedor,
+      montarEdicaoFornecedor(atual, mudancas),
+    );
+
+    const depois = await this.buscarNoIxcPorId(idFornecedor);
+    if (!depois) {
+      throw new NotFoundException(
+        `O fornecedor #${idFornecedor} sumiu do IXC durante a edição.`,
+      );
+    }
+    this.logger.log(
+      `Fornecedor #${idFornecedor} alterado no IXC: ` +
+        `fantasia="${depois.nomeFantasia ?? ''}"`,
+    );
+    return depois;
   }
 
   /**
@@ -674,6 +785,43 @@ export class FornecedorService {
     if (!algumaRespondeu && ultimoErro) throw ultimoErro;
     return null;
   }
+}
+
+/**
+ * Um fornecedor cru do IXC como as listas o mostram — `null` quando o registro
+ * não serve: sem código válido, ou desativado lá.
+ *
+ * Lançar conta nova para um cadastro que a empresa aposentou é quase sempre
+ * engano, e o que já existe continua aparecendo nas contas em aberto de
+ * qualquer jeito.
+ *
+ * Os dados bancários ficam de fora de propósito: moram noutra tabela e custam
+ * uma consulta por fornecedor. Numa lista de vinte linhas seriam vinte idas ao
+ * IXC para dados que só interessam na hora de pagar — e lá eles são lidos.
+ */
+function fornecedorAtivoDoIxc(
+  bruto: Record<string, unknown>,
+): FornecedorNoIxc | null {
+  const id = Number(bruto.id);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  if (String(bruto.ativo ?? '').toUpperCase() === 'N') return null;
+
+  return {
+    idFornecedor: id,
+    nome: texto(bruto.razao) ?? texto(bruto.fantasia) ?? `Fornecedor ${id}`,
+    nomeFantasia: texto(bruto.fantasia),
+    cpfCnpj: texto(bruto.cnpj_cpf) ?? texto(bruto.cpf_cnpj),
+    tipoPessoa: texto(bruto.tipo_pessoa),
+    email: texto(bruto.email),
+    telefone: texto(bruto.celular) ?? texto(bruto.telefone),
+    cidadeIxc: Number(bruto.cidade) || null,
+    ativo: true,
+    banco: null,
+    agencia: null,
+    conta: null,
+    chavePix: null,
+    tipoChavePix: null,
+  };
 }
 
 /** Dígitos do CPF/CNPJ de um fornecedor cru, seja qual for o nome da coluna. */

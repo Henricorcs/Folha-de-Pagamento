@@ -161,3 +161,15 @@ export class VincularFornecedorIxcDto {
 export class QueryFornecedorIxcDto {
   @IsString() @MinLength(3) cpfCnpj!: string;
 }
+
+/** O que a tela pode mudar no cadastro de fornecedor do próprio IXC. */
+export class EditarFornecedorIxcDto {
+  /**
+   * Como a pessoa é conhecida ("Deda pedreiro"). Texto vazio limpa o apelido,
+   * que é uma edição legítima — por isso não há `MinLength` aqui.
+   *
+   * O teto é a largura usual da coluna no IXC; quem manda a palavra final sobre
+   * o que cabe é ele, e a recusa dele sobe para a tela.
+   */
+  @IsOptional() @IsString() @MaxLength(150) nomeFantasia?: string;
+}

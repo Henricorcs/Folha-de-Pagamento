@@ -12,6 +12,7 @@ import {
   mapFornecedorParaPessoa,
   mapLinhaDadosBancarios,
   mascararDocumento,
+  montarEdicaoFornecedor,
   montarUpdateDiaristaDoFornecedor,
   montarUpdateDoFornecedor,
   parseValores,
@@ -609,5 +610,103 @@ describe('destinoDaChavePix', () => {
   it('sem tipo definido, usa a coluna genérica', () => {
     const misto = { id: '1', chave_pix: null, pix_celular: null };
     expect(destinoDaChavePix(misto, null)?.campoChave).toBe('chave_pix');
+  });
+});
+
+/**
+ * Gravar o nome fantasia é um `PUT`, e o `PUT` do webservice reescreve a linha
+ * inteira. O que este bloco protege:
+ *
+ *  - o cadastro volta completo — mandar só `{ fantasia }` não gravaria um
+ *    apelido, apagaria razão social, CPF e endereço do fornecedor;
+ *  - as colunas que este app não conhece voltam junto: são justamente as que
+ *    ninguém está olhando e que ninguém poderia repor;
+ *  - as datas voltam no formato que o IXC aceita na escrita, e não no que ele
+ *    usa na leitura.
+ */
+describe('montarEdicaoFornecedor', () => {
+  /** Fornecedor como o IXC devolve: datas em ISO e colunas de sobra. */
+  const NO_IXC = {
+    id: '196',
+    ativo: 'S',
+    tipo_pessoa: 'J',
+    razao: 'Marco Aurélio Castro',
+    fantasia: '',
+    cpf_cnpj: '12.345.678/0001-00',
+    ie_rg: '123456',
+    contribuinte_icms: 'N',
+    id_class_iss: '4',
+    endereco: 'Rua das Flores, 100',
+    data: '2024-03-07',
+    ultima_alteracao: '2026-08-15 14:32:10',
+  };
+
+  it('grava o fantasia sem perder o resto do cadastro', () => {
+    const p = montarEdicaoFornecedor(NO_IXC, { nomeFantasia: 'Marcão' });
+
+    expect(p.fantasia).toBe('Marcão');
+    expect(p).toMatchObject({
+      razao: 'Marco Aurélio Castro',
+      cpf_cnpj: '12.345.678/0001-00',
+      ie_rg: '123456',
+      contribuinte_icms: 'N',
+      endereco: 'Rua das Flores, 100',
+      // Copiada de outro fornecedor quando o cadastro nasceu daqui; perdê-la
+      // deixaria o fornecedor sem um campo que o IXC exige.
+      id_class_iss: '4',
+    });
+  });
+
+  /** A coluna que este app nunca ouviu falar é a que mais precisa voltar. */
+  it('devolve também as colunas que este app não conhece', () => {
+    const p = montarEdicaoFornecedor(
+      { ...NO_IXC, coluna_nova_do_ixc: 'algum valor' },
+      { nomeFantasia: 'Marcão' },
+    );
+
+    expect(p.coluna_nova_do_ixc).toBe('algum valor');
+  });
+
+  it('converte as datas para o formato que o IXC aceita', () => {
+    const p = montarEdicaoFornecedor(NO_IXC, { nomeFantasia: 'Marcão' });
+
+    expect(p.data).toBe('07/03/2024');
+    // Data e hora: a hora fica onde estava.
+    expect(p.ultima_alteracao).toBe('15/08/2026 14:32:10');
+  });
+
+  /** `0000-00-00` é o "vazio" do MySQL, não uma data: traduzi-la não ajuda. */
+  it('não mexe em data zerada', () => {
+    const p = montarEdicaoFornecedor(
+      { ...NO_IXC, data_nascimento: '0000-00-00' },
+      { nomeFantasia: 'Marcão' },
+    );
+
+    expect(p.data_nascimento).toBe('0000-00-00');
+  });
+
+  /** Documento e telefone não são data, por mais dígito que tenham. */
+  it('deixa em paz o que não é data', () => {
+    const p = montarEdicaoFornecedor(NO_IXC, { nomeFantasia: 'Marcão' });
+
+    expect(p.cpf_cnpj).toBe('12.345.678/0001-00');
+    expect(p.id).toBe('196');
+  });
+
+  it('apagar o apelido é uma edição como outra qualquer', () => {
+    const p = montarEdicaoFornecedor(
+      { ...NO_IXC, fantasia: 'Marcão' },
+      { nomeFantasia: '   ' },
+    );
+
+    expect(p.fantasia).toBe('');
+    expect(p.razao).toBe('Marco Aurélio Castro');
+  });
+
+  /** Sem mudança nenhuma, o cadastro volta como estava. */
+  it('não inventa fantasia quando não foi pedida mudança', () => {
+    const p = montarEdicaoFornecedor({ ...NO_IXC, fantasia: 'Marcão' }, {});
+
+    expect(p.fantasia).toBe('Marcão');
   });
 });

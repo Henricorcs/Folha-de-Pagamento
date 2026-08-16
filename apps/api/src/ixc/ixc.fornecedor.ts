@@ -234,6 +234,59 @@ export function mapFornecedorParaPessoa(
   };
 }
 
+/** O que se pode mudar no cadastro de fornecedor do IXC a partir daqui. */
+export interface EdicaoDoFornecedor {
+  /**
+   * Como a pessoa é conhecida no dia a dia ("Deda pedreiro"). Texto vazio
+   * limpa o campo — apagar o apelido é uma edição como outra qualquer.
+   */
+  nomeFantasia?: string;
+}
+
+/**
+ * Monta o corpo do `PUT /fornecedor/:id`: o registro que está lá, inteiro, com
+ * as mudanças por cima.
+ *
+ * O `PUT` do webservice **reescreve a linha**. Mandar só `{ fantasia }` não
+ * gravaria um apelido — apagaria razão social, CPF, endereço e a classificação
+ * de ISS do fornecedor de uma vez, e o estrago só apareceria no dia em que
+ * alguém fosse pagá-lo. É a mesma razão pela qual a edição de título devolve o
+ * registro completo (ver `montarEdicao`, em `pagamentos.service`).
+ *
+ * Por isso aqui se copia **tudo** o que o IXC devolveu, inclusive as colunas
+ * que este app não conhece: são justamente elas que ninguém está olhando e que
+ * ninguém poderia repor.
+ */
+export function montarEdicaoFornecedor(
+  atual: Record<string, unknown>,
+  mudancas: EdicaoDoFornecedor,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  for (const [coluna, valor] of Object.entries(atual)) {
+    payload[coluna] = typeof valor === 'string' ? dataParaEscrita(valor) : valor;
+  }
+
+  if (mudancas.nomeFantasia !== undefined) {
+    payload.fantasia = mudancas.nomeFantasia.trim();
+  }
+  return payload;
+}
+
+/**
+ * "AAAA-MM-DD" (como o IXC devolve na leitura) → "DD/MM/AAAA" (como ele aceita
+ * na escrita), preservando a hora quando o valor a tem.
+ *
+ * Devolver a data no formato da leitura seria devolvê-la errada: é o mesmo
+ * desencontro que a edição de título já trata. Data zerada (`0000-00-00`, o
+ * "vazio" do MySQL) passa intocada — ela não é uma data, e traduzi-la só
+ * trocaria um valor inválido por outro.
+ */
+function dataParaEscrita(valor: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(.*)$/.exec(valor);
+  if (!m || m[2] === '00' || m[3] === '00') return valor;
+  return `${m[3]}/${m[2]}/${m[1]}${m[4]}`;
+}
+
 /**
  * Aplica uma regra sobre os fornecedores lidos do IXC e devolve quem casou,
  * junto do campo efetivamente usado.

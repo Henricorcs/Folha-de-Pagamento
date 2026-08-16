@@ -27,6 +27,7 @@ import type {
   ConfigFinanceira,
   ConsultaCpfCnpj,
   FormaPagamento,
+  FornecedorParaPagar,
   PaginaFornecedoresParaPagar,
   PagamentoAvulso,
 } from '../../lib/types';
@@ -133,6 +134,9 @@ export function Avulsos({ doIxc = false }: { doIxc?: boolean } = {}) {
   });
   const [aberto, setAberto] = useState<string | null>(null);
   const [pagando, setPagando] = useState<BeneficiarioAvulso | null>(null);
+  /** Fornecedor do IXC aberto para edição (só no modo `doIxc`). */
+  const [editandoFornecedor, setEditandoFornecedor] =
+    useState<FornecedorParaPagar | null>(null);
 
   /**
    * De qual lado esta tela está. A folha e o contas a pagar dividem as mesmas
@@ -205,6 +209,31 @@ export function Avulsos({ doIxc = false }: { doIxc?: boolean } = {}) {
       setErro(true);
       setFeedback(mensagemErro(err));
     },
+  });
+
+  /**
+   * Grava o nome fantasia no cadastro do IXC. É o apelido pelo qual a pessoa é
+   * conhecida — e é por ele que a busca desta tela passa a encontrá-la, aqui e
+   * lá.
+   */
+  const salvarFornecedorIxc = useMutation({
+    mutationFn: async (dados: { idFornecedor: number; nomeFantasia: string }) =>
+      (
+        await api.patch<FornecedorParaPagar>(
+          `/avulsos/fornecedores-ixc/${dados.idFornecedor}`,
+          { nomeFantasia: dados.nomeFantasia },
+        )
+      ).data,
+    onSuccess: (f) => {
+      void qc.invalidateQueries({ queryKey: ['fornecedores-ixc-avulsos'] });
+      setEditandoFornecedor(null);
+      avisar(
+        f.nomeFantasia
+          ? `${f.nome} agora é "${f.nomeFantasia}" no IXC.`
+          : `Apelido de ${f.nome} apagado no IXC.`,
+      );
+    },
+    onError: (err) => avisar(mensagemErro(err), true),
   });
 
   const pagamentos = useQuery({
@@ -670,7 +699,9 @@ export function Avulsos({ doIxc = false }: { doIxc?: boolean } = {}) {
           value={busca}
           onChange={(e) => setBusca(e.target.value)}
           placeholder={
-            doIxc ? 'Buscar no IXC pelo nome' : 'Buscar por nome ou documento'
+            doIxc
+              ? 'Buscar no IXC por nome ou apelido'
+              : 'Buscar por nome ou documento'
           }
           className="campo max-w-xs"
         />
@@ -728,8 +759,8 @@ export function Avulsos({ doIxc = false }: { doIxc?: boolean } = {}) {
                   <tr>
                     <td colSpan={4}>
                       <Vazio titulo="Ninguém com esse nome no IXC">
-                        A busca procura pela razão social do cadastro de
-                        fornecedores.
+                        A busca procura pela razão social e pelo nome fantasia
+                        do cadastro de fornecedores.
                       </Vazio>
                     </td>
                   </tr>
@@ -783,16 +814,25 @@ export function Avulsos({ doIxc = false }: { doIxc?: boolean } = {}) {
                       )}
                     </td>
                     <td className="td text-right">
-                      <button
-                        onClick={() => pagarDoIxc.mutate(f.idFornecedor)}
-                        disabled={pagarDoIxc.isPending}
-                        className="btn btn-p bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40"
-                      >
-                        {pagarDoIxc.isPending &&
-                        pagarDoIxc.variables === f.idFornecedor
-                          ? 'Abrindo…'
-                          : 'Pagar'}
-                      </button>
+                      <div className="flex justify-end gap-2">
+                        <button
+                          onClick={() => setEditandoFornecedor(f)}
+                          className="btn btn-neutro btn-p"
+                          title="Mudar o cadastro dele no IXC"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          onClick={() => pagarDoIxc.mutate(f.idFornecedor)}
+                          disabled={pagarDoIxc.isPending}
+                          className="btn btn-p bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40"
+                        >
+                          {pagarDoIxc.isPending &&
+                          pagarDoIxc.variables === f.idFornecedor
+                            ? 'Abrindo…'
+                            : 'Pagar'}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1109,7 +1149,111 @@ export function Avulsos({ doIxc = false }: { doIxc?: boolean } = {}) {
           }
         />
       )}
+
+      {editandoFornecedor && (
+        <FormularioFornecedorIxc
+          fornecedor={editandoFornecedor}
+          ocupado={salvarFornecedorIxc.isPending}
+          onCancelar={() => setEditandoFornecedor(null)}
+          onConfirmar={(nomeFantasia) =>
+            salvarFornecedorIxc.mutate({
+              idFornecedor: editandoFornecedor.idFornecedor,
+              nomeFantasia,
+            })
+          }
+        />
+      )}
     </Pagina>
+  );
+}
+
+/**
+ * Edita o cadastro do fornecedor no próprio IXC.
+ *
+ * Só o nome fantasia se escreve daqui — o resto está à vista para conferir que
+ * é esta a pessoa antes de mexer no cadastro dela. Razão social, documento e
+ * contato são o que identifica o fornecedor dentro do IXC e mudam a vida de
+ * quem emite nota contra ele; o apelido, não: ele existe justamente para quem
+ * procura a pessoa pelo nome de que se lembra.
+ */
+function FormularioFornecedorIxc({
+  fornecedor,
+  ocupado,
+  onCancelar,
+  onConfirmar,
+}: {
+  fornecedor: FornecedorParaPagar;
+  ocupado: boolean;
+  onCancelar: () => void;
+  onConfirmar: (nomeFantasia: string) => void;
+}) {
+  const [fantasia, setFantasia] = useState(fornecedor.nomeFantasia ?? '');
+  const mudou = fantasia.trim() !== (fornecedor.nomeFantasia ?? '').trim();
+
+  return (
+    <Janela
+      titulo={`Editar no IXC — ${fornecedor.nome}`}
+      onFechar={onCancelar}
+    >
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Campo label="Fantasia (como é conhecido)" span2>
+          <input
+            value={fantasia}
+            onChange={(e) => setFantasia(e.target.value)}
+            className="campo"
+            placeholder="Ex.: Deda pedreiro"
+            autoFocus
+          />
+          <p className="ajuda">
+            É por aqui que a busca desta tela passa a achar a pessoa, além da
+            razão social. Vazio apaga o apelido no IXC.
+          </p>
+        </Campo>
+      </div>
+
+      {/*
+       * O que o IXC já tem, só para conferir. Não é editável de propósito:
+       * trocar razão social ou documento de um fornecedor é mexer no que a
+       * contabilidade usa para emitir nota, e isso se faz no IXC, com quem
+       * responde por aquele cadastro olhando.
+       */}
+      <dl className="mt-5 grid grid-cols-1 gap-x-6 gap-y-3 border-t border-tinta-100 pt-4 text-sm sm:grid-cols-2">
+        <Conferir titulo="Razão social / Nome">{fornecedor.nome}</Conferir>
+        <Conferir titulo="CPF / CNPJ">{fornecedor.cpfCnpj}</Conferir>
+        <Conferir titulo="E-mail">{fornecedor.email}</Conferir>
+        <Conferir titulo="Telefone">{fornecedor.telefone}</Conferir>
+        <Conferir titulo="Código no IXC">#{fornecedor.idFornecedor}</Conferir>
+      </dl>
+
+      <div className="mt-5 flex flex-wrap gap-3 border-t border-tinta-100 pt-4">
+        <button
+          onClick={() => onConfirmar(fantasia)}
+          disabled={!mudou || ocupado}
+          className="btn btn-primario"
+        >
+          {ocupado ? 'Salvando no IXC…' : 'Salvar no IXC'}
+        </button>
+        <button onClick={onCancelar} className="btn btn-neutro">
+          Cancelar
+        </button>
+      </div>
+    </Janela>
+  );
+}
+
+/** Um dado do cadastro do IXC mostrado só para conferência. */
+function Conferir({
+  titulo,
+  children,
+}: {
+  titulo: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs text-tinta-400">{titulo}</dt>
+      <dd className="truncate text-tinta-700">{children || '—'}</dd>
+    </div>
   );
 }
 
@@ -1393,7 +1537,7 @@ function FormularioPagamento({
             ))}
           </select>
           <p className="ajuda">
-            É por ela que o painel separa os gastos. Fica guardada aqui — o IXC
+            É por ela que o dashboard separa os gastos. Fica guardada aqui — o IXC
             não tem onde recebê-la.
           </p>
         </Campo>

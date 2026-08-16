@@ -15,6 +15,7 @@ import type { Request } from 'express';
 import { AvulsosService } from './avulsos.service';
 import {
   CriarBeneficiarioDto,
+  EditarFornecedorIxcDto,
   PagarAvulsoDto,
   QueryFornecedorIxcDto,
   QueryPagamentosAvulsosDto,
@@ -72,6 +73,22 @@ export class AvulsosController {
       page: Number(page) || 1,
       porPagina: Number(porPagina) || 25,
     });
+  }
+
+  /**
+   * Muda o cadastro do fornecedor lá no IXC — hoje, o nome fantasia.
+   *
+   * Escreve num registro que não nasceu aqui, e é essa a intenção: o apelido
+   * pelo qual a pessoa é conhecida faltava no cadastro dela, e passar a
+   * preenchê-lo daqui evita abrir o IXC só para isso.
+   */
+  @Patch('fornecedores-ixc/:id')
+  @HttpCode(200)
+  editarFornecedorDoIxc(
+    @Param('id') id: string,
+    @Body() dto: EditarFornecedorIxcDto,
+  ) {
+    return this.service.editarFornecedorDoIxc(Number(id), dto);
   }
 
   /** O cadastro daqui para um fornecedor do IXC — cria na primeira vez. */
