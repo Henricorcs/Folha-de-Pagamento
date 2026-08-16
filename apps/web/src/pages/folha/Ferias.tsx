@@ -524,7 +524,7 @@ function TabelaDaFila({
     <div className="overflow-x-auto rolagem-fina">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-t border-tinta-100">
+          <tr className="border-t border-tinta-200">
             <th className="th w-10">#</th>
             <th className="th">Empregado</th>
             <th className="th">Período aquisitivo</th>
@@ -612,7 +612,7 @@ function TabelaDeMarcadas({
     <div className="overflow-x-auto rolagem-fina">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-t border-tinta-100">
+          <tr className="border-t border-tinta-200">
             <th className="th">Empregado</th>
             <th className="th">Saída</th>
             <th className="th">Último dia</th>

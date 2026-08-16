@@ -502,7 +502,7 @@ function hojeISO(): string {
 
 function Dado({ rotulo, children }: { rotulo: string; children: ReactNode }) {
   return (
-    <div className="border-b border-tinta-100 py-2.5 last:border-0">
+    <div className="item-dividido py-2.5">
       <div className="text-xs text-tinta-400">{rotulo}</div>
       <div className="text-sm text-tinta-800">{children}</div>
     </div>

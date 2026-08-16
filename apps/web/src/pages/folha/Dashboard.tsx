@@ -566,7 +566,7 @@ export function Dashboard() {
                 <div className="overflow-x-auto rolagem-fina">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-t border-tinta-100">
+                      <tr className="border-t border-tinta-200">
                         <th className="th">Beneficiário</th>
                         <th className="th">Tipo</th>
                         <th className="th">Competência</th>
@@ -659,7 +659,7 @@ function DetalheDoCartao({
       <p className="mb-4 text-sm leading-relaxed text-tinta-500">{cartao.nota}</p>
 
       {linhas.length > 0 && (
-        <div className="divide-y divide-tinta-100">
+        <div className="lista-dividida">
           {linhas.map((l) => (
             <div
               key={l.rotulo}

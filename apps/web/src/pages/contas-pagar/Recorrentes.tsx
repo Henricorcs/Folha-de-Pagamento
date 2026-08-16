@@ -171,7 +171,27 @@ export function Recorrentes() {
           </Vazio>
         ) : (
           <div className="overflow-x-auto rolagem-fina">
-            <table className="w-full text-sm">
+            {/*
+             * Larguras fixas, e não o cálculo automático do navegador.
+             *
+             * Em tabela automática a folga da tela inteira vai parar na coluna
+             * de conteúdo mais largo — aqui, a do fornecedor. O resultado era um
+             * vão de uns quatrocentos pixels entre o nome e o valor: as colunas
+             * viravam ilhas separadas por vazio, e seguir uma linha da esquerda
+             * até a direita virava trabalho.
+             *
+             * Repartida assim, a folga é dividida entre todas e cada coluna fica
+             * do tamanho do que carrega. O `min-w` é o que faz a tabela rolar em
+             * tela estreita em vez de espremer tudo.
+             */}
+            <table className="w-full min-w-[920px] table-fixed text-sm">
+              <colgroup>
+                <col className="w-[32%]" />
+                <col className="w-[11%]" />
+                <col className="w-[13%]" />
+                <col className="w-[26%]" />
+                <col className="w-[18%]" />
+              </colgroup>
               <thead>
                 <tr>
                   <th className="th">Fornecedor</th>

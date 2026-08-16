@@ -166,10 +166,34 @@
     @apply whitespace-nowrap px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.1em] text-tinta-400;
   }
   .td {
-    @apply px-3 py-2.5 align-middle text-tinta-700;
+    @apply px-3 py-3 align-middle text-tinta-700;
   }
+  /*
+   * O fio que separa uma linha da outra é `tinta-200`, e não `tinta-100`, por
+   * um motivo medido: no tema escuro `tinta-100` é rgb(28,39,61) e o cartão
+   * embaixo dele é rgb(23,33,54) — cinco pontos de diferença. A linha estava
+   * lá, pintada quase na cor do fundo, e numa tabela de linhas altas (cada
+   * item com nome, observação e selos) não dava para dizer onde um item
+   * acabava e o outro começava.
+   *
+   * `tinta-200` é o mesmo tom das bordas de campo e de botão, que se lêem nos
+   * dois temas — é a espessura de contraste que uma divisória precisa ter.
+   * `tinta-100` continua servindo ao que ele faz bem: contorno de caixa e
+   * fundo de superfície discreta.
+   */
   .linha {
-    @apply border-t border-tinta-100 transition-colors hover:bg-tinta-50/70;
+    @apply border-t border-tinta-200 transition-colors hover:bg-tinta-50/70;
+  }
+  /*
+   * A mesma divisória para as listas que não são tabela — as de `divide-y` e
+   * as de `border-b … last:border-0`. Elas separam item de item igual, e sem
+   * isto a correção valeria só para metade das telas.
+   */
+  .lista-dividida {
+    @apply divide-y divide-tinta-200;
+  }
+  .item-dividido {
+    @apply border-b border-tinta-200 last:border-0;
   }
   /*
    * Linha marcada: um véu da cor da marca e uma faixa na borda esquerda.

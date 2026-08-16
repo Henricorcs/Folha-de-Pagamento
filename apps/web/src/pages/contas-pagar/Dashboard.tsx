@@ -597,7 +597,7 @@ function FilaDePagamento({
   }
 
   return (
-    <div className="divide-y divide-tinta-100">
+    <div className="lista-dividida">
       {contas.map((c) => {
         const dias = c.diasParaVencer;
         const atrasada = dias !== null && dias < 0;

@@ -142,7 +142,7 @@ export function TornarRecorrente({
             {irmas.map((c) => (
               <div
                 key={c.idFnApagar}
-                className="flex items-center justify-between gap-3 border-b border-tinta-100 px-3 py-1.5 text-sm last:border-0"
+                className="item-dividido flex items-center justify-between gap-3 px-3 py-1.5 text-sm"
               >
                 <span className="num text-tinta-600">
                   {c.vencimento ? formatData(c.vencimento) : '—'}

@@ -95,7 +95,7 @@ export function Usuarios() {
           <div className="overflow-x-auto rolagem-fina">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-t border-tinta-100">
+                <tr className="border-t border-tinta-200">
                   <th className="th">Pessoa</th>
                   <th className="th">Perfil</th>
                   <th className="th">Criado em</th>

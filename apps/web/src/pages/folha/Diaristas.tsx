@@ -758,7 +758,7 @@ export function Diaristas() {
             <div className="overflow-x-auto rolagem-fina">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-t border-tinta-100">
+                  <tr className="border-t border-tinta-200">
                     <th className="th">Data</th>
                     <th className="th">Serviço</th>
                     <th className="th text-right">Valor</th>
@@ -939,7 +939,7 @@ function AssinaturasPendentes({
       <div className="overflow-x-auto rolagem-fina">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-t border-tinta-100">
+            <tr className="border-t border-tinta-200">
               <th className="th">Data</th>
               <th className="th">Quem recebeu</th>
               <th className="th text-right">Valor</th>
@@ -1064,7 +1064,7 @@ function DiariasTravadas({
       <div className="overflow-x-auto rolagem-fina">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-t border-tinta-100">
+            <tr className="border-t border-tinta-200">
               <th className="th">Diarista</th>
               <th className="th">Data</th>
               <th className="th">Serviço</th>

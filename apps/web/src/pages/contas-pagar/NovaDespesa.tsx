@@ -459,7 +459,7 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
                   <button
                     key={f.idFornecedor}
                     onClick={() => setFornecedor(f)}
-                    className="flex w-full items-center justify-between gap-3 border-b border-tinta-100 px-4 py-2.5 text-left last:border-0 hover:bg-tinta-50"
+                    className="item-dividido flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left hover:bg-tinta-50"
                   >
                     <span className="min-w-0">
                       <span className="block truncate text-sm text-tinta-800">

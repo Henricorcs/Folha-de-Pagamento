@@ -157,7 +157,7 @@ export function FuncionarioDetalhe() {
               <div className="overflow-x-auto rolagem-fina">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-t border-tinta-100">
+                    <tr className="border-t border-tinta-200">
                       <th className="th">Data</th>
                       <th className="th">Descrição</th>
                       <th className="th text-right">Valor</th>
