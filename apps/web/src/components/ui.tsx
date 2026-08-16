@@ -1,5 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { formatNumeroBR, parseValorBR } from '../lib/format';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { formatNumeroBR } from '../lib/format';
 
 /**
  * Peças compartilhadas da interface. A regra da casa: o número é o herói —
@@ -7,19 +13,38 @@ import { formatNumeroBR, parseValorBR } from '../lib/format';
  */
 
 /**
- * Campo de dinheiro. É `text` de propósito: `input type="number"` não entende
- * o formato que a gente escreve e cola do IXC ("2.107,03") — o navegador
- * devolvia string vazia e o valor sumia sem avisar ninguém.
+ * Quantos dígitos o campo aceita: até R$ 99.999.999.999,99. Bem acima de
+ * qualquer conta desta casa, e longe do ponto em que o JavaScript começa a
+ * perder centavo em número inteiro.
+ */
+const MAX_DIGITOS = 13;
+
+/**
+ * Campo de dinheiro, com a máscara se montando enquanto se digita: os dígitos
+ * entram pela direita e o ponto de milhar e a vírgula aparecem sozinhos —
+ * 5 vira "0,05", 500 vira "5,00", 5000100 vira "50.001,00".
  *
- * Entra do jeito que vier (ponto de milhar, vírgula, "R$", ponto decimal) e
- * sai sempre canônico — ponto decimal, como a API espera. Ao sair do campo, o
- * que ficou valendo aparece formatado, para conferir antes de salvar.
+ * Antes o campo só se formatava ao perder o foco, e no meio da digitação
+ * mostrava "50001" cru. Num sistema de pagamento é justamente aí que o erro
+ * mora: "50001" tanto pode ser cinquenta mil e um reais quanto quinhentos
+ * reais e um centavo, e quem confere um lote de contas não tem como saber
+ * qual dos dois vai sair — o número só se revelava depois de sair do campo.
+ * Com a máscara, o que está escrito é sempre o que vai ser pago.
+ *
+ * É `text` de propósito: `input type="number"` não aceita ponto de milhar nem
+ * vírgula, e o navegador devolvia string vazia — o valor sumia sem avisar
+ * ninguém.
+ *
+ * O que se cola continua funcionando, e pelo mesmo caminho: de "R$ 2.107,03",
+ * "2.107,03" ou "2107.03" sobram os dígitos "210703", que é exatamente o que
+ * alguém teclaria. Valor vindo do IXC sempre traz as duas casas, então colar e
+ * digitar dão o mesmo resultado.
  */
 export function CampoDinheiro({
   valor,
   onChange,
   className = 'campo',
-  placeholder,
+  placeholder = '0,00',
 }: {
   /** Valor canônico: "2107.03" ou "" quando vazio. */
   valor: string;
@@ -27,48 +52,81 @@ export function CampoDinheiro({
   className?: string;
   placeholder?: string;
 }) {
-  const [texto, setTexto] = useState(() => paraExibicao(valor));
+  /** O que está escrito, guardado como os dígitos que o compõem. */
+  const [digitos, setDigitos] = useState(() => digitosDoValor(valor));
   const emitido = useRef(valor);
+  const campo = useRef<HTMLInputElement>(null);
 
   // Valor que não saiu daqui veio de fora (recarregou o cadastro, recalculou a
-  // folha): aí sim reescreve o campo. Enquanto se digita, o que está na tela é
-  // o que a pessoa escreveu — nada de reformatar embaixo do cursor.
+  // folha): aí sim reescreve o campo.
   useEffect(() => {
     if (valor === emitido.current) return;
     emitido.current = valor;
-    setTexto(paraExibicao(valor));
+    setDigitos(digitosDoValor(valor));
   }, [valor]);
 
-  function emitir(digitado: string) {
-    setTexto(digitado);
-    const n = parseValorBR(digitado);
-    const canonico = n === null ? '' : String(n);
+  /*
+   * O cursor fica sempre no fim.
+   *
+   * Numa máscara que se monta pela direita, cada tecla empurra tudo uma casa —
+   * o "1" digitado com o cursor no meio de "50.001,00" não entra onde o cursor
+   * está, entra nos centavos. Deixar o cursor onde ele caiu daria a impressão
+   * de que dá para editar no meio, e o valor sairia diferente do que a pessoa
+   * pensou ter escrito.
+   */
+  useLayoutEffect(() => {
+    const el = campo.current;
+    if (!el || document.activeElement !== el) return;
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [digitos]);
+
+  function aoDigitar(bruto: string) {
+    const novos = somenteDigitosSignificativos(bruto);
+    setDigitos(novos);
+
+    // Canônico com as duas casas, que é o que a API espera. Vazio continua
+    // vazio: campo em branco não é zero, é "não preenchido".
+    const canonico = novos ? (Number(novos) / 100).toFixed(2) : '';
     emitido.current = canonico;
     onChange(canonico);
   }
 
   return (
     <input
+      ref={campo}
       type="text"
-      inputMode="decimal"
-      value={texto}
+      // Só dígitos são teclados aqui, então o celular abre o teclado numérico
+      // em vez do de decimais com vírgula que ninguém precisa mais usar.
+      inputMode="numeric"
+      value={digitos ? formatNumeroBR(Number(digitos) / 100) : ''}
       placeholder={placeholder}
       className={className}
-      onChange={(e) => emitir(e.target.value)}
-      onBlur={() => {
-        // Mostra o que ficou valendo, para conferir antes de salvar.
-        const n = parseValorBR(texto);
-        setTexto(n === null ? '' : formatNumeroBR(n));
-      }}
+      onChange={(e) => aoDigitar(e.target.value)}
+      onFocus={(e) =>
+        e.target.setSelectionRange(e.target.value.length, e.target.value.length)
+      }
     />
   );
 }
 
-/** Canônico ("2107.03") → o que se lê no campo ("2.107,03"). */
-function paraExibicao(valor: string): string {
-  if (!valor) return '';
+/**
+ * Os dígitos que importam do que foi digitado ou colado.
+ *
+ * Os zeros da frente saem para o campo poder ser esvaziado: apagando "0,05"
+ * até o fim sobra "00", e sem essa limpeza ele empacaria em "0,00" para
+ * sempre, sem deixar voltar ao branco.
+ */
+function somenteDigitosSignificativos(bruto: string): string {
+  return bruto.replace(/\D/g, '').replace(/^0+/, '').slice(0, MAX_DIGITOS);
+}
+
+/** Canônico ("2107.03") → os dígitos que o escrevem ("210703"). */
+function digitosDoValor(valor: string): string {
   const n = Number(valor);
-  return Number.isFinite(n) ? formatNumeroBR(n) : '';
+  if (!valor || !Number.isFinite(n)) return '';
+  // Arredondar antes é obrigatório: 2107.03 * 100 dá 210702.99999… em ponto
+  // flutuante, e truncar isso comeria um centavo.
+  return somenteDigitosSignificativos(String(Math.round(Math.abs(n) * 100)));
 }
 
 export function Pagina({ children }: { children: ReactNode }) {
