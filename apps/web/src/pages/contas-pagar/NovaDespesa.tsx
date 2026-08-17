@@ -188,6 +188,25 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
     retry: 0,
   });
 
+  /**
+   * O dia em que o dinheiro saiu passa a valer como emissão e vencimento.
+   *
+   * Uma conta paga antes de existir no IXC é registro retroativo: ela não tem
+   * um vencimento futuro a esperar nem uma emissão em outro dia — as três datas
+   * são o mesmo dia, o do extrato. Deixá-las em "hoje" faria a conta nascer
+   * quitada com data de vencimento posterior ao próprio pagamento, e é isso que
+   * o fechamento do mês não perdoa.
+   *
+   * Vale no momento da escolha, e não como amarra permanente: quem precisar de
+   * uma emissão diferente ainda pode digitá-la depois.
+   */
+  function datarComoPaga(dia: string) {
+    setDataPagamento(dia);
+    if (!dia) return;
+    setEmissao(dia);
+    setVencimento(dia);
+  }
+
   const lancar = useMutation({
     mutationFn: async () => {
       const { data } = await api.post<DespesaLancada>(
@@ -617,12 +636,18 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
             onde o dinheiro saiu —, e separá-las fazia marcar a caixa sem olhar
             para a conta que ia ser debitada.
           */}
-          <label className="opcao mt-2.5" title="A conta é criada, aprovada e baixada como paga no IXC de uma vez">
+          <label
+            className="opcao mt-2.5"
+            title="A conta é criada, aprovada e baixada como paga no IXC de uma vez, e as três datas passam a ser o dia em que o dinheiro saiu"
+          >
             <input
               type="checkbox"
               className="marcador"
               checked={jaPaga}
-              onChange={(e) => setJaPaga(e.target.checked)}
+              onChange={(e) => {
+                setJaPaga(e.target.checked);
+                if (e.target.checked) datarComoPaga(dataPagamento);
+              }}
             />
             Já foi paga
           </label>
@@ -635,8 +660,9 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
                 id="data-pagamento"
                 type="date"
                 value={dataPagamento}
-                onChange={(e) => setDataPagamento(e.target.value)}
+                onChange={(e) => datarComoPaga(e.target.value)}
                 className="campo"
+                title="Vale também como emissão e vencimento"
               />
             </div>
           )}
