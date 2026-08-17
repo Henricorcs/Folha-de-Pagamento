@@ -51,6 +51,23 @@ export interface ResultadoDoPagamento {
 }
 
 /**
+ * O endpoint que quita uma conta a pagar no IXC — o "Baixa manual (Pagar)" da
+ * documentação do webservice.
+ *
+ * Era `fn_apagar_pagamentos_baixas`, que **não existe**. E o IXC não diz isso:
+ * para um recurso desconhecido ele responde "Recurso X não está disponível",
+ * mas para este ele responde "Erro inesperado, tente novamente!" — em qualquer
+ * chamada, até numa leitura. Pagamentos pararam nisso sem ninguém saber por
+ * quê, porque o motivo vinha num campo da resposta que não era lido e a tela
+ * mostrava só "HTTP 200".
+ *
+ * O número no nome é o id da tela no IXC, e vem assim da documentação — é o
+ * mesmo padrão de `botao_estornar_cancelamento_26200` e `baixar_comodato_23069`.
+ * Se um dia uma atualização do IXC mudar esse id, é esta linha que muda.
+ */
+const ENDPOINT_BAIXA = 'botao_pagar_26409';
+
+/**
  * Pagar uma conta do IXC daqui.
  *
  * São dois caminhos, e a diferença é de onde sai o dinheiro:
@@ -66,6 +83,7 @@ export interface ResultadoDoPagamento {
  * já está pago tiraria o dinheiro duas vezes do caixa, e é o erro mais caro
  * que esta tela pode cometer.
  */
+
 @Injectable()
 export class PagamentosService {
   private readonly logger = new Logger(PagamentosService.name);
@@ -216,7 +234,7 @@ export class PagamentosService {
 
     let recusa: string | null = null;
     try {
-      await this.ixc.create('fn_apagar_pagamentos_baixas', payloadDaBaixa);
+      await this.ixc.action(ENDPOINT_BAIXA, payloadDaBaixa);
     } catch (err) {
       /*
        * A recusa é anotada, não relançada aqui.
@@ -242,7 +260,6 @@ export class PagamentosService {
           `Enviado: ${JSON.stringify(payloadDaBaixa)}. ` +
           'Relendo o título para saber se ela pegou assim mesmo.',
       );
-      await this.logarBaixaModelo(payloadDaBaixa);
     }
 
     // A única pergunta que importa depois de mexer em dinheiro: a conta ficou
@@ -447,50 +464,6 @@ export class PagamentosService {
    * Só lê e só registra: nunca lança, porque isto roda depois de uma falha e
    * não pode virar uma segunda falha por cima dela.
    */
-  private async logarBaixaModelo(
-    enviado: Record<string, unknown>,
-  ): Promise<void> {
-    try {
-      const res = await this.ixc.list<Record<string, unknown>>(
-        'fn_apagar_pagamentos_baixas',
-        {
-          qtype: 'fn_apagar_pagamentos_baixas.id',
-          query: '0',
-          oper: '>',
-          rp: 1,
-          sortname: 'fn_apagar_pagamentos_baixas.id',
-          sortorder: 'desc',
-        },
-      );
-      const modelo = res.registros[0];
-      if (!modelo) {
-        this.logger.warn(
-          'Nenhuma baixa anterior no IXC para comparar — a tabela está vazia.',
-        );
-        return;
-      }
-
-      // O que existe lá e não sai daqui é a lista de suspeitos.
-      const nossos = new Set(Object.keys(enviado));
-      const faltando = Object.entries(modelo)
-        .filter(([coluna]) => !nossos.has(coluna))
-        .filter(([, valor]) => String(valor ?? '').trim())
-        .map(([coluna, valor]) => `${coluna}=${String(valor)}`);
-
-      this.logger.warn(
-        `Baixa que o IXC aceitou (#${String(modelo.id)}): ${JSON.stringify(modelo)}`,
-      );
-      this.logger.warn(
-        faltando.length
-          ? `Colunas preenchidas nela que não mandamos: ${faltando.join(', ')}`
-          : 'Ela não tem nenhuma coluna preenchida além das que mandamos.',
-      );
-    } catch (err) {
-      const motivo = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Não deu para ler uma baixa modelo do IXC: ${motivo}`);
-    }
-  }
-
   /** Um passo de auditoria no IXC: aprovar ou reprovar com o motivo. */
   private async auditar(
     idFnApagar: number,

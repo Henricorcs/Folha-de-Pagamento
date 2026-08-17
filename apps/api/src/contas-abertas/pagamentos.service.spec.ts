@@ -74,10 +74,13 @@ function montarServico(
     }),
     create: jest.fn(async (recurso: string, payload: Record<string, unknown>) => {
       criados.push({ recurso, payload });
-      if (opts.recusaABaixa && recurso === 'fn_apagar_pagamentos_baixas') {
-        throw new Error(opts.recusaABaixa);
-      }
       return { id: 1, raw: {} };
+    }),
+    // A baixa vai pelo endpoint de botão do IXC, não pelo CRUD.
+    action: jest.fn(async (recurso: string, payload: Record<string, unknown>) => {
+      criados.push({ recurso, payload });
+      if (opts.recusaABaixa) throw new Error(opts.recusaABaixa);
+      return {};
     }),
   };
 
@@ -121,7 +124,7 @@ describe('PagamentosService.pagar', () => {
 
     expect(criados.map((c) => c.recurso)).toEqual([
       'fn_apagar_auditoria',
-      'fn_apagar_pagamentos_baixas',
+      'botao_pagar_26409',
     ]);
     const baixa = criados[1].payload;
     expect(baixa).toMatchObject({
@@ -196,7 +199,7 @@ describe('PagamentosService.pagar', () => {
     const r = await service.pagar(4242, { contaPagamento: CFG.contaPagamentoCaixaId });
 
     expect(r.aprovada).toBe(true);
-    expect(criados.map((c) => c.recurso)).toEqual(['fn_apagar_pagamentos_baixas']);
+    expect(criados.map((c) => c.recurso)).toEqual(['botao_pagar_26409']);
   });
 
   it('paga o saldo em aberto, não o valor cheio do título', async () => {
@@ -282,7 +285,7 @@ describe('buildBaixaContaPagarPayload', () => {
  * da chamada, é o estado do título no IXC depois dela.
  */
 describe('PagamentosService.pagar — quando o IXC recusa a baixa', () => {
-  const RECUSA = 'IXC (/fn_apagar_pagamentos_baixas): recusou sem dizer o motivo (HTTP 200)';
+  const RECUSA = 'IXC (/botao_pagar_26409): recusou sem dizer o motivo (HTTP 200)';
 
   it('recusou mas quitou: vale como pago, com o aviso para ninguém repetir', async () => {
     const { service } = montarServico({ recusaABaixa: RECUSA });
