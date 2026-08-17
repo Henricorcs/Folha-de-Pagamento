@@ -201,23 +201,22 @@ export class PagamentosService {
 
     // Qualquer outra conta é dinheiro que sai por fora da integração — caixa,
     // outro banco, cartão. Aqui a baixa é a mesma que se daria à mão no IXC.
+    const payloadDaBaixa = buildBaixaContaPagarPayload({
+      idFnApagar,
+      contaPagamentoId,
+      contaContabilId,
+      filialId,
+      valor,
+      data: opcoes.data ? dataUtc(opcoes.data) : new Date(),
+      documento: textoOuNull(raw.documento),
+      historico:
+        opcoes.historico?.trim() ||
+        `Pagamento pelo ILNET FINANCE${usuarioNome ? ` (${usuarioNome})` : ''}`,
+    });
+
     let recusa: string | null = null;
     try {
-      await this.ixc.create(
-        'fn_apagar_pagamentos_baixas',
-        buildBaixaContaPagarPayload({
-          idFnApagar,
-          contaPagamentoId,
-          contaContabilId,
-          filialId,
-          valor,
-          data: opcoes.data ? dataUtc(opcoes.data) : new Date(),
-          documento: textoOuNull(raw.documento),
-          historico:
-            opcoes.historico?.trim() ||
-            `Pagamento pelo ILNET FINANCE${usuarioNome ? ` (${usuarioNome})` : ''}`,
-        }),
-      );
+      await this.ixc.create('fn_apagar_pagamentos_baixas', payloadDaBaixa);
     } catch (err) {
       /*
        * A recusa é anotada, não relançada aqui.
@@ -230,8 +229,17 @@ export class PagamentosService {
        * Quem decide se saiu é o próprio IXC, na leitura abaixo.
        */
       recusa = err instanceof Error ? err.message : String(err);
+      /*
+       * O que foi mandado vai para o log junto com a recusa.
+       *
+       * O IXC recusa esta chamada sem dizer por quê — HTTP 200, `type: error`,
+       * `message` vazia. Com só um dos lados da conversa registrado não há como
+       * descobrir qual campo ele não aceitou, e o caso não se reproduz fora da
+       * base real. Aqui não há segredo: são códigos de conta, valor e data.
+       */
       this.logger.warn(
         `Título ${idFnApagar}: o IXC recusou a baixa (${recusa}). ` +
+          `Enviado: ${JSON.stringify(payloadDaBaixa)}. ` +
           'Relendo o título para saber se ela pegou assim mesmo.',
       );
     }
