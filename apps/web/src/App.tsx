@@ -28,7 +28,7 @@ function Protegida({ children }: { children: ReactNode }) {
   const { usuario, carregando } = useAuth();
   if (carregando) {
     return (
-      <div className="flex h-screen items-center justify-center text-slate-400">
+      <div className="flex h-screen items-center justify-center bg-tinta-50 text-tinta-500">
         Carregando…
       </div>
     );

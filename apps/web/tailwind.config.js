@@ -54,6 +54,13 @@ export default {
          */
         papel: 'rgb(var(--papel) / <alpha-value>)',
         /**
+         * O fundo do campo de digitar. Tem cor própria porque precisa se
+         * distinguir do cartão e da página ao mesmo tempo — usar a de uma
+         * delas faz o campo sumir na outra.
+         */
+        campo: 'rgb(var(--campo) / <alpha-value>)',
+        'campo-foco': 'rgb(var(--campo-foco) / <alpha-value>)',
+        /**
          * A tinta escura que não vira do avesso: barra lateral, botão de ação,
          * fundo da tela de módulos. São superfícies que já eram escuras no tema
          * claro e continuam escuras no escuro — com texto branco em cima nos
