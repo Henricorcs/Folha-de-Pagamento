@@ -7,6 +7,8 @@ import { ContasAbertasController } from './contas-abertas.controller';
 import { ContasAbertasService } from './contas-abertas.service';
 import { DespesasController } from './despesas.controller';
 import { DespesasService } from './despesas.service';
+import { HistoricoPagamentosController } from './historico-pagamentos.controller';
+import { HistoricoPagamentosService } from './historico-pagamentos.service';
 import { PagamentosService } from './pagamentos.service';
 import { RecorrentesPollerService } from './recorrentes-poller.service';
 import { RecorrentesController } from './recorrentes.controller';
@@ -22,12 +24,19 @@ import { RecorrentesService } from './recorrentes.service';
     CategoriasController,
     DespesasController,
     RecorrentesController,
+    // As duas metades da mesma tabela do IXC: o que a empresa deve, e o
+    // histórico do que ela já pagou.
+    HistoricoPagamentosController,
   ],
   providers: [
     ContasAbertasService,
     CategoriasService,
     DespesasService,
+    // `PagamentosService` *paga* (aprova e dá baixa no IXC);
+    // `HistoricoPagamentosService` só *lê* o que já foi pago. Nomes parecidos,
+    // lados opostos: um escreve no IXC, o outro nunca.
     PagamentosService,
+    HistoricoPagamentosService,
     RecorrentesService,
     RecorrentesPollerService,
   ],

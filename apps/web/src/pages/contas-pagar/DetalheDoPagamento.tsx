@@ -1,0 +1,339 @@
+import { useQuery } from '@tanstack/react-query';
+import { useState, type ReactNode } from 'react';
+import { Carregando, Janela, Selo } from '../../components/ui';
+import { api, mensagemErro } from '../../lib/api';
+import { formatBRL, formatData } from '../../lib/format';
+import { TIPO_LABEL } from '../../lib/status';
+import type { DetalheDoTitulo, PagamentoFeito } from '../../lib/types';
+
+/**
+ * A ficha de um pagamento: quanto saiu, quando, de qual caixa — e, no fim, o
+ * registro do IXC por inteiro.
+ *
+ * A ordem é a de quem confere: primeiro o que se quer conferir (valor e dia),
+ * depois se o IXC confirma isso sem contradição, e só então os campos crus. Para
+ * um pagamento que fecha, as duas primeiras partes bastam e ninguém precisa
+ * descer; para o que não fecha, o campo que decidiu está logo abaixo, com o
+ * valor que veio do IXC — discordar deixa de ser palavra contra palavra.
+ */
+export function DetalheDoPagamento({
+  pagamento,
+  onFechar,
+}: {
+  pagamento: PagamentoFeito;
+  onFechar: () => void;
+}) {
+  const [copiado, setCopiado] = useState(false);
+  const [verTudo, setVerTudo] = useState(false);
+
+  // A mesma leitura crua da ficha do débito: é o mesmo título no IXC, pago em
+  // vez de aberto. Para um pagamento, o "por que ficou fora das contas em
+  // aberto" que ela devolve é exatamente a confirmação da baixa.
+  const detalhe = useQuery({
+    queryKey: ['conta-bruta', pagamento.idFnApagar],
+    queryFn: async () =>
+      (
+        await api.get<DetalheDoTitulo>(
+          `/contas-abertas/${pagamento.idFnApagar}/bruto`,
+        )
+      ).data,
+    retry: 0,
+  });
+
+  const campos = Object.entries(detalhe.data?.campos ?? {})
+    .map(([campo, valor]) => ({ campo, valor: String(valor ?? '') }))
+    .filter((c) => c.valor.trim() && c.valor.trim() !== '0')
+    .sort((a, b) => a.campo.localeCompare(b.campo));
+
+  async function copiar() {
+    await navigator.clipboard.writeText(
+      JSON.stringify(detalhe.data?.campos ?? {}, null, 2),
+    );
+    setCopiado(true);
+    setTimeout(() => setCopiado(false), 2500);
+  }
+
+  const extras = pagamento.juros + pagamento.multa;
+
+  return (
+    <Janela titulo="Detalhe do pagamento" onFechar={onFechar}>
+      <div className="p-5 sm:p-6">
+        {/* --- O que saiu, do tamanho de quem confere de longe --- */}
+        <div className="rounded-2xl bg-tinta-50 p-5">
+          <div className="text-sm text-tinta-500">Pago a</div>
+          <div className="font-display text-lg font-semibold text-tinta-900">
+            {pagamento.fornecedor.nome ||
+              `Fornecedor ${pagamento.fornecedor.id ?? '?'}`}
+          </div>
+          <div className="valor mt-2 text-3xl">
+            {formatBRL(pagamento.valorPago)}
+          </div>
+          <div className="num mt-0.5 text-sm text-tinta-500">
+            em {formatData(pagamento.pagoEm)}
+            {pagamento.formaPagamento ? ` · ${pagamento.formaPagamento}` : ''}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <PrazoDoPagamento pagamento={pagamento} />
+            {pagamento.parcial && (
+              <Selo
+                tom="atencao"
+                titulo="O título continua na lista de contas em aberto pelo que falta"
+              >
+                pagamento parcial
+              </Selo>
+            )}
+          </div>
+        </div>
+
+        {/* --- O IXC confirma? --- */}
+        <div className="mt-5">
+          {pagamento.conferencia.fecha ? (
+            <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+              O registro do IXC confirma este pagamento: título baixado, valor
+              batendo com o que era devido e sem marca de estorno.
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <p className="font-semibold">
+                O registro deste pagamento pede uma olhada:
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                {pagamento.conferencia.ressalvas.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-x-6 sm:grid-cols-2">
+          <Dado rotulo="Data do pagamento">
+            {formatData(pagamento.pagoEm)}
+            {/* De que coluna a data saiu não é detalhe técnico: é por ela que
+                se acha o título na tela do IXC. */}
+            <span className="num ml-1 text-xs text-tinta-400">
+              ({pagamento.campoDaBaixa})
+            </span>
+          </Dado>
+          <Dado rotulo="Vencimento">
+            {pagamento.vencimento
+              ? formatData(pagamento.vencimento)
+              : 'sem data no IXC'}
+          </Dado>
+          <Dado rotulo="Valor do título">{formatBRL(pagamento.valor)}</Dado>
+          <Dado rotulo="Saiu do caixa">{formatBRL(pagamento.valorPago)}</Dado>
+          {extras > 0 && (
+            <Dado rotulo="Juros e multa">
+              {formatBRL(extras)}
+              <span className="ml-1 text-xs text-tinta-400">
+                (o preço do atraso)
+              </span>
+            </Dado>
+          )}
+          {pagamento.desconto > 0 && (
+            <Dado rotulo="Desconto">{formatBRL(pagamento.desconto)}</Dado>
+          )}
+          {pagamento.parcial && (
+            <Dado rotulo="Ainda em aberto">
+              {formatBRL(pagamento.valorAberto)}
+            </Dado>
+          )}
+          <Dado rotulo="De onde saiu">
+            {pagamento.caixa.nome ??
+              (pagamento.caixa.id ? `caixa ${pagamento.caixa.id}` : '—')}
+          </Dado>
+          <Dado rotulo="Forma de pagamento">
+            {pagamento.formaPagamento ?? '—'}
+          </Dado>
+          <Dado rotulo="Documento">{pagamento.documento ?? '—'}</Dado>
+          <Dado rotulo="Título no IXC">nº {pagamento.idFnApagar}</Dado>
+          <Dado rotulo="Emissão">
+            {pagamento.emissao ? formatData(pagamento.emissao) : '—'}
+          </Dado>
+          <Dado rotulo="Categoria da despesa">
+            {pagamento.categoria.nome ??
+              (pagamento.categoria.id ? `conta ${pagamento.categoria.id}` : '—')}
+          </Dado>
+          <Dado rotulo="Classificação daqui">
+            {pagamento.classificacao?.nome ?? 'sem classificação'}
+          </Dado>
+          <Dado rotulo="Status no IXC">
+            {pagamento.statusEhDePago
+              ? `${pagamento.statusNoIxc} — pago`
+              : `${pagamento.statusNoIxc ?? '—'} (baixado mesmo assim)`}
+          </Dado>
+          <Dado rotulo="Auditoria">
+            {pagamento.statusAuditoria === 'A'
+              ? 'aprovada'
+              : pagamento.statusAuditoria === 'R'
+                ? 'reprovada'
+                : pagamento.statusAuditoria === 'C'
+                  ? 'cancelada'
+                  : 'não auditada'}
+          </Dado>
+          {pagamento.baixadoPor && (
+            <Dado rotulo="Baixado por">{pagamento.baixadoPor}</Dado>
+          )}
+        </div>
+
+        {pagamento.observacao && (
+          <div className="mt-4">
+            <div className="rotulo">Observação no IXC</div>
+            <p className="text-sm text-tinta-700">{pagamento.observacao}</p>
+          </div>
+        )}
+
+        {pagamento.origem && (
+          <div className="mt-4 rounded-xl bg-brand-50 px-4 py-3 text-sm text-brand-800">
+            Este pagamento nasceu no módulo Folha de Pagamento —{' '}
+            {TIPO_LABEL[pagamento.origem.tipo] ?? pagamento.origem.tipo}
+            {pagamento.origem.beneficiario
+              ? ` de ${pagamento.origem.beneficiario}`
+              : ''}
+            . É a mesma saída, não uma a mais.
+          </div>
+        )}
+
+        {/* --- O registro cru, para quem precisa cavar --- */}
+        <div className="mt-6 border-t border-tinta-100 pt-5">
+          <div className="rotulo">O que o IXC guarda deste título</div>
+
+          {detalhe.isLoading && <Carregando texto="Lendo o título no IXC…" />}
+
+          {detalhe.error && (
+            <p className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {mensagemErro(detalhe.error)}
+            </p>
+          )}
+
+          {detalhe.data && (
+            <>
+              <p className="mb-3 text-xs leading-relaxed text-tinta-500">
+                Os campos que decidem se um título ainda é dívida, com o valor
+                que veio do IXC — a mesma leitura da ficha do débito, do outro
+                lado.{' '}
+                {pagamento.parcial
+                  ? 'Neste aqui os dois convivem: a baixa confirma o que já saiu e o saldo mantém o título na lista de contas em aberto.'
+                  : 'É por eles que este título saiu da lista de contas em aberto.'}
+              </p>
+
+              <div className="overflow-hidden rounded-xl border border-tinta-100">
+                <table className="w-full text-sm">
+                  <tbody>
+                    {detalhe.data.filtro.olhou.map((c) => (
+                      <tr key={c.campo} className="linha">
+                        <td className="td num w-2/5 align-top text-xs text-tinta-500">
+                          {c.campo}
+                          <div className="mt-0.5 text-[11px] text-tinta-300">
+                            {c.nota}
+                          </div>
+                        </td>
+                        <td className="td break-all align-top font-semibold text-tinta-800">
+                          {c.valor}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  onClick={() => setVerTudo((v) => !v)}
+                  className="btn btn-sutil btn-p"
+                >
+                  {verTudo
+                    ? 'Esconder os demais campos'
+                    : `Ver todos os ${campos.length} campos do IXC`}
+                </button>
+                <button onClick={copiar} className="btn btn-neutro btn-p">
+                  {copiado ? 'Copiado!' : 'Copiar tudo'}
+                </button>
+              </div>
+
+              {verTudo && (
+                <div className="mt-3 max-h-[40vh] overflow-y-auto rolagem-fina rounded-xl border border-tinta-100">
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {campos.map(({ campo, valor }) => (
+                        <tr key={campo} className="linha">
+                          <td className="td num w-2/5 align-top text-xs text-tinta-500">
+                            {campo}
+                          </td>
+                          <td className="td break-all align-top text-tinta-800">
+                            {valor}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="mt-6 flex justify-end">
+          <button onClick={onFechar} className="btn btn-neutro">
+            Fechar
+          </button>
+        </div>
+      </div>
+    </Janela>
+  );
+}
+
+function Dado({ rotulo, children }: { rotulo: string; children: ReactNode }) {
+  return (
+    <div className="border-b border-tinta-100 py-2.5 last:border-0">
+      <div className="text-xs text-tinta-400">{rotulo}</div>
+      <div className="text-sm text-tinta-800">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Pagou em dia ou atrasado. É a régua da casa lida ao contrário da tela de
+ * contas em aberto: lá o verde é "ainda dá tempo", aqui é "saiu no prazo".
+ */
+export function PrazoDoPagamento({
+  pagamento,
+  pequeno = false,
+}: {
+  pagamento: PagamentoFeito;
+  pequeno?: boolean;
+}) {
+  const dias = pagamento.diasDeAtraso;
+
+  if (dias === null) {
+    return (
+      <Selo
+        pequeno={pequeno}
+        tom="neutro"
+        titulo="O título não tem vencimento no IXC, então não há como dizer se foi em dia"
+      >
+        sem vencimento
+      </Selo>
+    );
+  }
+  if (dias > 0) {
+    return (
+      <Selo pequeno={pequeno} tom="erro">
+        {dias === 1 ? 'pago 1 dia depois' : `pago ${dias} dias depois`}
+      </Selo>
+    );
+  }
+  if (dias === 0) {
+    return (
+      <Selo pequeno={pequeno} tom="pago">
+        pago no vencimento
+      </Selo>
+    );
+  }
+  const adiantado = Math.abs(dias);
+  return (
+    <Selo pequeno={pequeno} tom="pago">
+      {adiantado === 1 ? 'pago 1 dia antes' : `pago ${adiantado} dias antes`}
+    </Selo>
+  );
+}

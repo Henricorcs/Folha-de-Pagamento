@@ -73,13 +73,17 @@ const folha: Modulo = {
 const contasPagar: Modulo = {
   id: 'contas-pagar',
   nome: 'Contas a Pagar',
-  descricao: 'O que a empresa deve, direto do IXC: vencidas e a vencer',
+  descricao:
+    'O que a empresa deve e o que já pagou, direto do IXC: vencidas, a vencer e o histórico',
   base: '/contas-pagar',
   inicio: 'inicio',
   icone: IconeSaida,
   tom: 'bg-emerald-500/15 text-emerald-300',
   menu: [
     { to: 'inicio', label: 'Em aberto', icone: IconeSaida },
+    // As duas metades da mesma tabela do IXC, uma ao lado da outra: o que a
+    // empresa deve e o que ela já pagou.
+    { to: 'pagos', label: 'Já pagos', icone: IconeMoeda },
     { to: 'dashboard', label: 'Dashboard', icone: IconePainel },
     // Avulsos vive nos dois módulos, com os mesmos dados: é pagamento da
     // empresa (daqui) e é lançamento que a folha usa (de lá). Duplicar o

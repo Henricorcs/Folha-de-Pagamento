@@ -203,12 +203,30 @@ export function motivoDeNaoEstarAberto(
 }
 
 /**
+ * Os valores de `fn_apagar.status` que significam "esta conta foi paga".
+ *
+ * "F" vem primeiro porque é o desta base: são 34 mil títulos com ele, e "P" não
+ * aparece em nenhum — foi procurar só por "P" que fazia o painel dizer "R$ 0,00
+ * pago neste mês" com o mês inteiro já pago. "P" fica na lista porque é o código
+ * documentado e outras instalações do IXC o usam.
+ *
+ * Um título não tem dois status, então consultar os dois nunca conta duas vezes.
+ */
+export const STATUS_DE_PAGO = ['F', 'P'] as const;
+
+/** Se o `status` cru do IXC é um dos que dizem "pago". */
+export function statusDizPago(raw: Record<string, unknown>): boolean {
+  const status = String(raw.status ?? '').trim().toUpperCase();
+  return (STATUS_DE_PAGO as readonly string[]).includes(status);
+}
+
+/**
  * As colunas que marcam um título como baixado (quitado) no IXC.
  *
  * Lista fechada pelo mesmo motivo da de cancelamento: uma regra larga demais
  * já apagou quatrocentos títulos de dívida real da tela de uma vez.
  */
-const CAMPOS_DE_BAIXA = [
+export const CAMPOS_DE_BAIXA = [
   'data_pagamento',
   'data_baixa',
   'data_hora_baixa',
@@ -216,7 +234,7 @@ const CAMPOS_DE_BAIXA = [
 ] as const;
 
 /** A coluna que diz que este título já foi baixado, se houver. */
-function campoDeBaixa(raw: Record<string, unknown>): string | null {
+export function campoDeBaixa(raw: Record<string, unknown>): string | null {
   for (const campo of CAMPOS_DE_BAIXA) {
     if (temValorDeVerdade(raw[campo])) return campo;
   }
@@ -249,7 +267,10 @@ export function explicarFiltro(
     {
       campo: 'status',
       valor: texto('status') || '(vazio)',
-      nota: 'A = aberto · P = pago · C = cancelado',
+      // "F" vem escrito porque é o código de pago desta base — quem lê a ficha
+      // precisa reconhecer o que está vendo no campo, e "P = pago" sozinho fazia
+      // um título pago parecer estar num status desconhecido.
+      nota: 'A = aberto · F ou P = pago · C = cancelado',
     },
     {
       campo: 'liberado',
@@ -329,7 +350,7 @@ const CAMPOS_DE_DATA = [
  * Coluna vazia, `N`, zero e data zerada são o estado normal de quem nunca
  * cancelou nada — só valor de verdade conta.
  */
-function campoDeCancelamento(raw: Record<string, unknown>): string | null {
+export function campoDeCancelamento(raw: Record<string, unknown>): string | null {
   for (const campo of CAMPOS_DE_CANCELAMENTO) {
     if (temValorDeVerdade(raw[campo])) return campo;
   }
@@ -341,7 +362,7 @@ function campoDeCancelamento(raw: Record<string, unknown>): string | null {
  * e data zerada são o estado normal de quem nunca cancelou nem baixou nada —
  * o IXC preenche essas colunas assim quando o evento não aconteceu.
  */
-function temValorDeVerdade(valor: unknown): boolean {
+export function temValorDeVerdade(valor: unknown): boolean {
   const s = String(valor ?? '').trim().toUpperCase();
   if (!s || s === 'N' || s === '0' || s === 'NULL') return false;
   if (/^0000-00-00/.test(s) || /^00\/00\/0000/.test(s)) return false;
@@ -496,7 +517,7 @@ function diasEntre(hoje: Date, vencimento: Date): number {
 }
 
 /** O primeiro dos nomes conhecidos que tiver texto de verdade. */
-function primeiroTexto(
+export function primeiroTexto(
   raw: Record<string, unknown>,
   campos: string[],
 ): string | null {
@@ -508,7 +529,7 @@ function primeiroTexto(
 }
 
 /** O primeiro dos nomes conhecidos que tiver data válida. */
-function primeiraData(
+export function primeiraData(
   raw: Record<string, unknown>,
   campos: string[],
 ): Date | null {

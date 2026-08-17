@@ -8,6 +8,7 @@ import {
   explicarFiltro,
   mapContaAberta,
   motivoDeNaoEstarAberto,
+  STATUS_DE_PAGO,
   type AvaliacaoDoFiltro,
   ordenarPorUrgencia,
   resumirContasAbertas,
@@ -285,8 +286,12 @@ export class ContasAbertasService {
      * que fazia o painel dizer "R$ 0,00 pago neste mês" com o mês inteiro já
      * pago. Os dois são consultados; um título não tem dois status, então não
      * há risco de contar duas vezes.
+     *
+     * A lista mora no mapper, e não aqui, porque a tela de histórico de
+     * pagamentos precisa da mesma resposta: duas cópias dela discordando faria
+     * o total do mês no painel bater com uma tela e não com a outra.
      */
-    for (const status of ['F', 'P']) {
+    for (const status of STATUS_DE_PAGO) {
       for (let pagina = 1; pagina <= TETO_DE_PAGINAS_PAGAS; pagina++) {
         const res = await this.ixc.list<Record<string, unknown>>('fn_apagar', {
           qtype: 'fn_apagar.status',
@@ -503,7 +508,15 @@ export class ContasAbertasService {
     return [];
   }
 
-  private async nomesDasContasDeDespesa(): Promise<Map<number, string>> {
+  /**
+   * Nome das contas de despesa por código, guardado por alguns minutos.
+   *
+   * Público porque a tela de histórico de pagamentos precisa do mesmo índice —
+   * é o mesmo plano de contas, e quem sabe em que tabela desta base ele mora é
+   * este serviço. Uma segunda cópia leria o IXC de novo e poderia mostrar nome
+   * diferente para o mesmo código enquanto um dos caches estivesse velho.
+   */
+  async nomesDasContasDeDespesa(): Promise<Map<number, string>> {
     const agora = Date.now();
     if (
       this.indiceCategorias &&
@@ -553,7 +566,8 @@ export class ContasAbertasService {
     return nomes;
   }
 
-  private async nomesDosFornecedores(): Promise<Map<number, string>> {
+  /** O mesmo, para os fornecedores: um índice só, servindo as duas telas. */
+  async nomesDosFornecedores(): Promise<Map<number, string>> {
     const agora = Date.now();
     if (
       this.indiceFornecedores &&

@@ -1120,3 +1120,91 @@ export interface ResumoImpostos {
     trabalhadores: number | null;
   }[];
 }
+
+// ---------------------------------------------------------------------------
+// Histórico do que já foi pago — a outra metade da mesma tabela do IXC
+// ---------------------------------------------------------------------------
+
+/**
+ * O que o registro do IXC confirma sobre um pagamento — e o que nele não fecha.
+ * É o motivo de a tela existir: "já pagou" é fácil de acreditar; o que precisa
+ * de conferência é o que não bate.
+ */
+export interface ConferenciaDoPagamento {
+  /** Nada a apontar: o IXC confirma o pagamento por inteiro e coerente */
+  fecha: boolean;
+  ressalvas: string[];
+}
+
+export interface PagamentoFeito {
+  idFnApagar: number;
+  documento: string | null;
+  fornecedor: { id: number | null; nome: string };
+  /** Valor do título, como ele foi lançado */
+  valor: number;
+  /** Quanto saiu do caixa — com juros e multa, pode passar do valor do título */
+  valorPago: number;
+  /** O que ainda falta deste título: acima de zero = pagamento parcial */
+  valorAberto: number;
+  parcial: boolean;
+  juros: number;
+  multa: number;
+  desconto: number;
+  emissao: string | null;
+  vencimento: string | null;
+  /** O dia em que o IXC diz que o título foi baixado */
+  pagoEm: string;
+  /** A coluna do IXC de onde a data da baixa saiu — é por ela que se procura lá */
+  campoDaBaixa: string;
+  /** 0 = pagou no dia, positivo = atrasado, negativo = adiantado, null = sem vencimento */
+  diasDeAtraso: number | null;
+  formaPagamento: string | null;
+  /** De qual conta/caixa o dinheiro saiu */
+  caixa: { id: number | null; nome: string | null };
+  baixadoPor: string | null;
+  observacao: string | null;
+  statusAuditoria: 'A' | 'R' | 'C' | null;
+  /** O `status` cru do título: "A" com baixa é o status que ficou parado */
+  statusNoIxc: string | null;
+  /**
+   * Se esse status é um dos que significam "pago" nesta base — nela é "F", não
+   * o "P" da documentação. Quem decide é a API: uma segunda lista disso aqui
+   * escreveria "baixado mesmo assim" em todo pagamento normal do IXC.
+   */
+  statusEhDePago: boolean;
+  categoria: { id: number | null; nome: string | null };
+  classificacao: { id: string; nome: string } | null;
+  origem: OrigemNaFolha | null;
+  conferencia: ConferenciaDoPagamento;
+}
+
+export interface FatiaDePagamentos {
+  quantidade: number;
+  total: number;
+}
+
+export interface ResumoPagamentos {
+  quantidade: number;
+  /** Soma do que saiu do caixa */
+  total: number;
+  emDia: FatiaDePagamentos;
+  emAtraso: FatiaDePagamentos;
+  semVencimento: FatiaDePagamentos;
+  parciais: FatiaDePagamentos;
+  /** Com ressalva na conferência — é a fila de quem confere */
+  comRessalva: FatiaDePagamentos;
+  /** Juros e multa pagos: o preço do atraso, em dinheiro */
+  jurosEMulta: number;
+  desconto: number;
+}
+
+export interface HistoricoPagamentos {
+  pagamentos: PagamentoFeito[];
+  resumo: ResumoPagamentos;
+  periodo: { de: string; ate: string };
+  /** Quando a leitura foi feita — ela é de agora, não de um espelho */
+  lidoEm: string;
+  /** Como a lista foi obtida do IXC, por extenso */
+  comoFoiLido: string;
+  avisos: string[];
+}

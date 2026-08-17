@@ -8,6 +8,7 @@ import { Modulos } from './pages/Modulos';
 import { Inicio as ContasPagarInicio } from './pages/contas-pagar/Inicio';
 import { Categorias as ContasPagarCategorias } from './pages/contas-pagar/Categorias';
 import { Dashboard as ContasPagarDashboard } from './pages/contas-pagar/Dashboard';
+import { HistoricoDePagamentos } from './pages/contas-pagar/HistoricoDePagamentos';
 import { Recorrentes } from './pages/contas-pagar/Recorrentes';
 import { Avulsos } from './pages/folha/Avulsos';
 import { Configuracoes } from './pages/folha/Configuracoes';
@@ -107,6 +108,8 @@ export default function App() {
       >
         <Route index element={<Navigate to="inicio" replace />} />
         <Route path="inicio" element={<ContasPagarInicio />} />
+        {/* A outra metade da mesma tabela do IXC: o que já saiu. */}
+        <Route path="pagos" element={<HistoricoDePagamentos />} />
         <Route path="dashboard" element={<ContasPagarDashboard />} />
         {/* O caminho antigo continua valendo: quem tem a tela no favorito ou
             aberta numa aba não pode cair num "não encontrado" por causa de uma
