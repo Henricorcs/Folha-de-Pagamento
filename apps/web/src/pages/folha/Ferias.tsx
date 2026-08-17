@@ -658,7 +658,7 @@ function TabelaDeMarcadas({
               <td className="td text-right">
                 <button
                   onClick={() => onDesfazer(p)}
-                  className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600"
+                  className="btn btn-perigo btn-p"
                 >
                   Desfazer
                 </button>

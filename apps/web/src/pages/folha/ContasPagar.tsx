@@ -532,7 +532,7 @@ export function ContasPagar() {
                       {podeAprovar(c) && (
                         <button
                           onClick={() => aprovar(c)}
-                          className="btn btn-p bg-brand-600 text-white hover:bg-brand-700"
+                          className="btn btn-pagar btn-p"
                         >
                           Aprovar
                         </button>
@@ -569,7 +569,7 @@ export function ContasPagar() {
                           onClick={() => apagar(c)}
                           disabled={excluir.isPending}
                           title="Apaga aqui e no IXC"
-                          className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600"
+                          className="btn btn-perigo btn-p"
                         >
                           Excluir
                         </button>

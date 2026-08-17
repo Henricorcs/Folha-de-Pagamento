@@ -25,6 +25,15 @@ interface DespesaLancada {
   conta: { id: string; idFnApagarIxc: number | null; status: string };
   contas: Array<{ id: string; idFnApagarIxc: number | null }>;
   avisoCategoria: string | null;
+  /** Null quando o lançamento não pediu para já sair pago. */
+  baixa: {
+    pagas: number;
+    tentadas: number;
+    valor: number;
+    /** "AAAA-MM-DD" */
+    data: string;
+    avisos: string[];
+  } | null;
 }
 
 /** Uma conta de onde o dinheiro sai, como o IXC a tem. */
@@ -102,6 +111,14 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
   const [contaPagamento, setContaPagamento] = useState('');
   /** Qual leitor está aberto: o do boleto, o do QR do PIX, ou nenhum. */
   const [lendo, setLendo] = useState<'boleto' | 'pix' | null>(null);
+
+  /**
+   * Esta conta já foi paga antes de existir no IXC — o boleto saiu pelo
+   * aplicativo do banco e só agora está sendo registrada.
+   */
+  const [jaPaga, setJaPaga] = useState(false);
+  /** Dia em que o dinheiro saiu de fato. É o do extrato, não o de hoje. */
+  const [dataPagamento, setDataPagamento] = useState(hoje);
 
   /** Repetir todo mês: esta conta vira uma regra, e as próximas nascem sozinhas. */
   const [recorrente, setRecorrente] = useState(false);
@@ -193,6 +210,11 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
           tipoChavePix:
             (ehCopiaECola ? 'Código copia e cola' : tipoChavePix) || undefined,
           contaPagamento: contaPagamento ? Number(contaPagamento) : undefined,
+          // Já paga: a conta nasce, é aprovada e baixada na mesma ida, com a
+          // data do extrato. Sem isso ela ficaria em aberto esperando alguém
+          // lembrar de voltar — e é assim que o mesmo dinheiro sai duas vezes.
+          jaPaga: jaPaga || undefined,
+          dataPagamento: jaPaga ? dataPagamento : undefined,
           parcelas: parcelado
             ? parcelas.map((p, i) => ({
                 valor: Number(p.valor),
@@ -369,16 +391,50 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
               : 'A conta foi criada no IXC'}
           </p>
           <p className="mt-1 text-sm text-tinta-500">
+            {/* Lançada já paga, ela não fica no aguardo de nada — dizer que
+                fica mandaria alguém procurá-la na auditoria. */}
             {lancada.contas.length > 1
               ? `Títulos ${lancada.contas
                   .map((c) => c.idFnApagarIxc ?? '?')
-                  .join(', ')} — uma parcela cada, todas no aguardo da auditoria.`
+                  .join(', ')} — uma parcela cada${
+                  lancada.baixa ? '.' : ', todas no aguardo da auditoria.'
+                }`
               : lancada.conta.idFnApagarIxc
-                ? `Título nº ${lancada.conta.idFnApagarIxc}, no aguardo da auditoria do IXC como qualquer outra.`
+                ? `Título nº ${lancada.conta.idFnApagarIxc}${
+                    lancada.baixa
+                      ? '.'
+                      : ', no aguardo da auditoria do IXC como qualquer outra.'
+                  }`
                 : 'A conta foi salva aqui, mas o IXC ainda não devolveu o número dela.'}
           </p>
+          {/* A baixa é a parte que mexeu em dinheiro: ela merece dizer o que
+              conseguiu e o que não, em vez de sumir num "pronto". */}
+          {lancada.baixa && (
+            <div
+              className={`mx-auto mt-4 max-w-md rounded-xl px-4 py-3 text-sm ${
+                lancada.baixa.pagas === lancada.baixa.tentadas
+                  ? 'bg-emerald-50 text-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-200'
+                  : 'bg-amber-50 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200'
+              }`}
+            >
+              {lancada.baixa.pagas > 0 && (
+                <p>
+                  {lancada.baixa.tentadas > 1
+                    ? `${lancada.baixa.pagas} de ${lancada.baixa.tentadas} parcelas baixadas`
+                    : 'Baixada como paga'}{' '}
+                  no IXC em {formatarDia(lancada.baixa.data)} —{' '}
+                  {formatBRL(lancada.baixa.valor)}.
+                </p>
+              )}
+              {lancada.baixa.avisos.map((aviso) => (
+                <p key={aviso} className="mt-1">
+                  {aviso}
+                </p>
+              ))}
+            </div>
+          )}
           {lancada.avisoCategoria && (
-            <p className="mx-auto mt-4 max-w-md rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <p className="mx-auto mt-4 max-w-md rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
               {lancada.avisoCategoria}
             </p>
           )}
@@ -753,13 +809,62 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
           </p>
         </div>
 
+        {/* --- Conta que já saiu da conta antes de existir no IXC --- */}
+        <div className="sm:col-span-2">
+          <label className="opcao">
+            <input
+              type="checkbox"
+              className="marcador"
+              checked={jaPaga}
+              onChange={(e) => setJaPaga(e.target.checked)}
+            />
+            <span>
+              <strong className="font-semibold text-tinta-800">
+                Já foi paga
+              </strong>{' '}
+              — o dinheiro saiu da conta antes deste lançamento
+            </span>
+          </label>
+          {jaPaga && (
+            <div className="painel-opcao painel-opcao-pago">
+              <p className="text-xs leading-relaxed text-tinta-600">
+                A conta é criada, aprovada na auditoria e <strong>baixada
+                como paga</strong> no IXC de uma vez só — a mesma baixa que se
+                daria à mão por lá. Ela nem chega a aparecer na fila de
+                pagamento, que é o que evita o mesmo dinheiro sair duas vezes.
+              </p>
+              <div className="mt-3 max-w-[220px]">
+                <label className="rotulo" htmlFor="data-pagamento">
+                  Dia em que o dinheiro saiu
+                </label>
+                <input
+                  id="data-pagamento"
+                  type="date"
+                  value={dataPagamento}
+                  onChange={(e) => setDataPagamento(e.target.value)}
+                  className="campo"
+                />
+                <p className="ajuda">
+                  O dia do extrato, não o de hoje — é por ele que a conciliação
+                  do mês fecha.
+                </p>
+              </div>
+              <p className="mt-3 text-xs leading-relaxed text-tinta-500">
+                A baixa é lançada na conta escolhida lá em cima, em{' '}
+                <strong>Conta de onde sai</strong>: é de onde o dinheiro saiu de
+                verdade. Confira antes de salvar.
+              </p>
+            </div>
+          )}
+        </div>
+
         {/* --- Serviço que se repete todo mês --- */}
         {!parcelado && (
           <div className="sm:col-span-2">
-            <label className="flex items-center gap-2 text-sm text-tinta-700">
+            <label className="opcao">
               <input
                 type="checkbox"
-                className="h-4 w-4 accent-brand-600"
+                className="marcador"
                 checked={recorrente}
                 onChange={(e) => setRecorrente(e.target.checked)}
               />

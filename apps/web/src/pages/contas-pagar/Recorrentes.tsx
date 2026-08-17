@@ -361,7 +361,7 @@ export function Recorrentes() {
                                     remover.mutate(r.id);
                                   }
                                 }}
-                                className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10"
+                                className="btn btn-perigo btn-p"
                               >
                                 Apagar
                               </button>

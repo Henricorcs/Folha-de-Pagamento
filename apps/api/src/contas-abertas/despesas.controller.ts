@@ -102,6 +102,8 @@ export class DespesasController {
   @Post('contas-abertas/despesa')
   @HttpCode(201)
   lancar(@Body() dto: CriarDespesaDto, @Req() req: Request) {
-    return this.service.lancar(dto, usuarioId(req));
+    // O nome vai junto porque um lançamento já pago dá baixa no IXC, e a baixa
+    // é assinada: quem conferir o extrato de lá precisa saber quem a fez.
+    return this.service.lancar(dto, usuarioId(req), usuarioNome(req));
   }
 }

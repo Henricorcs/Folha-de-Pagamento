@@ -4,6 +4,7 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsISO8601,
@@ -237,4 +238,27 @@ export class CriarDespesaDto {
   @ValidateNested({ each: true })
   @Type(() => ParcelaDaDespesaDto)
   parcelas?: ParcelaDaDespesaDto[];
+
+  /**
+   * Esta conta já foi paga antes de existir no IXC.
+   *
+   * É o caso de quem pagou pela conta bancária na hora — um boleto no
+   * aplicativo, um PIX no celular — e só depois vem lançar. Sem isto, o
+   * lançamento nasce em aberto e alguém precisa lembrar de voltar para
+   * aprová-lo e baixá-lo, com o risco de o mesmo dinheiro ser pago de novo.
+   *
+   * Marcado, a conta é criada, aprovada na auditoria e baixada como paga na
+   * mesma ida — a mesma baixa que se daria à mão no IXC.
+   */
+  @IsOptional() @IsBoolean() jaPaga?: boolean;
+
+  /**
+   * Dia em que o dinheiro saiu (AAAA-MM-DD). Só vale com `jaPaga`; vazio cai no
+   * vencimento, e na falta dele em hoje.
+   *
+   * É o dia do extrato, não o de hoje: quem lança na sexta uma conta paga na
+   * segunda precisa que a baixa no IXC caia na segunda, ou a conciliação do mês
+   * não fecha.
+   */
+  @IsOptional() @IsISO8601() dataPagamento?: string;
 }

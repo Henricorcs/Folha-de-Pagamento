@@ -477,7 +477,7 @@ export function Impostos() {
                               excluir.mutate(g.id);
                             }
                           }}
-                          className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600"
+                          className="btn btn-perigo btn-p"
                         >
                           Excluir
                         </button>
@@ -671,7 +671,7 @@ function LancamentoAMao({
                       onClick={() =>
                         setItens(itens.filter((_, j) => j !== i))
                       }
-                      className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600"
+                      className="btn btn-perigo btn-p"
                     >
                       Tirar
                     </button>

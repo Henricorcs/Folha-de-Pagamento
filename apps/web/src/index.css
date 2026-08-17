@@ -126,7 +126,17 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* --- Botões --- */
+  /*
+   * --- Botões ---
+   *
+   * A cor diz o que o botão faz, e é a primeira coisa que se lê numa tela cheia
+   * deles. Quando todos eram da mesma cor, escolher entre "Pagar", "Editar" e
+   * "Excluir" obrigava a ler os três — e o mais caro dos três ficava do mesmo
+   * tamanho e do mesmo tom dos outros.
+   *
+   * São quatro papéis, e um só de cada por bloco: `primario` conclui,
+   * `pagar` move dinheiro, `perigo` desfaz, `neutro`/`sutil` acompanham.
+   */
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition duration-150 disabled:cursor-not-allowed disabled:opacity-50;
   }
@@ -138,6 +148,18 @@
   .btn-acao {
     @apply bg-barra text-white shadow-sm hover:bg-barra/90 active:bg-barra;
   }
+  /* Dinheiro saindo. Verde e sólido: é o botão que se procura na linha. */
+  .btn-pagar {
+    @apply bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 active:bg-emerald-800;
+  }
+  /*
+   * Apagar, cancelar, estornar. Desenhado sem peso até o mouse chegar: um
+   * vermelho sólido numa lista de quinhentas linhas vira um campo minado, mas
+   * um vermelho que só se acende sob o cursor avisa a tempo.
+   */
+  .btn-perigo {
+    @apply border border-transparent text-rose-600 hover:border-rose-200 hover:bg-rose-50 dark:text-rose-300 dark:hover:border-rose-500/30 dark:hover:bg-rose-500/10;
+  }
   .btn-neutro {
     @apply border border-tinta-200 bg-papel text-tinta-700 hover:border-tinta-300 hover:bg-tinta-50;
   }
@@ -148,15 +170,59 @@
     @apply rounded-lg px-3 py-1.5 text-xs;
   }
 
-  /* --- Formulário --- */
+  /*
+   * --- Formulário ---
+   *
+   * No escuro o campo é um poço: fundo mais fundo que o do cartão. Ele era
+   * `bg-papel`, a mesma cor exata do cartão atrás dele, e o resultado era uma
+   * parede lisa em que só um fio de borda dizia onde dava para escrever — num
+   * formulário de quinze campos ninguém acha onde clicar.
+   *
+   * No claro ele continua branco, e de propósito: lá o poço seria cinza, que é
+   * a cor do fundo da página — e campo fora de cartão (a busca de uma lista,
+   * por exemplo) sumiria contra ela. Cada tema afunda ou levanta o campo,
+   * conforme o que o destaca do que está atrás.
+   *
+   * O foco é a outra metade do pedido: quem clica precisa ver onde caiu. O
+   * campo sobe para a cor do cartão, a borda acende no azul da marca e um anel
+   * de quatro pixels o cerca — três sinais, porque um só se perde numa tela
+   * cheia.
+   */
   .campo {
-    @apply w-full rounded-xl border border-tinta-200 bg-papel px-3 py-2 text-sm text-tinta-900 transition placeholder:text-tinta-300 hover:border-tinta-300 focus:border-brand-400 focus:outline-none focus:ring-4 focus:ring-brand-100 dark:focus:ring-brand-900/40;
+    @apply w-full rounded-xl border border-tinta-200 bg-papel px-3 py-2 text-sm text-tinta-900 transition placeholder:text-tinta-400 hover:border-tinta-300 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/25 dark:bg-tinta-50 dark:focus:bg-papel;
   }
   .rotulo {
     @apply mb-1 block text-xs font-semibold text-tinta-500;
   }
   .ajuda {
     @apply mt-1 text-xs text-tinta-400;
+  }
+
+  /*
+   * Caixa de marcar. A do navegador é pequena demais para o que decide aqui —
+   * "já foi paga" muda se o dinheiro sai ou não —, e no tema escuro ela nascia
+   * branca, brilhando no meio do formulário.
+   */
+  .marcador {
+    @apply h-4 w-4 shrink-0 cursor-pointer rounded border-tinta-300 bg-tinta-50 accent-brand-600;
+  }
+  /*
+   * Uma opção que liga um comportamento. Tem moldura própria e vira alvo de
+   * clique inteiro: solta no meio do formulário, uma linha de texto com um
+   * quadradinho na frente não parecia coisa em que se clica.
+   */
+  .opcao {
+    @apply flex w-full cursor-pointer items-start gap-2.5 rounded-xl border border-tinta-200 bg-tinta-50/60 px-3.5 py-3 text-sm leading-snug text-tinta-700 transition hover:border-tinta-300 hover:bg-tinta-50;
+  }
+  /* O que a opção revela quando ligada: preso a ela pela borda esquerda. */
+  .painel-opcao {
+    @apply mt-2 rounded-xl border border-tinta-200 bg-tinta-50/60 p-3.5;
+    border-left-width: 3px;
+    border-left-color: theme('colors.brand.500');
+  }
+  /* Painel de algo que já aconteceu com o dinheiro: verde, não azul. */
+  .painel-opcao-pago {
+    border-left-color: theme('colors.emerald.500');
   }
 
   /* --- Tabela --- */

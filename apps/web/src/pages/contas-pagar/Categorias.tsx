@@ -237,7 +237,7 @@ export function Categorias() {
                                     remover.mutate(c.id);
                                   }
                                 }}
-                                className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600"
+                                className="btn btn-perigo btn-p"
                               >
                                 Excluir
                               </button>

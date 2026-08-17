@@ -697,7 +697,7 @@ export function Diaristas() {
                       <button
                         onClick={() => setPagando(d)}
                         disabled={!d.ativo}
-                        className="btn btn-p bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40"
+                        className="btn btn-pagar btn-p disabled:opacity-40"
                       >
                         Pagar
                       </button>
@@ -720,7 +720,7 @@ export function Diaristas() {
                               excluir.mutate(d.id);
                             }
                           }}
-                          className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600"
+                          className="btn btn-perigo btn-p"
                         >
                           Excluir
                         </button>
@@ -862,7 +862,7 @@ export function Diaristas() {
                                   excluirDiaria.mutate(d.id);
                                 }
                               }}
-                              className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600"
+                              className="btn btn-perigo btn-p"
                             >
                               Excluir
                             </button>
@@ -1107,7 +1107,7 @@ function DiariasTravadas({
                       }
                     }}
                     disabled={ocupado}
-                    className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600"
+                    className="btn btn-perigo btn-p"
                   >
                     Excluir
                   </button>

@@ -367,7 +367,7 @@ export function Inicio() {
                 ),
               )
             }
-            className="btn btn-p bg-brand-600 text-white hover:bg-brand-700"
+            className="btn btn-pagar btn-p"
           >
             Pagar em mãos
           </button>
@@ -626,7 +626,7 @@ function Linha({
           <button
             onClick={onPagarEmMaos}
             title="Escolher de onde sai e pagar — aprova no IXC junto"
-            className="btn btn-p bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40"
+            className="btn btn-pagar btn-p disabled:opacity-40"
           >
             Pagar
           </button>
@@ -648,7 +648,7 @@ function Linha({
           <button
             onClick={onExcluir}
             title="Apagar este título no IXC"
-            className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10"
+            className="btn btn-perigo btn-p"
           >
             Excluir
           </button>

@@ -825,7 +825,7 @@ export function Avulsos({ doIxc = false }: { doIxc?: boolean } = {}) {
                         <button
                           onClick={() => pagarDoIxc.mutate(f.idFornecedor)}
                           disabled={pagarDoIxc.isPending}
-                          className="btn btn-p bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40"
+                          className="btn btn-pagar btn-p disabled:opacity-40"
                         >
                           {pagarDoIxc.isPending &&
                           pagarDoIxc.variables === f.idFornecedor
@@ -984,7 +984,7 @@ export function Avulsos({ doIxc = false }: { doIxc?: boolean } = {}) {
                       <button
                         onClick={() => setPagando(b)}
                         disabled={!b.ativo}
-                        className="btn btn-p bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40"
+                        className="btn btn-pagar btn-p disabled:opacity-40"
                       >
                         Pagar
                       </button>
@@ -1007,7 +1007,7 @@ export function Avulsos({ doIxc = false }: { doIxc?: boolean } = {}) {
                               excluir.mutate(b.id);
                             }
                           }}
-                          className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600"
+                          className="btn btn-perigo btn-p"
                         >
                           Excluir
                         </button>
@@ -1122,7 +1122,7 @@ export function Avulsos({ doIxc = false }: { doIxc?: boolean } = {}) {
                                   excluirPagamento.mutate(p.id);
                                 }
                               }}
-                              className="btn btn-sutil btn-p hover:bg-rose-50 hover:text-rose-600"
+                              className="btn btn-perigo btn-p"
                             >
                               Excluir
                             </button>

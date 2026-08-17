@@ -86,6 +86,17 @@ export class PagamentosService {
       contaPagamento?: number;
       data?: string;
       historico?: string;
+      /**
+       * O dinheiro já saiu antes deste título existir — é o lançamento de uma
+       * conta que foi paga pela conta bancária e só agora está sendo registrada.
+       *
+       * Serve para uma coisa só: dispensar a espera pelo banco. A conta do
+       * ModoBank normalmente para no aprovar, porque quem paga é ele e marcá-la
+       * como paga antes disso seria dar por saído um dinheiro que ainda está lá.
+       * Quando quem chama afirma que a saída já aconteceu, essa premissa não
+       * existe mais — e a baixa aqui é a mesma que se daria à mão no IXC.
+       */
+      jaSaiu?: boolean;
       /** @deprecated A conta escolhida é quem manda; fica por compatibilidade. */
       forma?: FormaDePagar;
     },
@@ -167,8 +178,11 @@ export class PagamentosService {
      * permissão para acionar; dar baixa aqui marcaria como paga uma conta que o
      * banco ainda não pagou, e o dinheiro sairia depois, sem registro do outro
      * lado batendo.
+     *
+     * `jaSaiu` desfaz exatamente essa premissa: a conta está sendo lançada
+     * depois de já ter sido paga, então não há pagamento futuro para esperar.
      */
-    if (contaPagamentoId === cfg.contaPagamentoId) {
+    if (contaPagamentoId === cfg.contaPagamentoId && !opcoes.jaSaiu) {
       return {
         idFnApagar,
         aprovada,

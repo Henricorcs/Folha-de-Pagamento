@@ -42,11 +42,22 @@ function montarServico(opts: { falharNa?: number } = {}) {
     ),
   };
 
+  const pagamentos = {
+    pagar: jest.fn(async (idFnApagar: number) => ({
+      idFnApagar,
+      aprovada: true,
+      paga: true,
+      valor: 100,
+      avisos: [],
+    })),
+  };
+
   const service = new DespesasService(
     contasPagar as never,
     categorias as never,
+    pagamentos as never,
   );
-  return { service, contasPagar, categorias };
+  return { service, contasPagar, categorias, pagamentos };
 }
 
 const BASE: CriarDespesaDto = {
