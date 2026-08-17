@@ -168,7 +168,7 @@ export function PagarEmMaos({
           </div>
           <div className="min-w-[240px]">
             <label className="rotulo" htmlFor="conta-do-pagamento">
-              De onde sai
+              Conta de Pagamento
             </label>
             <select
               id="conta-do-pagamento"
@@ -445,7 +445,7 @@ export function EditarConta({
         </div>
         <div>
           <label className="rotulo" htmlFor="ed-conta">
-            Conta de onde sai
+            Conta de Pagamento
           </label>
           <select
             id="ed-conta"

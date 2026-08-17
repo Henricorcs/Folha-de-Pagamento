@@ -68,12 +68,12 @@ export function Configuracoes() {
         <Bloco titulo="IDs da integração" className="surgir surgir-1">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <CampoNum
-              label="Conta de pagamento — banco (id_contas)"
+              label="Conta de Pagamento — banco (id_contas)"
               valor={form.contaPagamentoId}
               onChange={(v) => num('contaPagamentoId', v)}
             />
             <CampoNum
-              label="Conta de pagamento — caixa (em mãos)"
+              label="Conta de Pagamento — caixa (em mãos)"
               valor={form.contaPagamentoCaixaId}
               onChange={(v) => num('contaPagamentoCaixaId', v)}
             />
