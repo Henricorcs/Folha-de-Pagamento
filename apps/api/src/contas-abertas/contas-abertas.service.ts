@@ -164,14 +164,6 @@ function explicarExclusoes(
           `na tela de contas a pagar do IXC. Se esse número crescer muito, é ` +
           `sinal de que esta regra está pegando conta demais.`,
       );
-    } else if (motivo === 'previsao') {
-      avisos.push(
-        `${quantidade} de ${totalLido} título(s) ficaram de fora por serem ` +
-          `previsão de gasto no IXC (coluna "previsao" = S), não dívida — é o ` +
-          `plano do mês que vem, a parcela do ano que vem. A tela de contas a ` +
-          `pagar do IXC também não os mostra. Se alguma dessas contas é devida ` +
-          `de verdade, tire a marca de previsão dela lá.`,
-      );
     } else if (motivo === 'quitado') {
       avisos.push(
         `${quantidade} título(s) vieram sem saldo a pagar e ficaram de fora.`,

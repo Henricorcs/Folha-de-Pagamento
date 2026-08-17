@@ -458,16 +458,19 @@ describe('titulo que existe mas nunca foi liberado', () => {
 });
 
 /**
- * Uma previsao de gasto, copiada do registro real que veio do IXC.
+ * Um titulo com `previsao = S`, copiado do registro real que veio do IXC.
  *
- * Ela aparecia na fila de pagamento como conta vencendo hoje, e nao estava na
- * tela de contas a pagar do IXC. Pelos outros campos ela e divida por inteiro:
- * status "A", liberada, saldo cheio, vencimento marcado -- so a coluna
- * `previsao` a separa de uma conta de verdade. A emissao de um ano e meio antes
- * do vencimento entrega o que ela e: gasto que se espera ter, nao dinheiro que
- * alguem esta cobrando.
+ * Este bloco existe para impedir uma correcao que ja foi feita e desfeita no
+ * mesmo dia. A tela de contas a pagar do IXC nao mostra esses titulos, e daí
+ * parecia que a lista daqui estava inflada de gasto planejado -- eles foram
+ * filtrados, e o que sumiu da fila foi conta com boleto que vence e precisa ser
+ * paga. Nesta empresa a marca de previsao nao quer dizer "ainda nao e divida".
+ *
+ * Entao: `previsao` nao decide nada aqui. Ela aparece na ficha, com o valor que
+ * veio do IXC, para quem estiver investigando "esta aqui e nao esta la" -- que
+ * continua sendo pergunta aberta, e se responde olhando, nao presumindo.
  */
-describe('previsao de gasto nao e conta a pagar', () => {
+describe('a marca de previsao nao tira conta da fila', () => {
   const PREVISAO: Record<string, unknown> = {
     id: '33854',
     liberado: 'S',
@@ -489,33 +492,19 @@ describe('previsao de gasto nao e conta a pagar', () => {
     id_contas: '18',
   };
 
-  it('fica de fora, e diz que foi pela coluna previsao', () => {
-    expect(estaEmAberto(PREVISAO)).toBe(false);
-    expect(motivoDeNaoEstarAberto(PREVISAO)).toEqual({
-      motivo: 'previsao',
-      campo: 'previsao',
-    });
+  it('continua na fila de pagamento, com o saldo que o IXC declara', () => {
+    expect(estaEmAberto(PREVISAO)).toBe(true);
+    expect(motivoDeNaoEstarAberto(PREVISAO)).toBeNull();
+    expect(mapContaAberta(PREVISAO, HOJE)!.valorAberto).toBe(85.14);
   });
 
-  it('a mesma conta, sem a marca de previsao, e divida de verdade', () => {
-    const real = { ...PREVISAO, previsao: 'N' };
-    expect(estaEmAberto(real)).toBe(true);
-    expect(mapContaAberta(real, HOJE)!.valorAberto).toBe(85.14);
-  });
-
-  /*
-   * A mesma disciplina da coluna `liberado`: base que nao tenha esse controle
-   * nao pode perder as contas dela por causa de um campo que nao existe la.
-   */
-  it('coluna ausente ou vazia nao exclui ninguem', () => {
-    const semColuna = { ...PREVISAO };
-    delete semColuna.previsao;
-    expect(estaEmAberto(semColuna)).toBe(true);
+  it('a marca nao muda nada: com S ou com N, a conta e a mesma', () => {
+    expect(estaEmAberto({ ...PREVISAO, previsao: 'N' })).toBe(true);
     expect(estaEmAberto({ ...PREVISAO, previsao: '' })).toBe(true);
   });
 
-  /** Previsao paga e dinheiro que saiu: quem manda ai e a baixa, nao a marca. */
-  it('previsao ja baixada sai como paga, nao como previsao', () => {
+  /** Baixada, sai da fila por estar paga -- como qualquer outra conta. */
+  it('uma vez baixada, sai por pagamento e nao por outra regra', () => {
     const baixada = {
       ...PREVISAO,
       data_pagamento: '17/08/2026',
