@@ -996,6 +996,36 @@ export interface Guia {
   trabalhadores: number | null;
   arquivoNome: string;
   itens: ItemGuia[];
+  /**
+   * A conta a pagar que esta guia virou. Null = ela ainda não está na fila de
+   * pagamento — imposto que vence e não está na lista de ninguém.
+   */
+  contaPagar: {
+    id: string;
+    /** O título no IXC, que é por onde se acha a conta do outro lado */
+    idFnApagarIxc: number | null;
+    status: string;
+    pagoEm: string | null;
+  } | null;
+  /** Vem só na resposta do lançamento: a conta que acabou de ser criada. */
+  conta?: ContaDaGuia | null;
+  /** Vem só no lançamento: por que a conta a pagar não saiu. */
+  avisoConta?: string | null;
+}
+
+/** O que aconteceu ao transformar uma guia em conta a pagar. */
+export interface ContaDaGuia {
+  guiaId: string;
+  contaPagarId: string;
+  idFnApagarIxc: number | null;
+  valor: number;
+  vencimento: string;
+  fornecedor: { id: number; nome: string };
+  /** Como ela vai ser paga: o que veio impresso no PDF. */
+  formaDePagamento: 'BOLETO' | 'PIX' | null;
+  /** A conta já existia — a chamada não criou nada. */
+  jaExistia: boolean;
+  aviso: string | null;
 }
 
 /** O que o leitor entendeu do PDF, antes de alguém confirmar. */

@@ -56,7 +56,24 @@ export interface GuiaLida {
   /** Quantos trabalhadores a guia do FGTS declarou; null nas demais. */
   trabalhadores: number | null;
   itens: ItemGuiaLido[];
+  /** Como esta guia se paga. Null = o PDF não trouxe nem código nem PIX. */
+  pagamento: PagamentoDaGuia | null;
 }
+
+/**
+ * Como a guia se paga — e é isso que separa uma conta a pagar de verdade de um
+ * lembrete de que se deve.
+ *
+ * Sem o código, a conta chega ao IXC e fica parada esperando alguém abrir o PDF
+ * e digitar. E os documentos se dividem em dois: DARF, DAS e DARE trazem a
+ * linha digitável de arrecadação; a guia do FGTS Digital não traz código
+ * nenhum — traz o "copia e cola" do PIX, que é como a Caixa quer receber.
+ */
+export type PagamentoDaGuia =
+  /** Linha digitável de arrecadação: 48 dígitos, começa com 8. */
+  | { forma: 'BOLETO'; codigoBarras: string }
+  /** O payload EMV do QR Code, que o IXC guarda como chave "copia e cola". */
+  | { forma: 'PIX'; copiaECola: string };
 
 /** Erro de leitura com texto que serve para mostrar na tela. */
 export class GuiaIlegivelError extends Error {}
@@ -94,6 +111,13 @@ const MESES = [
  * a pessoa joga o arquivo sem ter de dizer o que é.
  */
 export function lerGuia(texto: string): GuiaLida {
+  // A forma de pagamento é lida à parte de propósito: ela não muda de um
+  // documento para o outro, mora sempre no rodapé, e assim cada leitor continua
+  // cuidando só do que é seu — a composição do imposto.
+  return { ...escolherLeitor(texto), pagamento: lerPagamento(texto) };
+}
+
+function escolherLeitor(texto: string): Omit<GuiaLida, 'pagamento'> {
   if (/GFD\s*-\s*Guia do FGTS Digital/i.test(texto)) return lerFgts(texto);
   if (/Composição do Documento de Arrecadação/i.test(texto)) return lerSenda(texto);
   if (/ARRECADAÇÃO DE RECEITAS ESTADUAIS/i.test(texto)) return lerDare(texto);
@@ -104,11 +128,60 @@ export function lerGuia(texto: string): GuiaLida {
 }
 
 /**
+ * A linha digitável de arrecadação, no formato em que ela é impressa: quatro
+ * blocos de onze dígitos, cada um seguido do seu dígito verificador.
+ *
+ * O formato é o filtro, e é ele que evita o engano caro: na mesma página existe
+ * uma linha que começa igual e termina no CNPJ da empresa
+ * ("... 32071626219 7 86.876.109/0001-02"). Tirar os dígitos de qualquer linha
+ * comprida daria um código com cara de válido e destino nenhum — o bloco final
+ * tem de ser onze dígitos seguidos, e o CNPJ não é.
+ */
+const LINHA_DIGITAVEL =
+  /(\d{11})[-. ]?(\d)\s+(\d{11})[-. ]?(\d)\s+(\d{11})[-. ]?(\d)\s+(\d{11})[-. ]?(\d)(?!\d)/;
+
+/**
+ * Como pagar esta guia, lido do próprio documento.
+ *
+ * Fica exportada porque é usada duas vezes: ao ler o PDF, e depois, ao gerar a
+ * conta a pagar a partir do texto guardado — a guia lançada mês passado também
+ * merece virar conta sem que ninguém precise achar o arquivo de novo.
+ */
+export function lerPagamento(texto: string): PagamentoDaGuia | null {
+  for (const linha of texto.split(/\r?\n/)) {
+    const m = LINHA_DIGITAVEL.exec(linha);
+    if (!m) continue;
+    const digitos = m.slice(1).join('');
+    // Arrecadação (tributo, consumo) começa com 8; cobrança bancária, não. O
+    // que não começa com 8 aqui é coincidência de números, não código.
+    if (digitos.length === 48 && digitos.startsWith('8')) {
+      return { forma: 'BOLETO', codigoBarras: digitos };
+    }
+  }
+
+  /*
+   * O PIX vem como o payload inteiro do QR Code, numa linha só: começa em
+   * "000201" e termina no CRC ("6304" + quatro caracteres). Logo abaixo dele o
+   * PDF do FGTS imprime "PIX Copia e Cola:" seguido de uma URL — que **não** é
+   * o copia e cola, é só o endereço do QR. Pegar o rótulo em vez do payload
+   * daria uma chave que nenhum banco paga.
+   */
+  for (const bruto of texto.split(/\r?\n/)) {
+    const linha = bruto.trim();
+    if (linha.startsWith('000201') && /6304[0-9A-Fa-f]{4}$/.test(linha)) {
+      return { forma: 'PIX', copiaECola: linha };
+    }
+  }
+
+  return null;
+}
+
+/**
  * DARF e DAS: mesma diagramação do SENDA, muda só o título e os códigos. A
  * composição vem em linhas "código denominação valor valor", onde o último
  * número é o total do item (principal + multa + juros).
  */
-function lerSenda(texto: string): GuiaLida {
+function lerSenda(texto: string): Omit<GuiaLida, 'pagamento'> {
   const linhas = texto.split('\n').map((l) => l.trim());
   const ehSimples = /do Simples Nacional/i.test(texto);
 
@@ -152,7 +225,7 @@ function lerSenda(texto: string): GuiaLida {
  * os dois valores que interessam vêm dos totais rotulados: o FGTS do mês (custo
  * da empresa) e o consignado, que é desconto do trabalhador sendo repassado.
  */
-function lerFgts(texto: string): GuiaLida {
+function lerFgts(texto: string): Omit<GuiaLida, 'pagamento'> {
   const fgts = valorDepoisDe(texto, /Total FGTS:\s*/);
   const consignado = valorDepoisDe(texto, /Total Consignado:\s*/);
 
@@ -218,7 +291,7 @@ function lerFgts(texto: string): GuiaLida {
  * montada por outro caminho do documento: quando as duas contas não batem, a
  * tela avisa antes de gravar.
  */
-function lerDare(texto: string): GuiaLida {
+function lerDare(texto: string): Omit<GuiaLida, 'pagamento'> {
   const { competencias, codigos, vencimento } = lerRelacaoDare(texto);
   if (competencias.length === 0) {
     throw new GuiaIlegivelError(

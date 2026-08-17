@@ -52,6 +52,19 @@ export class ImpostosController {
     return this.service.listar(competencia);
   }
 
+  /**
+   * Põe a guia na fila de pagamento do IXC.
+   *
+   * A guia já sai como conta a pagar quando é lançada; isto aqui é para as que
+   * ficaram para trás — as de antes desta tela existir, e as em que o IXC não
+   * respondeu na hora. Chamar duas vezes devolve a conta que já existe.
+   */
+  @Post('guias/:id/conta-a-pagar')
+  @HttpCode(201)
+  gerarConta(@Param('id') id: string, @Req() req: Request) {
+    return this.service.gerarContaAPagar(id, usuarioId(req));
+  }
+
   @Delete('guias/:id')
   @HttpCode(200)
   async remover(@Param('id') id: string) {

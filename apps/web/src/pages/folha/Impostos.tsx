@@ -19,6 +19,7 @@ import {
   GUIAS_EVENTUAIS,
   TIPO_GUIA_LABEL,
   type ClasseTributo,
+  type ContaDaGuia,
   type Guia,
   type ItemGuia,
   type LeituraDaGuia,
@@ -145,14 +146,47 @@ export function Impostos() {
       return data;
     },
     onSuccess: (guia) => {
-      avisar(
-        `Guia de ${TIPO_GUIA_LABEL[guia.tipo]} de ${formatComp(guia.competencia)} lançada.`,
-      );
+      avisar(avisoDoLancamento(guia), !!guia.avisoConta);
       cancelar();
       qc.invalidateQueries({ queryKey: ['guias'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
+      // A guia entrou na fila de pagamento: a lista de contas em aberto e o
+      // painel mudaram de valor neste instante.
+      qc.invalidateQueries({ queryKey: ['contas-abertas'] });
     },
     onError: (err) => avisar(mensagemErro(err), true),
+  });
+
+  /** Qual guia está esperando a conta a pagar sair — para o botão daquela linha. */
+  const [gerandoId, setGerandoId] = useState<string | null>(null);
+
+  /**
+   * Gera a conta a pagar de uma guia que ainda não tem.
+   *
+   * Existe para as guias lançadas antes desta tela e para o mês em que o IXC
+   * não respondeu na hora: o lançamento novo já sai com a conta.
+   */
+  const gerarConta = useMutation({
+    mutationFn: async (id: string) =>
+      (await api.post<ContaDaGuia>(`/impostos/guias/${id}/conta-a-pagar`, {}))
+        .data,
+    onSuccess: (conta) => {
+      avisar(
+        conta.jaExistia
+          ? `Esta guia já estava na fila: título ${conta.idFnApagarIxc ?? '—'} no IXC.`
+          : `Conta a pagar de ${formatBRL(conta.valor)} lançada para ` +
+              `${conta.fornecedor.nome}, vencendo em ${formatData(conta.vencimento)}` +
+              (conta.aviso ? `. ${conta.aviso}` : '.'),
+        !!conta.aviso,
+      );
+      setGerandoId(null);
+      qc.invalidateQueries({ queryKey: ['guias'] });
+      qc.invalidateQueries({ queryKey: ['contas-abertas'] });
+    },
+    onError: (err) => {
+      setGerandoId(null);
+      avisar(mensagemErro(err), true);
+    },
   });
 
   /**
@@ -163,9 +197,7 @@ export function Impostos() {
     mutationFn: async (guia: Record<string, unknown>) =>
       (await api.post<Guia>('/impostos/guias', guia)).data,
     onSuccess: (guia) => {
-      avisar(
-        `Guia de ${TIPO_GUIA_LABEL[guia.tipo]} de ${formatComp(guia.competencia)} lançada à mão.`,
-      );
+      avisar(avisoDoLancamento(guia, 'à mão'), !!guia.avisoConta);
       setAMao(false);
       qc.invalidateQueries({ queryKey: ['guias'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
@@ -430,6 +462,7 @@ export function Impostos() {
                   <th className="th">Guia</th>
                   <th className="th">Vencimento</th>
                   <th className="th">Composição</th>
+                  <th className="th">Conta a pagar</th>
                   <th className="th text-right">Total</th>
                   <th className="th text-right">Ação</th>
                 </tr>
@@ -463,6 +496,16 @@ export function Impostos() {
                           ))}
                         </div>
                       </td>
+                      <td className="td">
+                        <SituacaoDaConta
+                          guia={g}
+                          gerando={gerarConta.isPending && gerandoId === g.id}
+                          onGerar={() => {
+                            setGerandoId(g.id);
+                            gerarConta.mutate(g.id);
+                          }}
+                        />
+                      </td>
                       <td className="td text-right">
                         <span className="valor">{formatBRL(g.valorTotal)}</span>
                       </td>
@@ -491,6 +534,75 @@ export function Impostos() {
         )}
       </Bloco>
     </Pagina>
+  );
+}
+
+/**
+ * O que dizer depois de lançar a guia.
+ *
+ * A conta a pagar sai junto, e é ela que interessa a quem paga — dizer só
+ * "guia lançada" esconderia o que acabou de entrar na fila do dia 20. Quando
+ * ela não saiu, o motivo vem no mesmo aviso: a guia está gravada, o imposto
+ * continua vencendo, e alguém precisa saber disso agora.
+ */
+function avisoDoLancamento(guia: Guia, como = ''): string {
+  const nome = `Guia de ${TIPO_GUIA_LABEL[guia.tipo]} de ${formatComp(guia.competencia)}`;
+  const lancada = `${nome} lançada${como ? ` ${como}` : ''}`;
+
+  if (guia.avisoConta) {
+    return `${lancada}, mas ela não virou conta a pagar: ${guia.avisoConta}`;
+  }
+  if (!guia.conta) return `${lancada}.`;
+
+  return (
+    `${lancada}, e já virou conta a pagar de ${formatBRL(guia.conta.valor)} ` +
+    `para ${guia.conta.fornecedor.nome}, vencendo em ${formatData(guia.conta.vencimento)}` +
+    (guia.conta.aviso ? `. ${guia.conta.aviso}` : '.')
+  );
+}
+
+/**
+ * Se a guia já está na fila de pagamento — e, quando não está, o botão que a
+ * põe lá.
+ *
+ * O número do título no IXC fica visível porque é por ele que se acha a conta
+ * do outro lado: sem isso, conferir se o imposto foi pago vira caça pelo valor
+ * numa lista de centenas.
+ */
+function SituacaoDaConta({
+  guia,
+  gerando,
+  onGerar,
+}: {
+  guia: Guia;
+  gerando: boolean;
+  onGerar: () => void;
+}) {
+  if (!guia.contaPagar) {
+    return (
+      <button
+        onClick={onGerar}
+        disabled={gerando}
+        className="btn btn-neutro btn-p"
+        title="Lança esta guia como conta a pagar no IXC, com o vencimento e o código de pagamento que vieram no PDF"
+      >
+        {gerando ? 'Lançando…' : 'Gerar conta a pagar'}
+      </button>
+    );
+  }
+
+  const paga = !!guia.contaPagar.pagoEm;
+  return (
+    <div className="flex flex-col gap-0.5">
+      <Selo pequeno tom={paga ? 'pago' : 'info'}>
+        {paga ? 'paga' : 'na fila de pagamento'}
+      </Selo>
+      <span className="num text-xs text-tinta-400">
+        {guia.contaPagar.idFnApagarIxc
+          ? `título ${guia.contaPagar.idFnApagarIxc} no IXC`
+          : 'ainda sem número do IXC'}
+      </span>
+    </div>
   );
 }
 

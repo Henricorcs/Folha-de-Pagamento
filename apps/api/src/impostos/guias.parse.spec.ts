@@ -111,7 +111,11 @@ Informações de recolhimentos do Consignado
 Observações
 Data de geração da Guia: 07/08/2026 às 14:48:47 - Página 1/1
 O detalhamento da guia pode ser consultado através do endereço https://fgtsdigital.sistema.gov.br
+00020101021226900014br.gov.bcb.pix2568pix-qrcode.caixa.gov.br/api/v2/cobv/00000000000000000000000000000000520400005303986580\
+2BR5923CAIXA ECONOMICA FEDERAL6008Brasilia62070503***63040000
 PIX Copia e Cola:
+pix-qrcode.caixa.gov.br/api/v2/cobv/00000000000000000000000000000000
+Payload Location:
 `;
 
 /**
@@ -410,5 +414,62 @@ describe('parseValor', () => {
     expect(parseValor('4.310,76')).toBe(4310.76);
     expect(parseValor('22.688,27')).toBe(22688.27);
     expect(parseValor('178,31')).toBe(178.31);
+  });
+});
+
+/**
+ * Como pagar a guia. Sem isto, a conta a pagar que ela gera chega ao IXC sem
+ * como ser paga — alguém teria de abrir o PDF e digitar o código à mão, que é
+ * exatamente o trabalho que jogar o arquivo aqui deveria acabar.
+ */
+describe('a forma de pagamento que vem no documento', () => {
+  it('lê a linha digitável do DARF, com os dígitos verificadores', () => {
+    expect(lerGuia(DARF_INSS).pagamento).toEqual({
+      forma: 'BOLETO',
+      codigoBarras: '858300000123345600000000000000000000000111222334',
+    });
+  });
+
+  it('lê a do DAS e a do DARE, que são o mesmo formato', () => {
+    for (const texto of [DAS_SIMPLES, DARE]) {
+      const p = lerGuia(texto).pagamento;
+      expect(p?.forma).toBe('BOLETO');
+      // Arrecadação: 48 dígitos e começa em 8. É o que o IXC aceita como
+      // código de barras, e o que um banco reconhece como tributo.
+      expect((p as { codigoBarras: string }).codigoBarras).toMatch(/^8\d{47}$/);
+    }
+  });
+
+  /*
+   * A armadilha do DARF: a linha logo abaixo da digitável começa igual e
+   * termina no CNPJ da empresa. Tirar os dígitos de qualquer linha comprida
+   * daria um código com cara de válido e destino nenhum.
+   */
+  it('não confunde a linha que termina no CNPJ com a digitável', () => {
+    const p = lerGuia(DARF_INSS).pagamento as { codigoBarras: string };
+    expect(p.codigoBarras).not.toContain('11222333000144');
+    expect(p.codigoBarras).toHaveLength(48);
+  });
+
+  /*
+   * O FGTS Digital não imprime código de barras: quem recebe é a Caixa, e ela
+   * quer PIX. O payload inteiro do QR Code é o que se paga — a URL impressa
+   * embaixo do rótulo "PIX Copia e Cola:" é só o endereço do QR, e colada num
+   * banco não paga nada.
+   */
+  it('no FGTS lê o copia e cola do PIX, não a URL do rótulo', () => {
+    const p = lerGuia(FGTS).pagamento;
+    expect(p?.forma).toBe('PIX');
+    const copiaECola = (p as { copiaECola: string }).copiaECola;
+    expect(copiaECola.startsWith('00020101')).toBe(true);
+    expect(copiaECola).toContain('br.gov.bcb.pix');
+    expect(copiaECola).not.toMatch(/^pix-qrcode/);
+  });
+
+  it('guia sem código nem PIX não inventa forma de pagamento', () => {
+    const semNada = DARF_INSS.split('\n')
+      .filter((l) => !/\d{11}[-. ]?\d\s/.test(l))
+      .join('\n');
+    expect(lerGuia(semNada).pagamento).toBeNull();
   });
 });

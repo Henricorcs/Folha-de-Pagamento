@@ -891,6 +891,8 @@ model ContaPagar {
   diaria          Diaria?
   /// Pagamento avulso que gerou esta conta, quando foi pago pelo IXC
   pagamentoAvulso PagamentoAvulso?
+  /// Guia de imposto que gerou esta conta
+  guia            Guia?
 
   @@index([status])
   @@index([competencia])
@@ -952,6 +954,15 @@ model Guia {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   itens GuiaItem[]
+
+  /// A conta a pagar que esta guia virou no IXC.
+  ///
+  /// Guia é imposto que vence: ela não serve só ao gráfico, ela tem de entrar
+  /// na fila de pagamento como qualquer boleto. O vínculo fica aqui para a
+  /// mesma guia não virar duas contas — pagar imposto em dobro é dinheiro que
+  /// só volta em compensação, meses depois.
+  contaPagar   ContaPagar? @relation(fields: [contaPagarId], references: [id], onDelete: SetNull)
+  contaPagarId String?     @unique @map("conta_pagar_id")
 
   /// O mesmo documento não entra duas vezes — senão o gráfico conta em dobro
   @@unique([tipo, competencia, numeroDocumento])
