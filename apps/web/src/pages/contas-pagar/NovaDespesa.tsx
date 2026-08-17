@@ -400,14 +400,25 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
 
   // Depois de lançada a tela vira recibo: a conta já existe no IXC e mostrar o
   // formulário de novo convidaria a lançar a mesma despesa duas vezes.
+  //
+  // Saiu tudo pago é uma notícia diferente de "lançada": ela diz que não há
+  // mais nada a fazer com esta conta, e é o que impede alguém de ir procurá-la
+  // na lista para pagar de novo.
+  const quitou = !!lancada?.baixa && lancada.baixa.pagas === lancada.baixa.tentadas;
+
   if (lancada) {
     return (
-      <Janela titulo="Conta lançada" onFechar={onFechar}>
+      <Janela
+        titulo={quitou ? 'Conta lançada e paga' : 'Conta lançada'}
+        onFechar={onFechar}
+      >
         <div className="text-center">
           <p className="font-display text-lg font-semibold text-tinta-900">
             {lancada.contas.length > 1
-              ? `${lancada.contas.length} contas criadas no IXC`
-              : 'A conta foi criada no IXC'}
+              ? `${lancada.contas.length} contas ${quitou ? 'lançadas e pagas' : 'criadas'} no IXC`
+              : quitou
+                ? 'A conta foi lançada e paga no IXC'
+                : 'A conta foi criada no IXC'}
           </p>
           <p className="mt-1 text-sm text-tinta-500">
             {/* Lançada já paga, ela não fica no aguardo de nada — dizer que
@@ -1242,18 +1253,36 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
         <button onClick={onFechar} className="btn btn-neutro">
           Cancelar
         </button>
+        {/*
+          Marcada a conta como já paga, o botão vira o de pagar — verde, com o
+          nome do que ele de fato faz.
+
+          O lançamento sempre criou, aprovou e baixou de uma vez nesse caso, mas
+          o botão continuava dizendo só "Lançar conta": a parte que mexe em
+          dinheiro acontecia sem estar escrita em lugar nenhum, e quem quisesse
+          pagar ia procurar o pagamento na lista depois — pagando de novo o que
+          já tinha saído.
+        */}
         <button
           onClick={() => lancar.mutate()}
           disabled={!podeLancar || lancar.isPending}
-          className="btn btn-primario"
+          className={`btn ${jaPaga ? 'btn-pagar' : 'btn-primario'}`}
         >
           {lancar.isPending
-            ? parcelas.length > 1
-              ? `Lançando ${parcelas.length} contas no IXC…`
-              : 'Lançando no IXC…'
-            : parcelado && parcelas.length > 1
-              ? `Lançar ${parcelas.length} contas`
-              : 'Lançar conta'}
+            ? jaPaga
+              ? parcelas.length > 1
+                ? `Lançando e pagando ${parcelas.length} contas…`
+                : 'Lançando e pagando no IXC…'
+              : parcelas.length > 1
+                ? `Lançando ${parcelas.length} contas no IXC…`
+                : 'Lançando no IXC…'
+            : jaPaga
+              ? parcelado && parcelas.length > 1
+                ? `Lançar e pagar ${parcelas.length} contas`
+                : 'Lançar e pagar'
+              : parcelado && parcelas.length > 1
+                ? `Lançar ${parcelas.length} contas`
+                : 'Lançar conta'}
         </button>
       </div>
 
