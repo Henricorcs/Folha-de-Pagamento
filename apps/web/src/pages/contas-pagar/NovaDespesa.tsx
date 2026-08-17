@@ -21,6 +21,25 @@ interface FornecedorIxc {
   cpfCnpj: string | null;
 }
 
+/**
+ * O ritmo das parcelas de uma nota.
+ *
+ * `'mes'` é o dia fixo — vence dia 15, vence todo dia 15 —, e é o padrão porque
+ * é assim que quase toda nota parcelada é combinada. Os intervalos em dias
+ * ficam para o que de fato conta dias, como um carnê de 15 em 15.
+ */
+type RitmoDasParcelas = 15 | 30 | 'mes';
+
+/**
+ * O mesmo fornecedor lido pelo código, agora com a aba "Dados bancários" do
+ * IXC. A busca por nome não traz isso — mora noutra tabela e custaria uma
+ * consulta por linha da lista.
+ */
+interface FornecedorComBanco extends FornecedorIxc {
+  chavePix: string | null;
+  tipoChavePix: string | null;
+}
+
 interface DespesaLancada {
   conta: { id: string; idFnApagarIxc: number | null; status: string };
   contas: Array<{ id: string; idFnApagarIxc: number | null }>;
@@ -131,7 +150,7 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
   const [modoParcela, setModoParcela] = useState<'nota' | 'consorcio'>('nota');
   const [quantasParcelas, setQuantasParcelas] = useState('2');
   /** Dias entre uma parcela e a seguinte: quinzenal ou mensal. */
-  const [intervalo, setIntervalo] = useState<15 | 30>(30);
+  const [intervalo, setIntervalo] = useState<RitmoDasParcelas>('mes');
   const [parcelas, setParcelas] = useState<Parcela[]>([]);
 
   // --- Consórcio ---
@@ -187,6 +206,40 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
     enabled: buscaEfetiva.length >= 2 && !fornecedor,
     retry: 0,
   });
+
+  /**
+   * A chave PIX de quem foi escolhido, lida do cadastro dele no IXC.
+   *
+   * Só depois da escolha: na lista de busca isso seria uma consulta por linha.
+   * Falha para dentro — sem a chave, o campo fica em branco e o IXC usa a do
+   * cadastro na hora de pagar, que é o comportamento de sempre.
+   */
+  const bancoDoFornecedor = useQuery({
+    queryKey: ['fornecedor-ixc', fornecedor?.idFornecedor],
+    queryFn: async () =>
+      (
+        await api.get<FornecedorComBanco | null>(
+          `/fornecedores-ixc/${fornecedor!.idFornecedor}`,
+        )
+      ).data,
+    enabled: !!fornecedor,
+    retry: 0,
+  });
+
+  const pixDoCadastro = bancoDoFornecedor.data?.chavePix?.trim() || '';
+
+  /**
+   * Preenche a chave assim que ela chega — mas nunca por cima do que já está
+   * escrito. Quem colou um copia-e-cola de cobrança ou leu um QR Code escolheu
+   * aquela chave para esta conta; o cadastro do fornecedor é o padrão, não a
+   * última palavra.
+   */
+  useEffect(() => {
+    if (!pixDoCadastro) return;
+    setChavePix((atual) => atual || pixDoCadastro);
+    const tipo = bancoDoFornecedor.data?.tipoChavePix?.trim();
+    if (tipo) setTipoChavePix((atual) => atual || tipo);
+  }, [pixDoCadastro, bancoDoFornecedor.data?.tipoChavePix]);
 
   /**
    * O dia em que o dinheiro saiu passa a valer como emissão e vencimento.
@@ -303,7 +356,7 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
     quantidade: number,
     total: number,
     primeiroVencimento: string,
-    dias: number,
+    ritmo: RitmoDasParcelas,
   ): Parcela[] {
     if (quantidade < 1 || !primeiroVencimento) return [];
     const centavos = Math.round(total * 100);
@@ -312,15 +365,23 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
 
     return Array.from({ length: quantidade }, (_, i) => ({
       valor: (((i === 0 ? base + sobra : base) / 100) || 0).toFixed(2),
-      vencimento: somarDias(primeiroVencimento, dias * i),
+      // "mes" mantém o dia: quem vence dia 15 vence todo dia 15. Contar 30 dias
+      // parece a mesma coisa e não é — em seis meses a conta já anda cinco dias,
+      // e a parcela de agosto cai em setembro no dia 10.
+      vencimento:
+        ritmo === 'mes'
+          ? mesesDepois(primeiroVencimento, i)
+          : somarDias(primeiroVencimento, ritmo * i),
     }));
   }
 
   function refazerParcelas(
     quantidade = Number(quantasParcelas) || 0,
-    dias = intervalo,
+    ritmo = intervalo,
   ) {
-    setParcelas(gerarParcelas(quantidade, Number(valor) || 0, vencimento, dias));
+    setParcelas(
+      gerarParcelas(quantidade, Number(valor) || 0, vencimento, ritmo),
+    );
   }
 
   /**
@@ -498,6 +559,11 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
               onClick={() => {
                 setFornecedor(null);
                 setTermo('');
+                // A chave sai junto com o fornecedor. Sem isto, trocar de
+                // credor deixaria a chave do anterior no campo — e a conta iria
+                // para o IXC pagando a pessoa errada.
+                setChavePix('');
+                setTipoChavePix('');
               }}
               className="btn btn-sutil btn-p"
             >
@@ -813,6 +879,18 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
                 </span>
               )}
             </div>
+            {/* De onde veio a chave que está no campo. Quem confere um
+                pagamento precisa saber se ela é do cadastro do fornecedor ou
+                se alguém a digitou aqui — são responsabilidades diferentes. */}
+            <p className="ajuda">
+              {bancoDoFornecedor.isFetching
+                ? 'Procurando a chave do fornecedor no IXC…'
+                : pixDoCadastro && chavePix.trim() === pixDoCadastro
+                  ? 'Chave do cadastro deste fornecedor no IXC. Dá para trocar, e vale só para esta conta.'
+                  : pixDoCadastro
+                    ? `No cadastro do IXC a chave dele é ${pixDoCadastro} — esta conta vai com a que está acima.`
+                    : 'Este fornecedor não tem chave PIX no cadastro do IXC. Escreva a chave aqui, ou cadastre-a lá.'}
+            </p>
           </div>
         )}
 
@@ -1096,25 +1174,36 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
                   />
                 </div>
                 <div>
-                  <span className="rotulo">A cada</span>
+                  <span className="rotulo">Vencendo</span>
                   <div className="flex gap-1.5">
-                    {([15, 30] as const).map((dias) => (
-                      <button
-                        key={dias}
-                        type="button"
-                        onClick={() => {
-                          setIntervalo(dias);
-                          refazerParcelas(undefined, dias);
-                        }}
-                        className={
-                          intervalo === dias
-                            ? 'btn btn-p bg-brand-600 text-white'
-                            : 'btn btn-p btn-neutro'
-                        }
-                      >
-                        {dias} dias
-                      </button>
-                    ))}
+                    {([
+                      [
+                        'mes',
+                        vencimento
+                          ? `todo dia ${Number(vencimento.slice(8, 10))}`
+                          : 'todo mês',
+                      ],
+                      [15, 'a cada 15 dias'],
+                      [30, 'a cada 30 dias'],
+                    ] as Array<[RitmoDasParcelas, string]>).map(
+                      ([ritmo, rotulo]) => (
+                        <button
+                          key={String(ritmo)}
+                          type="button"
+                          onClick={() => {
+                            setIntervalo(ritmo);
+                            refazerParcelas(undefined, ritmo);
+                          }}
+                          className={
+                            intervalo === ritmo
+                              ? 'btn btn-p bg-brand-600 text-white'
+                              : 'btn btn-p btn-neutro'
+                          }
+                        >
+                          {rotulo}
+                        </button>
+                      ),
+                    )}
                   </div>
                 </div>
                 <button

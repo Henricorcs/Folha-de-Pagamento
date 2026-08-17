@@ -98,6 +98,19 @@ export class DespesasController {
     return this.fornecedores.buscarNoIxcPorNome(busca ?? '');
   }
 
+  /**
+   * Um fornecedor do IXC pelo código, com a aba "Dados bancários" junto.
+   *
+   * A busca por nome não traz a chave PIX de propósito: ela mora noutra tabela e
+   * custa uma consulta por fornecedor, o que numa lista seria uma rajada no IXC.
+   * Escolhido um, aí sim vale a consulta — é a chave que de fato paga, e quem
+   * lança a conta não deveria ter de ir ao IXC copiá-la à mão.
+   */
+  @Get('fornecedores-ixc/:id')
+  buscarFornecedorPorId(@Param('id', ParseIntPipe) id: number) {
+    return this.fornecedores.buscarNoIxcPorId(id);
+  }
+
   /** Cria a conta a pagar no IXC e a etiqueta com a categoria escolhida. */
   @Post('contas-abertas/despesa')
   @HttpCode(201)

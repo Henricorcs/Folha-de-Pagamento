@@ -5,7 +5,6 @@ import {
   Bloco,
   CabecalhoPagina,
   Carregando,
-  Indicador,
   Pagina,
   Selo,
   Vazio,
@@ -30,8 +29,13 @@ import { DetalheDoPagamento, PrazoDoPagamento } from './DetalheDoPagamento';
  * milhares de baixas — pedir "tudo" seria uma tela que nunca abre.
  */
 
-/** As fatias do resumo viram filtro: clicar no número mostra os pagamentos dele. */
-type Recorte = 'todos' | 'em-dia' | 'atraso' | 'ressalva' | 'parciais';
+/**
+ * Os recortes da lista. Só dois além de "todos", e de propósito: são os que
+ * respondem a uma pergunta de quem confere ("o que está torto?", "o que ficou
+ * pela metade?"). Separar em dia de em atraso não era recorte, era estatística —
+ * e cada linha já diz o seu prazo.
+ */
+type Recorte = 'todos' | 'ressalva' | 'parciais';
 
 /**
  * A marca de UTF-8 que vai na frente do CSV: sem ela o Excel abre os acentos
@@ -113,65 +117,12 @@ export function HistoricoDePagamentos() {
         </Aviso>
       ))}
 
-      {resumo && (
-        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Indicador
-            rotulo="Saiu no período"
-            valor={formatBRL(resumo.total)}
-            detalhe={
-              resumo.jurosEMulta > 0
-                ? `${resumo.quantidade} pagamento(s) · ${formatBRL(resumo.jurosEMulta)} de juros e multa`
-                : `${resumo.quantidade} pagamento(s)`
-            }
-            acento
-            aberto={recorte === 'todos'}
-            onClick={() => setRecorte('todos')}
-          />
-          <Indicador
-            rotulo="Pagos em dia"
-            valor={formatBRL(resumo.emDia.total)}
-            detalhe={`${resumo.emDia.quantidade} pagamento(s)${
-              resumo.semVencimento.quantidade > 0
-                ? ` · ${resumo.semVencimento.quantidade} sem vencimento`
-                : ''
-            }`}
-            aberto={recorte === 'em-dia'}
-            onClick={() => setRecorte('em-dia')}
-          />
-          <Indicador
-            rotulo="Pagos em atraso"
-            valor={formatBRL(resumo.emAtraso.total)}
-            detalhe={`${resumo.emAtraso.quantidade} pagamento(s)`}
-            alerta={
-              resumo.jurosEMulta > 0
-                ? `${formatBRL(resumo.jurosEMulta)} em juros e multa`
-                : undefined
-            }
-            aberto={recorte === 'atraso'}
-            onClick={() => setRecorte('atraso')}
-          />
-          {/* O cartão que justifica a tela: o que o IXC registrou de forma que
-              não fecha. Sem ele, a lista convida a confiar em duzentas linhas de
-              uma vez sem nada pedir atenção. */}
-          <Indicador
-            rotulo="Pedem conferência"
-            valor={formatBRL(resumo.comRessalva.total)}
-            detalhe={
-              resumo.comRessalva.quantidade === 0
-                ? 'nenhum: todos os registros fecham'
-                : `${resumo.comRessalva.quantidade} pagamento(s) com algo torto no registro`
-            }
-            alerta={
-              resumo.parciais.quantidade > 0
-                ? `${resumo.parciais.quantidade} pagamento(s) parciais`
-                : undefined
-            }
-            aberto={recorte === 'ressalva'}
-            onClick={() => setRecorte('ressalva')}
-          />
-        </div>
-      )}
-
+      {/*
+        Sem cartões de resumo em cima: quem abre esta tela vem atrás de um
+        pagamento, não de um total. O que os cartões somavam continua à mão —
+        o filtro de conferência e o de parciais ficaram como botões, e cada
+        linha já diz na cara se foi em dia, em atraso ou se tem algo torto.
+      */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <input
           value={busca}
@@ -179,6 +130,19 @@ export function HistoricoDePagamentos() {
           placeholder="Buscar por fornecedor, documento, forma de pagamento ou observação"
           className="campo max-w-md"
         />
+        {resumo && resumo.comRessalva.quantidade > 0 && (
+          <button
+            onClick={() =>
+              setRecorte(recorte === 'ressalva' ? 'todos' : 'ressalva')
+            }
+            className={`btn btn-p ${
+              recorte === 'ressalva' ? 'btn-acao' : 'btn-sutil'
+            }`}
+            title="Pagamentos cujo registro no IXC não fecha: status parado, valor sem informação, baixa com auditoria reprovada"
+          >
+            Só os que pedem conferência ({resumo.comRessalva.quantidade})
+          </button>
+        )}
         {resumo && resumo.parciais.quantidade > 0 && (
           <button
             onClick={() =>
@@ -442,11 +406,8 @@ function filtrar(
   const termo = busca.trim().toLowerCase();
 
   return pagamentos.filter((p) => {
-    const dias = p.diasDeAtraso;
     const passaRecorte =
       recorte === 'todos' ||
-      (recorte === 'em-dia' && dias !== null && dias <= 0) ||
-      (recorte === 'atraso' && dias !== null && dias > 0) ||
       (recorte === 'ressalva' && !p.conferencia.fecha) ||
       (recorte === 'parciais' && p.parcial);
     if (!passaRecorte) return false;

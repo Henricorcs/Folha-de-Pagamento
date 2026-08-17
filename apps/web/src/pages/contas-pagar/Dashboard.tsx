@@ -212,10 +212,6 @@ export function Dashboard() {
             />
           </Bloco>
 
-          <Bloco titulo="Por urgência" className="surgir surgir-1">
-            <FaixaDeUrgencia contas={contas} />
-          </Bloco>
-
           {/* --- O dia de trabalho: o que sai nos próximos dias --- */}
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
             <Bloco
@@ -358,37 +354,6 @@ function BarraDeFatias({ fatias }: { fatias: Fatia[] }) {
       </div>
     </div>
   );
-}
-
-/**
- * A régua de cores da casa, na mesma leitura da lista: vermelho já venceu,
- * amarelo vence hoje, verde ainda tem prazo.
- */
-function FaixaDeUrgencia({ contas }: { contas: ContaAberta[] }) {
-  const grupos: Array<{ rotulo: string; cor: string; contas: ContaAberta[] }> = [
-    {
-      rotulo: 'Vencidas',
-      cor: CORES_DE_ESTADO.vencido,
-      contas: contas.filter((c) => c.diasParaVencer !== null && c.diasParaVencer < 0),
-    },
-    {
-      rotulo: 'Vencem hoje',
-      cor: CORES_DE_ESTADO.hoje,
-      contas: contas.filter((c) => c.diasParaVencer === 0),
-    },
-    {
-      rotulo: 'Ainda no prazo',
-      cor: CORES_DE_ESTADO.prazo,
-      contas: contas.filter((c) => c.diasParaVencer !== null && c.diasParaVencer > 0),
-    },
-    {
-      rotulo: 'Sem vencimento',
-      cor: CORES_DE_ESTADO.semData,
-      contas: contas.filter((c) => c.diasParaVencer === null),
-    },
-  ];
-
-  return <BarraDeFatias fatias={grupos.map(paraFatia)} />;
 }
 
 /**
@@ -668,21 +633,6 @@ interface Grupo {
   total: number;
   quantidade: number;
 }
-
-/** Um conjunto de contas vira a fatia que o representa na barra. */
-function paraFatia(grupo: {
-  rotulo: string;
-  cor: string;
-  contas: ContaAberta[];
-}): Fatia {
-  return {
-    rotulo: grupo.rotulo,
-    cor: grupo.cor,
-    total: somar(grupo.contas),
-    quantidade: grupo.contas.length,
-  };
-}
-
 
 /**
  * Soma por chave e devolve do maior para o menor. O que não cabe nas primeiras
