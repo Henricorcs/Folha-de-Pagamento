@@ -143,6 +143,21 @@
   .card {
     @apply rounded-2xl border border-tinta-100 bg-papel shadow-card;
   }
+
+  /*
+   * A faixa do título, no alto de uma janela ou de um cartão.
+   *
+   * Ganha um véu da cor da marca e um fio embaixo. Sem isso o título tinha o
+   * mesmo fundo do conteúdo, e cartão colado em cartão virava uma coluna
+   * contínua em que não se via onde uma coisa acabava e a outra começava — numa
+   * tela com seis blocos, achar o começo do que se procura dava trabalho.
+   *
+   * O véu é fraco de propósito: ele separa, não disputa. Quem tem de se ler
+   * primeiro é o número embaixo dele.
+   */
+  .faixa-titulo {
+    @apply rounded-t-2xl border-b border-tinta-200 bg-brand-500/[0.07] dark:bg-brand-400/[0.09];
+  }
   .card-hover {
     @apply transition duration-200 hover:-translate-y-0.5 hover:shadow-card-hover;
   }
@@ -213,6 +228,15 @@
   .btn-neutro {
     @apply border border-tinta-200 bg-papel text-tinta-700 hover:border-tinta-300 hover:bg-tinta-50;
   }
+  /*
+   * Ferramenta ao lado de um campo: ler o QR, ler o código de barras. Não
+   * conclui nada e não é escolha alternativa — abre um jeito mais rápido de
+   * preencher o campo vizinho. Ganha um véu da cor da marca em vez de cor
+   * sólida: distingue-se do neutro sem competir com o botão que fecha a tela.
+   */
+  .btn-ferramenta {
+    @apply border border-brand-500/30 bg-brand-500/10 text-brand-700 hover:border-brand-500/50 hover:bg-brand-500/20 dark:text-brand-300;
+  }
   .btn-sutil {
     @apply text-tinta-500 hover:bg-tinta-100 hover:text-tinta-800;
   }
@@ -253,22 +277,16 @@
     @apply h-4 w-4 shrink-0 cursor-pointer rounded border-tinta-300 bg-tinta-50 accent-brand-600;
   }
   /*
-   * Uma opção que liga um comportamento. Tem moldura própria e vira alvo de
-   * clique inteiro: solta no meio do formulário, uma linha de texto com um
-   * quadradinho na frente não parecia coisa em que se clica.
+   * Uma opção que liga um comportamento.
+   *
+   * É uma linha, não uma caixa. Ela já teve moldura própria, para parecer
+   * clicável, e o preço foi alto: três opções viravam três blocos empilhados
+   * que empurravam o resto do formulário para fora da tela. Num formulário
+   * longo, o que atrapalha não é a opção discreta demais — é a tela que não
+   * cabe. O alvo de clique continua sendo a linha inteira.
    */
   .opcao {
-    @apply flex w-full cursor-pointer items-start gap-2.5 rounded-xl border border-tinta-200 bg-tinta-50/60 px-3.5 py-3 text-sm leading-snug text-tinta-700 transition hover:border-tinta-300 hover:bg-tinta-50;
-  }
-  /* O que a opção revela quando ligada: preso a ela pela borda esquerda. */
-  .painel-opcao {
-    @apply mt-2 rounded-xl border border-tinta-200 bg-tinta-50/60 p-3.5;
-    border-left-width: 3px;
-    border-left-color: theme('colors.brand.500');
-  }
-  /* Painel de algo que já aconteceu com o dinheiro: verde, não azul. */
-  .painel-opcao-pago {
-    border-left-color: theme('colors.emerald.500');
+    @apply flex cursor-pointer items-center gap-2 text-sm leading-snug text-tinta-700 transition hover:text-tinta-900;
   }
 
   /* --- Tabela --- */

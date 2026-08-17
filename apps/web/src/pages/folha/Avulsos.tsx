@@ -577,7 +577,7 @@ export function Avulsos({ doIxc = false }: { doIxc?: boolean } = {}) {
                 <button
                   onClick={() => consultar.mutate(form.cpfCnpj)}
                   disabled={form.cpfCnpj.trim().length < 3 || consultar.isPending}
-                  className="btn btn-neutro shrink-0"
+                  className="btn btn-ferramenta shrink-0"
                   title="Procura no IXC um fornecedor já cadastrado com esse documento"
                 >
                   {consultar.isPending ? 'Vendo…' : 'Conferir no IXC'}
@@ -1648,7 +1648,7 @@ function FormularioPagamento({
                   <button
                     type="button"
                     onClick={() => setLendoQr(true)}
-                    className="btn btn-neutro shrink-0"
+                    className="btn btn-ferramenta shrink-0"
                     title="Ler o QR Code do PIX com a câmera"
                   >
                     QR

@@ -190,16 +190,16 @@ export function Bloco({
     return (
     <section className={`card ${esticado ? 'flex h-full flex-col' : ''} ${className}`}>
       {titulo && (
-        <div className="flex items-center justify-between gap-3 px-4 pb-2.5 pt-4 sm:px-5">
+        <div className="faixa-titulo flex items-center justify-between gap-3 px-4 py-3 sm:px-5">
           <h2 className="titulo-bloco">{titulo}</h2>
           {acao}
         </div>
       )}
       <div
         className={`${esticado ? 'flex min-h-0 flex-1 flex-col' : ''} ${
-          semPadding
-            ? ''
-            : `px-4 pb-4 sm:px-5 sm:pb-5 ${titulo ? '' : 'pt-4 sm:pt-5'}`
+          // O topo já não vem de graça: a faixa do título agora tem borda
+          // própria, e sem esta folga o conteúdo encostaria nela.
+          semPadding ? '' : 'px-4 pb-4 pt-4 sm:px-5 sm:pb-5 sm:pt-5'
         }`}
       >
         {children}
@@ -251,7 +251,7 @@ export function Janela({
         aria-label={titulo}
         className="surgir my-auto h-fit w-full max-w-5xl rounded-2xl border border-tinta-100 bg-papel shadow-2xl"
       >
-        <div className="flex items-start justify-between gap-3 border-b border-tinta-100 px-5 py-4 sm:px-6">
+        <div className="faixa-titulo flex items-start justify-between gap-3 px-5 py-4 sm:px-6">
           <h2 className="titulo-bloco">{titulo}</h2>
           <button
             onClick={onFechar}

@@ -448,14 +448,8 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
 
   return (
     <Janela titulo="Lançar conta a pagar" onFechar={onFechar}>
-      <p className="mb-5 text-sm leading-relaxed text-tinta-500">
-        Uma conta só, lançada à mão — energia, aluguel, uma compra. Ela vira
-        conta a pagar no IXC na hora, pelo mesmo caminho da folha, e de lá segue
-        para a auditoria como todas as outras.
-      </p>
-
       {/* --- Fornecedor --- */}
-      <div className="mb-5">
+      <div className="mb-4">
         <label className="rotulo" htmlFor="fornecedor">
           Fornecedor no IXC
         </label>
@@ -490,10 +484,6 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
               className="campo"
               autoFocus
             />
-            <p className="ajuda">
-              A busca vai ao IXC. Só aparecem fornecedores ativos.
-            </p>
-
             {fornecedores.isFetching && <Carregando texto="Procurando no IXC…" />}
 
             {fornecedores.error && (
@@ -577,15 +567,11 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
               </option>
             ))}
           </select>
-          <p className="ajuda">
-            {TIPOS_DE_PAGAMENTO.find((t) => t.valor === tipoPagamento)?.nota ??
-              'O rótulo tem de ser o mesmo do seu IXC.'}
-          </p>
         </div>
 
         <div>
           <label className="rotulo" htmlFor="conta-pagamento">
-            Conta de onde sai
+            Conta de Pagamento
           </label>
           <select
             id="conta-pagamento"
@@ -619,42 +605,76 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
               </optgroup>
             )}
           </select>
-          <p className="ajuda">
-            {contasPagamento.error
-              ? 'Não deu para ler as contas do IXC — a padrão vale.'
-              : 'É de onde o dinheiro sai: o banco, ou o caixa no pagamento em mãos.'}
-          </p>
-        </div>
-
-        <div>
-          <label className="rotulo" htmlFor="emissao">
-            Emissão
-          </label>
-          <input
-            id="emissao"
-            type="date"
-            value={emissao}
-            onChange={(e) => setEmissao(e.target.value)}
-            className="campo"
-          />
-        </div>
-
-        <div>
-          <label className="rotulo" htmlFor="vencimento">
-            Vencimento
-          </label>
-          <input
-            id="vencimento"
-            type="date"
-            value={vencimento}
-            onChange={(e) => setVencimento(e.target.value)}
-            className="campo"
-          />
-          {vencimento < emissao && (
+          {contasPagamento.error && (
             <p className="ajuda text-amber-700">
-              O vencimento está antes da emissão — confira se é isso mesmo.
+              Não deu para ler as contas do IXC — a padrão vale.
             </p>
           )}
+
+          {/*
+            "Já foi paga" mora colado na conta, e não junto das outras opções:
+            é esta conta que recebe a baixa. As duas escolhas são uma só — de
+            onde o dinheiro saiu —, e separá-las fazia marcar a caixa sem olhar
+            para a conta que ia ser debitada.
+          */}
+          <label className="opcao mt-2.5" title="A conta é criada, aprovada e baixada como paga no IXC de uma vez">
+            <input
+              type="checkbox"
+              className="marcador"
+              checked={jaPaga}
+              onChange={(e) => setJaPaga(e.target.checked)}
+            />
+            Já foi paga
+          </label>
+          {jaPaga && (
+            <div className="mt-2">
+              <label className="rotulo" htmlFor="data-pagamento">
+                Dia em que saiu
+              </label>
+              <input
+                id="data-pagamento"
+                type="date"
+                value={dataPagamento}
+                onChange={(e) => setDataPagamento(e.target.value)}
+                className="campo"
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Emissão e vencimento uma sob a outra: são a mesma pergunta em dois
+            tempos, e lado a lado com um campo alto sobrava buraco na coluna. */}
+        <div className="space-y-3">
+          <div>
+            <label className="rotulo" htmlFor="emissao">
+              Emissão
+            </label>
+            <input
+              id="emissao"
+              type="date"
+              value={emissao}
+              onChange={(e) => setEmissao(e.target.value)}
+              className="campo"
+            />
+          </div>
+
+          <div>
+            <label className="rotulo" htmlFor="vencimento">
+              Vencimento
+            </label>
+            <input
+              id="vencimento"
+              type="date"
+              value={vencimento}
+              onChange={(e) => setVencimento(e.target.value)}
+              className="campo"
+            />
+            {vencimento < emissao && (
+              <p className="ajuda text-amber-700">
+                O vencimento está antes da emissão — confira se é isso mesmo.
+              </p>
+            )}
+          </div>
         </div>
 
         {/*
@@ -682,7 +702,7 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
                 <button
                   type="button"
                   onClick={() => setLendo('boleto')}
-                  className="btn btn-neutro shrink-0"
+                  className="btn btn-ferramenta shrink-0"
                   title="Ler o código de barras com a câmera"
                 >
                   Ler boleto
@@ -729,7 +749,7 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
                 <button
                   type="button"
                   onClick={() => setLendo('pix')}
-                  className="btn btn-neutro shrink-0"
+                  className="btn btn-ferramenta shrink-0"
                   title="Ler o QR Code do PIX com a câmera"
                 >
                   Ler QR Code
@@ -759,138 +779,85 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
           </div>
         )}
 
-        <div>
-          <label className="rotulo" htmlFor="documento">
-            Documento
-          </label>
-          <input
-            id="documento"
-            value={documento}
-            onChange={(e) => setDocumento(e.target.value)}
-            className="campo"
-            placeholder="opcional"
-          />
-        </div>
-
-        <div>
-          <label className="rotulo" htmlFor="numero-nota">
-            Número da nota
-          </label>
-          <input
-            id="numero-nota"
-            value={numeroNota}
-            onChange={(e) => setNumeroNota(e.target.value)}
-            className="campo"
-            placeholder="opcional"
-          />
-        </div>
-
-        <div className="sm:col-span-2">
-          <label className="rotulo" htmlFor="categoria">
-            A que se refere
-          </label>
-          <select
-            id="categoria"
-            className="campo"
-            value={categoriaId}
-            disabled={categorias.isLoading}
-            onChange={(e) => setCategoriaId(e.target.value)}
-          >
-            <option value="">Sem classificação</option>
-            {(categorias.data ?? []).map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.nome}
-              </option>
-            ))}
-          </select>
-          <p className="ajuda">
-            É por esta escolha que o dashboard separa os gastos. Ela fica guardada
-            aqui — o IXC não tem onde recebê-la.
-          </p>
-        </div>
-
-        {/* --- Conta que já saiu da conta antes de existir no IXC --- */}
-        <div className="sm:col-span-2">
-          <label className="opcao">
+        {/* Os três curtos numa linha só: eram três alturas de campo para
+            preencher meia tela de largura. */}
+        <div className="grid grid-cols-1 gap-4 sm:col-span-2 sm:grid-cols-3">
+          <div>
+            <label className="rotulo" htmlFor="documento">
+              Documento
+            </label>
             <input
-              type="checkbox"
-              className="marcador"
-              checked={jaPaga}
-              onChange={(e) => setJaPaga(e.target.checked)}
+              id="documento"
+              value={documento}
+              onChange={(e) => setDocumento(e.target.value)}
+              className="campo"
+              placeholder="opcional"
             />
-            <span>
-              <strong className="font-semibold text-tinta-800">
-                Já foi paga
-              </strong>{' '}
-              — o dinheiro saiu da conta antes deste lançamento
-            </span>
-          </label>
-          {jaPaga && (
-            <div className="painel-opcao painel-opcao-pago">
-              <p className="text-xs leading-relaxed text-tinta-600">
-                A conta é criada, aprovada na auditoria e <strong>baixada
-                como paga</strong> no IXC de uma vez só — a mesma baixa que se
-                daria à mão por lá. Ela nem chega a aparecer na fila de
-                pagamento, que é o que evita o mesmo dinheiro sair duas vezes.
-              </p>
-              <div className="mt-3 max-w-[220px]">
-                <label className="rotulo" htmlFor="data-pagamento">
-                  Dia em que o dinheiro saiu
-                </label>
-                <input
-                  id="data-pagamento"
-                  type="date"
-                  value={dataPagamento}
-                  onChange={(e) => setDataPagamento(e.target.value)}
-                  className="campo"
-                />
-                <p className="ajuda">
-                  O dia do extrato, não o de hoje — é por ele que a conciliação
-                  do mês fecha.
-                </p>
-              </div>
-              <p className="mt-3 text-xs leading-relaxed text-tinta-500">
-                A baixa é lançada na conta escolhida lá em cima, em{' '}
-                <strong>Conta de onde sai</strong>: é de onde o dinheiro saiu de
-                verdade. Confira antes de salvar.
-              </p>
-            </div>
-          )}
+          </div>
+
+          <div>
+            <label className="rotulo" htmlFor="numero-nota">
+              Número da nota
+            </label>
+            <input
+              id="numero-nota"
+              value={numeroNota}
+              onChange={(e) => setNumeroNota(e.target.value)}
+              className="campo"
+              placeholder="opcional"
+            />
+          </div>
+
+          <div>
+            <label className="rotulo" htmlFor="categoria">
+              A que se refere
+            </label>
+            <select
+              id="categoria"
+              className="campo"
+              value={categoriaId}
+              disabled={categorias.isLoading}
+              onChange={(e) => setCategoriaId(e.target.value)}
+              title="É por esta escolha que o dashboard separa os gastos. Fica guardada aqui — o IXC não tem onde recebê-la."
+            >
+              <option value="">Sem classificação</option>
+              {(categorias.data ?? []).map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nome}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* --- Serviço que se repete todo mês --- */}
         {!parcelado && (
           <div className="sm:col-span-2">
-            <label className="opcao">
+            <label
+              className="opcao"
+              title="Internet, aluguel, contabilidade — a conta de cada mês nasce sozinha no IXC"
+            >
               <input
                 type="checkbox"
                 className="marcador"
                 checked={recorrente}
                 onChange={(e) => setRecorrente(e.target.checked)}
               />
-              Repetir todo mês — internet, aluguel, contabilidade
+              Repetir todo mês
             </label>
             {recorrente && (
-              <div className="mt-1 rounded-xl border border-tinta-100 p-3">
-                <p className="text-xs leading-relaxed text-tinta-500">
-                  Esta conta é lançada agora, vencendo em{' '}
-                  {vencimento ? formatarDia(vencimento) : '—'}. Daí em diante,
-                  todo mês uma nova nasce sozinha no IXC{' '}
-                  <strong>5 dias antes de vencer</strong>, com o mesmo valor e a
-                  mesma categoria. Dá para mudar o valor, desligar ou apagar em
-                  Recorrentes.
-                </p>
-                <label className="mt-2 flex items-center gap-2 text-sm text-tinta-700">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 accent-brand-600"
-                    checked={soDiasUteis}
-                    onChange={(e) => setSoDiasUteis(e.target.checked)}
-                  />
-                  Só em dia útil — vencimento em fim de semana ou feriado
-                  nacional passa para o próximo dia em que o banco abre
-                </label>
-              </div>
+              <label
+                className="opcao ml-6 mt-2"
+                title="Vencimento em sábado, domingo ou feriado nacional passa para o próximo dia em que o banco abre"
+              >
+                <input
+                  type="checkbox"
+                  className="marcador"
+                  checked={soDiasUteis}
+                  onChange={(e) => setSoDiasUteis(e.target.checked)}
+                />
+                Só em dia útil
+              </label>
             )}
           </div>
         )}
@@ -898,10 +865,13 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
         {/* --- Parcelamento --- */}
         {!recorrente && (
         <div className="sm:col-span-2">
-          <label className="flex items-center gap-2 text-sm text-tinta-700">
+          <label
+            className="opcao"
+            title="Uma conta a pagar para cada parcela no IXC"
+          >
             <input
               type="checkbox"
-              className="h-4 w-4 accent-brand-600"
+              className="marcador"
               checked={parcelado}
               onChange={(e) => {
                 setParcelado(e.target.checked);
@@ -910,7 +880,7 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
                 else refazerParcelas();
               }}
             />
-            Lançar em parcelas — uma conta a pagar para cada uma no IXC
+            Lançar em parcelas
           </label>
 
           {parcelado && (
@@ -1214,14 +1184,10 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
             id="observacao"
             value={observacao}
             onChange={(e) => setObservacao(e.target.value)}
-            rows={3}
+            rows={2}
             className="campo"
-            placeholder="Energia da fazenda, competência 08/2026"
+            title="Vai para o campo de observação do IXC — é o que se lê na lista de contas a pagar de lá"
           />
-          <p className="ajuda">
-            Vai para o campo de observação do IXC — é o que se lê na lista de
-            contas a pagar de lá.
-          </p>
         </div>
       </div>
 
