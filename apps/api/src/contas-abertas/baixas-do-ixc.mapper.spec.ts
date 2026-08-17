@@ -21,7 +21,7 @@ function baixa(over: Record<string, unknown> = {}): Record<string, unknown> {
     data: '15/08/2026',
     valor: '50.000,00',
     documento: '36949',
-    historico: 'Pag. Moises de Oliveira Sousa - doc.: 36949',
+    historico: 'Pag. Fulano de Tal - doc.: 36949',
     ...over,
   };
 }

@@ -456,3 +456,78 @@ describe('titulo que existe mas nunca foi liberado', () => {
     expect(olhado?.valor).toBe('N');
   });
 });
+
+/**
+ * Uma previsao de gasto, copiada do registro real que veio do IXC.
+ *
+ * Ela aparecia na fila de pagamento como conta vencendo hoje, e nao estava na
+ * tela de contas a pagar do IXC. Pelos outros campos ela e divida por inteiro:
+ * status "A", liberada, saldo cheio, vencimento marcado -- so a coluna
+ * `previsao` a separa de uma conta de verdade. A emissao de um ano e meio antes
+ * do vencimento entrega o que ela e: gasto que se espera ter, nao dinheiro que
+ * alguem esta cobrando.
+ */
+describe('previsao de gasto nao e conta a pagar', () => {
+  const PREVISAO: Record<string, unknown> = {
+    id: '33854',
+    liberado: 'S',
+    filial_id: '1',
+    status: 'A',
+    data_emissao: '2025-03-20',
+    data_vencimento: '2026-08-17',
+    valor: '85.14',
+    valor_aberto: '85.14',
+    valor_pago: '0.00',
+    data_pagamento: '',
+    valor_total_pago: '0.00',
+    status_auditoria: '',
+    documento: '',
+    id_entrada: '0',
+    tipo_pagamento: 'Boleto',
+    previsao: 'S',
+    id_conta: '11925',
+    id_contas: '18',
+  };
+
+  it('fica de fora, e diz que foi pela coluna previsao', () => {
+    expect(estaEmAberto(PREVISAO)).toBe(false);
+    expect(motivoDeNaoEstarAberto(PREVISAO)).toEqual({
+      motivo: 'previsao',
+      campo: 'previsao',
+    });
+  });
+
+  it('a mesma conta, sem a marca de previsao, e divida de verdade', () => {
+    const real = { ...PREVISAO, previsao: 'N' };
+    expect(estaEmAberto(real)).toBe(true);
+    expect(mapContaAberta(real, HOJE)!.valorAberto).toBe(85.14);
+  });
+
+  /*
+   * A mesma disciplina da coluna `liberado`: base que nao tenha esse controle
+   * nao pode perder as contas dela por causa de um campo que nao existe la.
+   */
+  it('coluna ausente ou vazia nao exclui ninguem', () => {
+    const semColuna = { ...PREVISAO };
+    delete semColuna.previsao;
+    expect(estaEmAberto(semColuna)).toBe(true);
+    expect(estaEmAberto({ ...PREVISAO, previsao: '' })).toBe(true);
+  });
+
+  /** Previsao paga e dinheiro que saiu: quem manda ai e a baixa, nao a marca. */
+  it('previsao ja baixada sai como paga, nao como previsao', () => {
+    const baixada = {
+      ...PREVISAO,
+      data_pagamento: '17/08/2026',
+      valor_aberto: '0,00',
+    };
+    expect(motivoDeNaoEstarAberto(baixada)?.motivo).toBe('pago');
+  });
+
+  it('a ficha do debito mostra a coluna previsao com o valor lido', () => {
+    const olhado = explicarFiltro(PREVISAO).olhou.find(
+      (c) => c.campo === 'previsao',
+    );
+    expect(olhado?.valor).toBe('S');
+  });
+});

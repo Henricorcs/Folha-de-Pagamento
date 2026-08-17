@@ -22,7 +22,9 @@ function titulo(over: Record<string, unknown> = {}): Record<string, unknown> {
     id: '36949',
     status: 'F',
     id_fornecedor: '77',
-    fornecedor: 'MOISES DE OLIVEIRA SOUSA',
+    // Nome de fachada: o repositório é público, e fornecedor de verdade não
+    // entra em arquivo versionado.
+    fornecedor: 'FULANO DE TAL',
     valor: '50.000,00',
     data_emissao: '15/08/2026',
     data_vencimento: '15/08/2026',

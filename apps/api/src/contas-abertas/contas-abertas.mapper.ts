@@ -104,7 +104,7 @@ export function estaEmAberto(raw: Record<string, unknown>): boolean {
 
 /** Por que um título não entra na lista — e por qual campo se soube disso. */
 export interface MotivoDeExclusao {
-  motivo: 'pago' | 'cancelado' | 'quitado' | 'nao-liberado';
+  motivo: 'pago' | 'cancelado' | 'quitado' | 'nao-liberado' | 'previsao';
   /** A coluna do IXC que decidiu. Serve para explicar a exclusão na tela. */
   campo: string;
 }
@@ -166,6 +166,34 @@ export function motivoDeNaoEstarAberto(
    */
   if (String(raw.liberado ?? '').trim().toUpperCase() === 'N') {
     return { motivo: 'nao-liberado', campo: 'liberado' };
+  }
+
+  /*
+   * Previsão de gasto não é conta a pagar.
+   *
+   * `previsao = S` é o que o IXC usa para o gasto que se espera ter e ainda não
+   * existe como dívida — o plano de celular do mês que vem, a parcela do
+   * consórcio do ano que vem. A tela de contas a pagar do IXC não os mostra, e
+   * era por isso que esta lista tinha títulos que não se achava lá: eles têm
+   * status "A", saldo cheio e vencimento — parecem dívida por todos os outros
+   * campos. Um deles vencia hoje com emissão de um ano e meio atrás.
+   *
+   * Pôr previsão na fila de pagamento é pedir para alguém pagar o que ninguém
+   * cobrou ainda. Elas ficam de fora, contadas no aviso da tela.
+   *
+   * Só o "S" explícito exclui, como no `liberado`: coluna vazia é o estado
+   * normal da conta de verdade, e as lançadas por esta casa nascem com "N".
+   *
+   * A baixa passa na frente da marca: previsão que alguém baixou virou dinheiro
+   * que saiu, e o motivo tem de dizer "pago". Chamá-la de previsão esconderia
+   * uma saída de caixa atrás de uma marca de planejamento — e o histórico de
+   * pagamentos, que lê a baixa, mostraria um pagamento que esta tela nega.
+   */
+  if (
+    String(raw.previsao ?? '').trim().toUpperCase() === 'S' &&
+    !campoDeBaixa(raw)
+  ) {
+    return { motivo: 'previsao', campo: 'previsao' };
   }
 
   /*
