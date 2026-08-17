@@ -109,12 +109,28 @@ export function DetalheDoPagamento({
         <div className="mt-5 grid grid-cols-1 gap-x-6 sm:grid-cols-2">
           <Dado rotulo="Data do pagamento">
             {formatData(pagamento.pagoEm)}
-            {/* De que coluna a data saiu não é detalhe técnico: é por ela que
-                se acha o título na tela do IXC. */}
-            <span className="num ml-1 text-xs text-tinta-400">
-              ({pagamento.campoDaBaixa})
+            {/* De onde a data saiu não é detalhe técnico: é o que separa o
+                pagamento atrasado do lançamento atrasado, e é por ela que se
+                acha o registro na tela do IXC. */}
+            <span className="ml-1 text-xs text-tinta-400">
+              {pagamento.fonteDaData === 'baixa'
+                ? `(informada na baixa${
+                    pagamento.baixaNoIxc ? ` nº ${pagamento.baixaNoIxc}` : ''
+                  })`
+                : `(${pagamento.campoDaBaixa} — o dia em que a baixa foi registrada)`}
             </span>
           </Dado>
+          {/* Só quando os dois dias diferem: repetir a mesma data em dois
+              campos faria procurar diferença onde não há. */}
+          {pagamento.registradoEm.slice(0, 10) !==
+            pagamento.pagoEm.slice(0, 10) && (
+            <Dado rotulo="Lançado no IXC em">
+              {formatData(pagamento.registradoEm)}
+              <span className="ml-1 text-xs text-tinta-400">
+                (o dia do registro, não o do dinheiro)
+              </span>
+            </Dado>
+          )}
           <Dado rotulo="Vencimento">
             {pagamento.vencimento
               ? formatData(pagamento.vencimento)
@@ -318,7 +334,23 @@ export function PrazoDoPagamento({
   }
   if (dias > 0) {
     return (
-      <Selo pequeno={pequeno} tom="erro">
+      <Selo
+        pequeno={pequeno}
+        tom="erro"
+        /*
+         * Sem a linha de baixa, o dia que se tem é o do registro — e quem lança
+         * dias depois de pagar vê atraso que não houve. O selo continua
+         * aparecendo (o título pode ter atrasado mesmo), mas diz em que dia ele
+         * está se baseando, para ninguém cobrar de fornecedor um atraso nosso.
+         */
+        titulo={
+          pagamento.fonteDaData === 'titulo'
+            ? 'Contado pelo dia em que a baixa foi registrada no IXC, que pode ' +
+              'ser depois do dia em que o dinheiro saiu — não achei a linha de ' +
+              'baixa deste título'
+            : undefined
+        }
+      >
         {dias === 1 ? 'pago 1 dia depois' : `pago ${dias} dias depois`}
       </Selo>
     );

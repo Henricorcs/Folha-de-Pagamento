@@ -21,6 +21,7 @@ import {
   type StatusAuditoriaIxc,
 } from '../ixc/ixc.financeiro';
 import { parseIxcDecimal, parseIxcId } from '../ixc/ixc.parse';
+import type { BaixaNoIxc } from './baixas-do-ixc.mapper';
 import {
   campoDeBaixa,
   campoDeCancelamento,
@@ -49,8 +50,30 @@ export interface PagamentoFeito {
   desconto: number;
   emissao: Date | null;
   vencimento: Date | null;
-  /** O dia em que o IXC diz que o título foi baixado */
+  /**
+   * O dia em que o dinheiro saiu.
+   *
+   * Vem da baixa quando ela pôde ser lida — é o dia que alguém informou ao
+   * baixar o título, o mesmo que a aba "Pagamentos" do IXC mostra. Sem ela,
+   * sobra o dia do título, que é o do registro da baixa. Ver `fonteDaData`.
+   */
   pagoEm: Date;
+  /**
+   * O dia em que a baixa foi registrada no IXC (a coluna `campoDaBaixa` do
+   * título). Ele é igual ao de cima quando se paga e se lança no mesmo dia, e
+   * mais tarde quando se lança depois — que é o caso de quem paga pelo banco e
+   * só então vem registrar.
+   */
+  registradoEm: Date;
+  /**
+   * De onde `pagoEm` saiu: `baixa` = o dia informado na linha de baixa;
+   * `titulo` = o dia em que a baixa foi registrada, porque a linha dela não
+   * pôde ser lida. A diferença é o que separa "pagou atrasado" de "lançou
+   * atrasado", e a tela precisa poder dizer qual das duas está mostrando.
+   */
+  fonteDaData: 'baixa' | 'titulo';
+  /** O número da linha de baixa no IXC, quando ela foi lida */
+  baixaNoIxc: number | null;
   /**
    * A coluna do IXC de onde a data da baixa saiu. Não é curiosidade técnica: é
    * por ela que se procura o título na tela do IXC, e é o que permite discordar
@@ -237,7 +260,13 @@ export function mapPagamento(
     desconto,
     emissao: primeiraData(raw, ['data_emissao', 'data', 'emissao']),
     vencimento,
+    // O título só sabe quando a baixa foi registrada. Enquanto a linha de baixa
+    // não corrigir isto (`aplicarBaixa`), o dia do pagamento é esse — e a tela
+    // diz de onde ele veio, em vez de deixar parecer que é o dia do dinheiro.
     pagoEm,
+    registradoEm: pagoEm,
+    fonteDaData: 'titulo',
+    baixaNoIxc: null,
     campoDaBaixa,
     diasDeAtraso: vencimento === null ? null : diasEntre(vencimento, pagoEm),
     formaPagamento: primeiroTexto(raw, [
@@ -280,6 +309,32 @@ export function mapPagamento(
       campoDaBaixa,
     }),
   };
+}
+
+/**
+ * Põe no pagamento o dia que a baixa informa — o dia em que o dinheiro saiu.
+ *
+ * É a correção que dá nome a esta tela. O título guarda o dia em que a baixa foi
+ * registrada, e quem paga o boleto pelo aplicativo do banco e só depois vem
+ * lançar registra sempre depois: a conta paga no vencimento aparecia com um, com
+ * cinco, com treze dias de atraso, conforme a demora do lançamento. O atraso que
+ * interessa é o do pagamento, e quem sabe dele é a baixa.
+ *
+ * O atraso é recontado aqui de propósito, e não deixado para a tela: ele existe
+ * em três lugares (o selo, o resumo do período e a exportação), e três contas da
+ * mesma coisa é como duas delas passam a discordar.
+ */
+export function aplicarBaixa(
+  pagamento: PagamentoFeito,
+  baixa: BaixaNoIxc,
+): void {
+  pagamento.pagoEm = baixa.data;
+  pagamento.fonteDaData = 'baixa';
+  pagamento.baixaNoIxc = baixa.id;
+  pagamento.diasDeAtraso =
+    pagamento.vencimento === null
+      ? null
+      : diasEntre(pagamento.vencimento, baixa.data);
 }
 
 /**

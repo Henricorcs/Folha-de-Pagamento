@@ -1,5 +1,6 @@
 import { estaEmAberto } from './contas-abertas.mapper';
 import {
+  aplicarBaixa,
   mapPagamento,
   motivoDeNaoSerPagamento,
   ordenarPorPagamento,
@@ -227,6 +228,71 @@ describe('ler um pagamento', () => {
 
   it('não aceita baixa com conteúdo que não é data', () => {
     expect(mapPagamento(pago({ data_pagamento: 'pago' }))).toBeNull();
+  });
+});
+
+/**
+ * O caso que trouxe isto: uma compra vencida em 15/08 e paga no dia, lançada
+ * aqui no dia 16. O IXC grava em `data_pagamento` o dia do registro, e a tela
+ * dizia "pago 1 dia depois" de um pagamento feito no vencimento — cobrando de
+ * quem pagou um atraso que foi do lançamento. Quem sabe o dia do dinheiro é a
+ * linha de baixa, que é o que a aba "Pagamentos" do IXC mostra.
+ */
+describe('a data que a baixa corrige', () => {
+  const lancadoNoDiaSeguinte = pago({
+    data_vencimento: '15/08/2026',
+    data_pagamento: '16/08/2026',
+  });
+
+  it('o dia do pagamento passa a ser o informado na baixa', () => {
+    const p = mapPagamento(lancadoNoDiaSeguinte)!;
+    expect(p.diasDeAtraso).toBe(1);
+
+    aplicarBaixa(p, {
+      id: 1724287,
+      idFnApagar: p.idFnApagar,
+      data: new Date(Date.UTC(2026, 7, 15)),
+      campo: 'data',
+    });
+
+    expect(p.pagoEm.toISOString().slice(0, 10)).toBe('2026-08-15');
+    expect(p.diasDeAtraso).toBe(0);
+    expect(p.fonteDaData).toBe('baixa');
+    expect(p.baixaNoIxc).toBe(1724287);
+  });
+
+  /*
+   * O dia do registro não é jogado fora: é por ele que se acha o título na
+   * leitura do IXC, e é ele que explica por que a conta apareceu num período e
+   * não no outro.
+   */
+  it('guarda o dia em que a baixa foi registrada', () => {
+    const p = mapPagamento(lancadoNoDiaSeguinte)!;
+    aplicarBaixa(p, {
+      id: 1,
+      idFnApagar: p.idFnApagar,
+      data: new Date(Date.UTC(2026, 7, 15)),
+      campo: 'data',
+    });
+    expect(p.registradoEm.toISOString().slice(0, 10)).toBe('2026-08-16');
+  });
+
+  it('sem vencimento no IXC, continua sem inventar atraso', () => {
+    const p = mapPagamento(pago({ data_vencimento: '' }))!;
+    aplicarBaixa(p, {
+      id: 1,
+      idFnApagar: p.idFnApagar,
+      data: new Date(Date.UTC(2026, 7, 15)),
+      campo: 'data',
+    });
+    expect(p.diasDeAtraso).toBeNull();
+  });
+
+  it('sem baixa lida, a data é a do título e a ficha diz isso', () => {
+    const p = mapPagamento(lancadoNoDiaSeguinte)!;
+    expect(p.fonteDaData).toBe('titulo');
+    expect(p.baixaNoIxc).toBeNull();
+    expect(p.registradoEm).toEqual(p.pagoEm);
   });
 });
 

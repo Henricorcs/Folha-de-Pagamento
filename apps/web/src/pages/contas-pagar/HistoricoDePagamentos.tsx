@@ -438,6 +438,7 @@ function filtrar(
 function baixarCsv(pagamentos: PagamentoFeito[], periodo: Janela): void {
   const colunas = [
     'Pago em',
+    'Lancado no IXC em',
     'Vencimento',
     'Dias de atraso',
     'Fornecedor',
@@ -460,6 +461,7 @@ function baixarCsv(pagamentos: PagamentoFeito[], periodo: Janela): void {
 
   const linhas = pagamentos.map((p) => [
     formatData(p.pagoEm),
+    formatData(p.registradoEm),
     p.vencimento ? formatData(p.vencimento) : '',
     p.diasDeAtraso === null ? '' : String(p.diasDeAtraso),
     p.fornecedor.nome,

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { FinanceiroModule } from '../financeiro/financeiro.module';
 import { IxcModule } from '../ixc/ixc.module';
+import { BaixasDoIxcService } from './baixas-do-ixc.service';
 import { CategoriasController } from './categorias.controller';
 import { CategoriasService } from './categorias.service';
 import { ContasAbertasController } from './contas-abertas.controller';
@@ -37,6 +38,9 @@ import { RecorrentesService } from './recorrentes.service';
     // lados opostos: um escreve no IXC, o outro nunca.
     PagamentosService,
     HistoricoPagamentosService,
+    // A linha de baixa do IXC, que é quem sabe em que dia o dinheiro saiu — o
+    // título só sabe em que dia a baixa foi registrada.
+    BaixasDoIxcService,
     RecorrentesService,
     RecorrentesPollerService,
   ],

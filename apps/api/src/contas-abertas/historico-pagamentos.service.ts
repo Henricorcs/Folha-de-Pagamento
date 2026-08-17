@@ -1,10 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { IxcClient } from '../ixc/ixc.client';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  BaixasDoIxcService,
+  TETO_DE_BAIXAS_AVULSAS,
+  type LeituraDeBaixas,
+} from './baixas-do-ixc.service';
 import { CategoriasService } from './categorias.service';
 import { ContasAbertasService } from './contas-abertas.service';
 import { CAMPOS_DE_BAIXA, STATUS_DE_PAGO } from './contas-abertas.mapper';
 import {
+  aplicarBaixa,
   mapPagamento,
   motivoDeNaoSerPagamento,
   ordenarPorPagamento,
@@ -43,6 +49,15 @@ const PAGINA = 500;
 
 /** Por quanto tempo vale o que se descobriu sobre a coluna da baixa. */
 const VALIDADE_DA_SONDA_MS = 30 * 60 * 1000;
+
+/**
+ * Quanto tempo depois do dinheiro sair uma baixa ainda costuma ser lançada.
+ *
+ * Não é um limite de nada: é o quanto a leitura das baixas recua para já trazer
+ * a linha dos títulos lançados com atraso. O que passar disso ainda é perguntado
+ * um a um — só que aí são poucos.
+ */
+const MARGEM_DE_LANCAMENTO_DIAS = 90;
 
 /**
  * Como esta base do IXC responde a um filtro por data de baixa: em que coluna a
@@ -90,6 +105,10 @@ export class HistoricoPagamentosService {
     private readonly ixc: IxcClient,
     private readonly prisma: PrismaService,
     private readonly categorias: CategoriasService,
+    // O título sabe que foi pago e em que dia isso foi *registrado*; quem sabe
+    // em que dia o dinheiro saiu é a baixa. Sem ela, quem lança no dia seguinte
+    // ao pagamento vê a tela acusar atraso de um pagamento feito no prazo.
+    private readonly baixas: BaixasDoIxcService,
     // Os índices de nome (fornecedor, plano de contas) e a lista de caixas vêm
     // de lá de propósito: é o serviço que sabe em que tabela desta base cada
     // cadastro mora — `planejamento_analitico` para o plano de contas, por
@@ -115,13 +134,33 @@ export class HistoricoPagamentosService {
       );
     }
 
+    /*
+     * O dia em que o dinheiro saiu vem da baixa; o título só sabe o dia em que
+     * ela foi registrada. É a diferença entre "pagou atrasado" e "lançou
+     * atrasado", e a segunda não é problema de ninguém.
+     *
+     * A leitura começa antes do período de propósito. O título lançado dentro
+     * dele pode ter sido pago antes, e é justamente esse o caso que se veio
+     * consertar — sem a baixa dele no índice, cada um viraria uma pergunta
+     * separada ao IXC, e dezenas de lançamentos atrasados num mês são dezenas
+     * de idas e voltas numa abertura de tela. Uma janela mais larga custa uma
+     * página a mais de leitura e responde por todos.
+     */
+    const baixas = await this.baixas.daJanela(
+      recuar(periodo.de, MARGEM_DE_LANCAMENTO_DIAS),
+      periodo.ate,
+    );
+
     // Cada título que fica de fora é contado pelo motivo e pela coluna que
     // decidiu — a mesma disciplina da tela de contas em aberto, onde foi assim
     // que se descobriu que uma regra larga demais tinha engolido quatrocentos
     // títulos de verdade.
     const excluidos = new Map<string, number>();
     const pagamentos: PagamentoFeito[] = [];
-    let foraDoPeriodo = 0;
+    const contagem = { foraDoPeriodo: 0, mudaramDePeriodo: 0 };
+    const idsLidos = new Set<number>();
+    /** Baixado, mas sem linha de baixa na janela lida: precisa ser perguntado. */
+    const semParNaJanela: PagamentoFeito[] = [];
 
     for (const raw of leitura.brutos) {
       const fora = motivoDeNaoSerPagamento(raw);
@@ -135,25 +174,67 @@ export class HistoricoPagamentosService {
 
       const pagamento = mapPagamento(raw);
       if (!pagamento) continue;
+      idsLidos.add(pagamento.idFnApagar);
 
-      // O período é conferido aqui de novo, sempre. Base que ignore um `qtype`
-      // que não conhece devolve a tabela inteira, e um histórico com pagamento
-      // de outro mês no meio mente sobre quanto saiu do caixa no período.
-      if (!dentroDoPeriodo(pagamento.pagoEm, periodo)) {
-        foraDoPeriodo += 1;
+      const baixa = baixas.porTitulo.get(pagamento.idFnApagar);
+      if (baixa) {
+        aplicarBaixa(pagamento, baixa);
+        this.guardar(pagamento, periodo, pagamentos, contagem);
         continue;
       }
-      pagamentos.push(pagamento);
+
+      /*
+       * Título baixado cuja linha de baixa a janela não trouxe. São dois casos
+       * que só uma pergunta separa: ou o dinheiro saiu antes do que a janela
+       * alcança — o lançamento muito atrasado —, ou a listagem não devolveu a
+       * linha. No primeiro, o pagamento é de outro período e não pode ser
+       * contado neste; no segundo, ele é daqui e sumiria se fosse descartado.
+       * Chutar erraria metade.
+       */
+      if (baixas.disponivel) {
+        semParNaJanela.push(pagamento);
+        continue;
+      }
+
+      // Sem as baixas, resta o dia do registro — que é o que esta tela mostrava
+      // antes, e a ficha de cada pagamento diz que é ele.
+      this.guardar(pagamento, periodo, pagamentos, contagem);
     }
 
+    const semDataDoDinheiro = await this.perguntarBaixaUmAUm(
+      semParNaJanela,
+      periodo,
+      pagamentos,
+      contagem,
+    );
+
+    await this.buscarPagosForaDaJanela(
+      baixas,
+      idsLidos,
+      periodo,
+      pagamentos,
+      contagem,
+      avisos,
+    );
+
     avisos.push(...explicarExclusoes(excluidos));
+    avisos.push(
+      ...explicarDatas({
+        baixas,
+        mudaramDePeriodo: contagem.mudaramDePeriodo,
+        semDataDoDinheiro,
+      }),
+    );
 
     // Muito registro fora da janela é o sinal de que o IXC não aplicou o
     // filtro: em vez de mostrar um número silenciosamente errado, a tela conta
     // que a conferência aconteceu deste lado.
-    if (foraDoPeriodo > pagamentos.length && foraDoPeriodo > 20) {
+    if (
+      contagem.foraDoPeriodo > pagamentos.length &&
+      contagem.foraDoPeriodo > 20
+    ) {
       avisos.push(
-        `${foraDoPeriodo} pagamento(s) vieram do IXC fora do período pedido e ` +
+        `${contagem.foraDoPeriodo} pagamento(s) vieram do IXC fora do período pedido e ` +
           'foram descartados aqui. Provavelmente o filtro por data não está ' +
           'sendo aplicado do lado do IXC — os totais abaixo são só do período, ' +
           'mas a leitura está trazendo mais do que precisa.',
@@ -169,9 +250,130 @@ export class HistoricoPagamentosService {
       resumo: resumirPagamentos(pagamentos),
       periodo,
       lidoEm,
-      comoFoiLido: leitura.como,
+      comoFoiLido: `${leitura.como} ${baixas.como}`,
       avisos,
     };
+  }
+
+  /**
+   * Põe o pagamento na lista, ou conta por que ele não entrou.
+   *
+   * Os dois motivos de ficar de fora são diferentes e não podem virar um número
+   * só. Data do registro fora do período é sinal de filtro que o IXC ignorou —
+   * defeito de leitura. Data do registro dentro e data do dinheiro fora é o
+   * lançamento atrasado funcionando como deve: o pagamento é de outro período e
+   * é lá que ele aparece. Somados, o primeiro se esconderia atrás do segundo.
+   */
+  private guardar(
+    pagamento: PagamentoFeito,
+    periodo: Periodo,
+    pagamentos: PagamentoFeito[],
+    contagem: { foraDoPeriodo: number; mudaramDePeriodo: number },
+  ): void {
+    // O período é conferido aqui, sempre. Base que ignore um `qtype` que não
+    // conhece devolve a tabela inteira, e um histórico com pagamento de outro
+    // mês no meio mente sobre quanto saiu do caixa no período.
+    if (dentroDoPeriodo(pagamento.pagoEm, periodo)) {
+      pagamentos.push(pagamento);
+      return;
+    }
+    if (dentroDoPeriodo(pagamento.registradoEm, periodo)) {
+      contagem.mudaramDePeriodo += 1;
+      return;
+    }
+    contagem.foraDoPeriodo += 1;
+  }
+
+  /**
+   * Pergunta ao IXC, título por título, a baixa dos que ficaram sem par.
+   *
+   * Devolve quantos continuaram sem resposta — esses ficam com a data do
+   * registro, e a ficha deles diz isso. É a única saída honesta: descartá-los
+   * sumiria com um pagamento que existe, e datá-los pelo registro sem avisar
+   * repetiria o erro que esta leitura veio consertar.
+   */
+  private async perguntarBaixaUmAUm(
+    semPar: PagamentoFeito[],
+    periodo: Periodo,
+    pagamentos: PagamentoFeito[],
+    contagem: { foraDoPeriodo: number; mudaramDePeriodo: number },
+  ): Promise<number> {
+    let semResposta = 0;
+
+    for (const [i, pagamento] of semPar.entries()) {
+      const baixa =
+        i < TETO_DE_BAIXAS_AVULSAS
+          ? await this.baixas.doTitulo(pagamento.idFnApagar)
+          : null;
+
+      if (baixa) {
+        aplicarBaixa(pagamento, baixa);
+      } else {
+        semResposta += 1;
+      }
+      this.guardar(pagamento, periodo, pagamentos, contagem);
+    }
+
+    return semResposta;
+  }
+
+  /**
+   * Busca os títulos que foram pagos no período mas registrados fora dele.
+   *
+   * São o outro lado do lançamento atrasado: a baixa é do dia 30 de julho e o
+   * registro, do dia 5 de agosto. A leitura por data do título procura julho e
+   * não acha esse registro; sem esta busca o pagamento sumiria de julho — e de
+   * agosto ele já sai, porque o dinheiro não saiu em agosto. Pagamento que não
+   * aparece em período nenhum é o pior resultado possível numa tela de
+   * conferência: ninguém procura o que não está em lugar algum.
+   */
+  private async buscarPagosForaDaJanela(
+    baixas: LeituraDeBaixas,
+    idsLidos: Set<number>,
+    periodo: Periodo,
+    pagamentos: PagamentoFeito[],
+    contagem: { foraDoPeriodo: number; mudaramDePeriodo: number },
+    avisos: string[],
+  ): Promise<void> {
+    if (!baixas.disponivel) return;
+
+    // Só as baixas do período: a leitura recua antes dele para achar a linha
+    // dos títulos lançados com atraso, e ir buscar todo título de três meses
+    // atrás que a janela não trouxe seria puxar meio histórico para descartar.
+    const faltantes = [...baixas.porTitulo.values()].filter(
+      (b) => !idsLidos.has(b.idFnApagar) && dentroDoPeriodo(b.data, periodo),
+    );
+    if (faltantes.length === 0) return;
+
+    for (const baixa of faltantes.slice(0, TETO_DE_BAIXAS_AVULSAS)) {
+      const raw = await this.ixc
+        .getById<Record<string, unknown>>(
+          'fn_apagar',
+          'fn_apagar.id',
+          baixa.idFnApagar,
+        )
+        .catch(() => null);
+      if (!raw) continue;
+
+      // O título vem do mesmo filtro que o resto da tela: baixa estornada não
+      // é dinheiro que saiu, mesmo tendo linha de pagamento.
+      if (motivoDeNaoSerPagamento(raw)) continue;
+
+      const pagamento = mapPagamento(raw);
+      if (!pagamento) continue;
+
+      aplicarBaixa(pagamento, baixa);
+      this.guardar(pagamento, periodo, pagamentos, contagem);
+    }
+
+    if (faltantes.length > TETO_DE_BAIXAS_AVULSAS) {
+      avisos.push(
+        `${faltantes.length - TETO_DE_BAIXAS_AVULSAS} pagamento(s) deste ` +
+          'período foram registrados no IXC depois dele e não couberam nesta ' +
+          'leitura. Eles existem lá — escolha um período que alcance o dia em ' +
+          'que foram registrados para vê-los.',
+      );
+    }
   }
 
   /**
@@ -543,6 +745,58 @@ function explicarExclusoes(excluidos: Map<string, number>): string[] {
   return avisos;
 }
 
+/**
+ * Conta em texto de onde vieram as datas desta leitura.
+ *
+ * A tela mostra um dia para cada pagamento e não tem como mostrar dois. Quando
+ * esse dia não é o do dinheiro — porque a baixa não pôde ser lida —, dizê-lo é o
+ * que impede alguém de cobrar de um fornecedor um atraso que foi do lançamento.
+ */
+function explicarDatas(p: {
+  baixas: LeituraDeBaixas;
+  mudaramDePeriodo: number;
+  semDataDoDinheiro: number;
+}): string[] {
+  const avisos: string[] = [];
+
+  if (!p.baixas.disponivel) {
+    avisos.push(
+      'A data mostrada em cada pagamento é o dia em que a baixa foi registrada ' +
+        'no IXC, não necessariamente o dia em que o dinheiro saiu: não consegui ' +
+        'ler as baixas desta base. Conta paga num dia e lançada em outro aparece ' +
+        'aqui com atraso que é do lançamento, não do pagamento — confira na aba ' +
+        '"Pagamentos" do título, no IXC.',
+    );
+    return avisos;
+  }
+
+  if (p.baixas.cortado) {
+    avisos.push(
+      `A leitura das baixas parou em ${p.baixas.lidas} linhas. Alguns ` +
+        'pagamentos deste período podem estar com a data do registro em vez da ' +
+        'do dia em que o dinheiro saiu — escolha um período mais curto.',
+    );
+  }
+
+  if (p.semDataDoDinheiro > 0) {
+    avisos.push(
+      `${p.semDataDoDinheiro} pagamento(s) estão com a data em que a baixa foi ` +
+        'registrada: não achei a linha de baixa deles no IXC. Na ficha de cada ' +
+        'um está dito de onde a data veio.',
+    );
+  }
+
+  if (p.mudaramDePeriodo > 0) {
+    avisos.push(
+      `${p.mudaramDePeriodo} título(s) tiveram a baixa registrada neste ` +
+        'período, mas o dinheiro saiu antes dele — eles aparecem no período em ' +
+        'que saíram, não neste.',
+    );
+  }
+
+  return avisos;
+}
+
 /** A data está dentro do período, contando por dia civil e incluindo as pontas. */
 function dentroDoPeriodo(data: Date, periodo: Periodo): boolean {
   const dia = diaCivil(data);
@@ -551,6 +805,11 @@ function dentroDoPeriodo(data: Date, periodo: Periodo): boolean {
 
 function diaCivil(data: Date): number {
   return Date.UTC(data.getUTCFullYear(), data.getUTCMonth(), data.getUTCDate());
+}
+
+/** A mesma data, tantos dias antes. */
+function recuar(data: Date, dias: number): Date {
+  return new Date(data.getTime() - dias * 86_400_000);
 }
 
 /**
