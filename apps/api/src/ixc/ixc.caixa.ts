@@ -14,16 +14,36 @@
 import { formatDataIxc, formatValorIxc } from './ixc.financeiro';
 import { parseIxcDecimal, parseIxcId } from './ixc.parse';
 
-/** Nomes prováveis da tabela de contas/caixas, na ordem de tentativa. */
+/**
+ * Nomes prováveis da tabela de contas/caixas, na ordem de tentativa.
+ *
+ * `contas` vem primeiro porque é o nome certo: está na documentação (Cadastros
+ * > Financeiro > Contas) e responde no IXC desta casa. Ele era o segundo, atrás
+ * de um `fn_contas` que não existe — uma chamada recusada em toda leitura de
+ * caixa, à toa.
+ */
 export const TABELAS_CONTAS_CAIXA = [
-  'fn_contas',
   'contas',
+  'fn_contas',
   'fn_caixa',
   'caixa',
   'financeiro_contas',
 ];
 
-/** Nomes prováveis da tabela de lançamentos da movimentação financeira. */
+/**
+ * Nomes prováveis da tabela de lançamentos da movimentação financeira.
+ *
+ * **Nenhum destes existe no webservice.** Foram testados um a um contra o IXC:
+ * todos respondem "Recurso X não está disponível", e a documentação também não
+ * traz nenhum equivalente — o que ela tem de "caixa" é caixa de fibra, do mapa
+ * da rede.
+ *
+ * A consequência está no comportamento e é intencional: sem tabela, o
+ * `CaixaService` não escreve nada e o pagamento em mãos é marcado como
+ * "lançar no IXC à mão". A lista fica porque o nome pode aparecer noutra versão
+ * — mas quem for procurar por que a saída do caixa nunca é lançada sozinha,
+ * a resposta é esta.
+ */
 export const TABELAS_MOVIMENTO_CAIXA = [
   'fn_lancamento_caixa',
   'fn_lanc_caixa',

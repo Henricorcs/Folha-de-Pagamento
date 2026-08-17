@@ -19,6 +19,7 @@ import {
   REGRA_ESTRANGEIRO,
   REGRA_ICMS_ISENTO,
   somenteDigitos,
+  TABELAS_DADOS_BANCARIOS,
   variacoesDocumento,
 } from './ixc.fornecedor';
 import type { IxcFornecedor } from './ixc.types';
@@ -708,5 +709,74 @@ describe('montarEdicaoFornecedor', () => {
     const p = montarEdicaoFornecedor({ ...NO_IXC, fantasia: 'Marcão' }, {});
 
     expect(p.fantasia).toBe('Marcão');
+  });
+});
+
+/**
+ * A tabela `dados_bancarios` do IXC desta casa, com os nomes de coluna reais —
+ * conferidos contra a base. O que este bloco protege e por que ele existe:
+ *
+ * a coluna da chave aleatória chama-se `pix_aleatorio`, no masculino, e o app
+ * procurava `pix_aleatoria`. Um fornecedor cuja única chave fosse a aleatória
+ * saía do cadastro como se não tivesse PIX nenhum — e o pagamento dele ia para
+ * o banco sem chave.
+ */
+describe('dados bancários com os nomes de coluna reais do IXC', () => {
+  /** Uma linha do grid como a base devolve. */
+  const LINHA = {
+    id: '360',
+    id_fornecedor: '3248',
+    cod_banco: '756',
+    banco: 'Sicoob',
+    cod_agencia: '3007',
+    cod_conta: '12345-6',
+    titular: 'Fulano',
+    conta_principal: 'S',
+    meio_pagamento_preferencial: 'PIX',
+    tipo_pix_preferencial: 'CPF_CNPJ',
+    pix_cpf_cnpj: '392.186.782-72',
+    pix_celular: '',
+    pix_email: '',
+    pix_aleatorio: '',
+  };
+
+  it('acha a chave aleatória na coluna que existe de verdade', () => {
+    const so_aleatoria = {
+      ...LINHA,
+      tipo_pix_preferencial: '',
+      pix_cpf_cnpj: '',
+      pix_aleatorio: '8f2b1c44-9d3e-4a71-b0c8-5e6f7a8b9c0d',
+    };
+
+    expect(escolherPix(so_aleatoria)).toEqual({
+      chavePix: '8f2b1c44-9d3e-4a71-b0c8-5e6f7a8b9c0d',
+      tipoChavePix: 'Aleatória',
+    });
+  });
+
+  /** `CPF_CNPJ` com sublinhado é como o IXC grava o preferencial. */
+  it('entende o tipo preferencial do jeito que o IXC o escreve', () => {
+    expect(lerTipoPixPreferencial(LINHA)).toBe('CPF/CNPJ');
+    expect(escolherPix(LINHA)).toEqual({
+      chavePix: '392.186.782-72',
+      tipoChavePix: 'CPF/CNPJ',
+    });
+  });
+
+  it('lê banco, agência e conta das colunas com prefixo cod_', () => {
+    expect(mapLinhaDadosBancarios(LINHA)).toMatchObject({
+      banco: 'Sicoob',
+      agencia: '3007',
+      conta: '12345-6',
+    });
+  });
+
+  it('liga a linha ao fornecedor pela coluna certa', () => {
+    expect(detectarCampoFornecedor(LINHA)).toBe('id_fornecedor');
+  });
+
+  /** A tabela certa é a primeira tentada: as outras custam uma chamada cada. */
+  it('dados_bancarios é o primeiro nome tentado', () => {
+    expect(TABELAS_DADOS_BANCARIOS[0]).toBe('dados_bancarios');
   });
 });

@@ -51,19 +51,25 @@ export interface ResultadoDoPagamento {
 }
 
 /**
- * O endpoint que quita uma conta a pagar no IXC — o "Baixa manual (Pagar)" da
- * documentação do webservice.
+ * O endpoint que quita uma conta a pagar no IXC — o "Baixa manual (Pagar)" de
+ * Sistema > Pagar > Botões, na coleção em `docs/ixc`.
  *
- * Era `fn_apagar_pagamentos_baixas`, que **não existe**. E o IXC não diz isso:
- * para um recurso desconhecido ele responde "Recurso X não está disponível",
- * mas para este ele responde "Erro inesperado, tente novamente!" — em qualquer
- * chamada, até numa leitura. Pagamentos pararam nisso sem ninguém saber por
- * quê, porque o motivo vinha num campo da resposta que não era lido e a tela
- * mostrava só "HTTP 200".
+ * Era `fn_apagar_pagamentos_baixas`, que a coleção também traz, numa seção
+ * antiga com o mesmo nome de operação e o mesmo corpo. A diferença é que **esta
+ * instalação não o serve**: ele responde "Erro inesperado, tente novamente!" a
+ * qualquer chamada, até a uma leitura — enquanto um recurso realmente
+ * desconhecido responde "Recurso X não está disponível". Ou seja, o IXC trata o
+ * endpoint aposentado como se o problema fosse a requisição, e foi isso que
+ * escondeu a causa: pagamentos pararam sem ninguém saber por quê, ainda mais
+ * porque o motivo vinha num campo da resposta que não era lido e a tela mostrava
+ * só "HTTP 200".
  *
- * O número no nome é o id da tela no IXC, e vem assim da documentação — é o
- * mesmo padrão de `botao_estornar_cancelamento_26200` e `baixar_comodato_23069`.
- * Se um dia uma atualização do IXC mudar esse id, é esta linha que muda.
+ * Havendo dois nomes documentados para a mesma operação, vale o que a base
+ * responde — e este foi confirmado nela, quitando um título de verdade.
+ *
+ * O número no nome é o id da tela no IXC, mesmo padrão de
+ * `botao_estornar_cancelamento_26200` e `baixar_comodato_23069`. Se uma
+ * atualização mudar esse id, é esta linha que muda.
  */
 const ENDPOINT_BAIXA = 'botao_pagar_26409';
 

@@ -354,15 +354,27 @@ export function distribuicaoDoCampo(
 // vinham vazios ao ler só `fornecedor`.
 // ---------------------------------------------------------------------------
 
-/** Nomes prováveis da tabela do grid, tentados em ordem até um responder. */
+/**
+ * Nomes prováveis da tabela do grid, tentados em ordem até um responder.
+ *
+ * `dados_bancarios` vem primeiro porque é o nome de verdade: confirmado contra
+ * o IXC, com `id_fornecedor`, `pix_cpf_cnpj`, `pix_celular`, `pix_email`,
+ * `pix_aleatorio` e `tipo_pix_preferencial`. Ele era o **último** da lista, e
+ * cada leitura de dados bancários gastava seis chamadas recusadas antes de
+ * chegar nele — em cada pagamento, para cada fornecedor.
+ *
+ * Os outros ficam depois, e não por superstição: o nome da tabela muda entre
+ * versões do IXC, e esta lista é o que faz o app continuar funcionando numa
+ * base onde ele for outro.
+ */
 export const TABELAS_DADOS_BANCARIOS = [
+  'dados_bancarios',
   'fornecedor_dados_bancarios',
   'fornecedores_dados_bancarios',
   'dados_bancarios_fornecedor',
   'fornecedor_conta_bancaria',
   'fornecedor_banco',
   'fn_dados_bancarios',
-  'dados_bancarios',
 ];
 
 const CAMPOS_BANCO = [
@@ -399,7 +411,13 @@ const COLUNAS_PIX: Array<{ campos: string[]; tipo: TipoChavePix | null }> = [
   { campos: ['pix_cpf_cnpj', 'pix_cnpj_cpf', 'pix_cpf', 'pix_cnpj'], tipo: 'CPF/CNPJ' },
   { campos: ['pix_email', 'pix_e_mail'], tipo: 'E-mail' },
   { campos: ['pix_celular', 'pix_telefone', 'pix_fone'], tipo: 'Celular' },
-  { campos: ['pix_aleatoria', 'pix_chave_aleatoria'], tipo: 'Aleatória' },
+  // `pix_aleatorio` no masculino é como a coluna se chama de verdade — o app
+  // procurava só `pix_aleatoria`, e a chave aleatória de um fornecedor era
+  // simplesmente invisível: ele saía do cadastro como se não tivesse PIX.
+  {
+    campos: ['pix_aleatorio', 'pix_aleatoria', 'pix_chave_aleatoria'],
+    tipo: 'Aleatória',
+  },
   { campos: ['pix'], tipo: null },
 ];
 
