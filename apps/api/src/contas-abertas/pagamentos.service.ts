@@ -242,6 +242,7 @@ export class PagamentosService {
           `Enviado: ${JSON.stringify(payloadDaBaixa)}. ` +
           'Relendo o título para saber se ela pegou assim mesmo.',
       );
+      await this.logarBaixaModelo(payloadDaBaixa);
     }
 
     // A única pergunta que importa depois de mexer em dinheiro: a conta ficou
@@ -431,6 +432,63 @@ export class PagamentosService {
     );
 
     return { idFnApagar, alterado, reaprovada: estavaAprovada };
+  }
+
+  /**
+   * Pergunta ao IXC como é uma baixa que ele aceitou, e põe lado a lado com a
+   * que ele acabou de recusar.
+   *
+   * O motivo que ele dá é "Erro inesperado, tente novamente!" — genérico, e não
+   * aponta campo nenhum. Sem a documentação do webservice, o único jeito de
+   * descobrir o que falta é olhar uma linha real da tabela: é o mesmo caminho
+   * que este app já usa para a Classificação de ISS e para a marcação de
+   * diarista, copiar do que existe em vez de adivinhar.
+   *
+   * Só lê e só registra: nunca lança, porque isto roda depois de uma falha e
+   * não pode virar uma segunda falha por cima dela.
+   */
+  private async logarBaixaModelo(
+    enviado: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      const res = await this.ixc.list<Record<string, unknown>>(
+        'fn_apagar_pagamentos_baixas',
+        {
+          qtype: 'fn_apagar_pagamentos_baixas.id',
+          query: '0',
+          oper: '>',
+          rp: 1,
+          sortname: 'fn_apagar_pagamentos_baixas.id',
+          sortorder: 'desc',
+        },
+      );
+      const modelo = res.registros[0];
+      if (!modelo) {
+        this.logger.warn(
+          'Nenhuma baixa anterior no IXC para comparar — a tabela está vazia.',
+        );
+        return;
+      }
+
+      // O que existe lá e não sai daqui é a lista de suspeitos.
+      const nossos = new Set(Object.keys(enviado));
+      const faltando = Object.entries(modelo)
+        .filter(([coluna]) => !nossos.has(coluna))
+        .filter(([, valor]) => String(valor ?? '').trim())
+        .map(([coluna, valor]) => `${coluna}=${String(valor)}`);
+
+      this.logger.warn(
+        `Baixa que o IXC aceitou (#${String(modelo.id)}): ${JSON.stringify(modelo)}`,
+      );
+      this.logger.warn(
+        faltando.length
+          ? `Colunas preenchidas nela que não mandamos: ${faltando.join(', ')}`
+          : 'Ela não tem nenhuma coluna preenchida além das que mandamos.',
+      );
+    } catch (err) {
+      const motivo = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Não deu para ler uma baixa modelo do IXC: ${motivo}`);
+    }
   }
 
   /** Um passo de auditoria no IXC: aprovar ou reprovar com o motivo. */

@@ -126,3 +126,34 @@ describe('motivoDaRecusa', () => {
     );
   });
 });
+
+/**
+ * Onde o IXC escreve o motivo. Visto em producao, na baixa de conta a pagar:
+ *
+ *   {"type":"error","valor":"Erro inesperado, tente novamente!"}
+ *
+ * O motivo existia e era descartado por estar fora de `message`.
+ */
+describe('motivoDaRecusa — onde o IXC escreve o motivo', () => {
+  it('le o motivo de `valor`, como vem nas baixas', () => {
+    expect(
+      motivoDaRecusa(200, {
+        type: 'error',
+        valor: 'Erro inesperado, tente novamente!',
+      }),
+    ).toBe('Erro inesperado, tente novamente!');
+  });
+
+  it('le tambem de `mensagem`', () => {
+    expect(motivoDaRecusa(200, { type: 'error', mensagem: 'Sem saldo' })).toBe(
+      'Sem saldo',
+    );
+  });
+
+  /** `message` continua sendo a primeira escolha quando as duas vem. */
+  it('message tem preferencia sobre valor', () => {
+    expect(
+      motivoDaRecusa(200, { type: 'error', message: 'A', valor: 'B' }),
+    ).toBe('A');
+  });
+});

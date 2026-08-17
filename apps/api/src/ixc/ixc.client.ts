@@ -203,8 +203,22 @@ export class IxcClient {
  */
 export function motivoDaRecusa(status: number, corpo: unknown): string {
   const data = (corpo ?? {}) as IxcActionResponse;
-  const message = String(data.message ?? '').trim();
-  if (message) return message;
+
+  /*
+   * `message` é onde a documentação diz que o motivo vai, e é onde ele às vezes
+   * está. Nas baixas de conta a pagar ele vem em `valor`:
+   *
+   *   {"type":"error","valor":"Erro inesperado, tente novamente!"}
+   *
+   * Lendo só `message`, o motivo existia e era descartado — a tela dizia "HTTP
+   * 200" para uma resposta que trazia a explicação escrita. As duas são
+   * tentadas, na ordem, e `mensagem` entra porque o webservice mistura inglês
+   * e português conforme o endpoint.
+   */
+  for (const campo of ['message', 'valor', 'mensagem'] as const) {
+    const texto = String(data[campo] ?? '').trim();
+    if (texto) return texto;
+  }
 
   let cru: string;
   try {
