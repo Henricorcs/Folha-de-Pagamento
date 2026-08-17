@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigFinanceiraService } from '../financeiro/config-financeira.service';
 import { IxcClient } from '../ixc/ixc.client';
 import {
@@ -196,37 +201,88 @@ export class PagamentosService {
 
     // Qualquer outra conta é dinheiro que sai por fora da integração — caixa,
     // outro banco, cartão. Aqui a baixa é a mesma que se daria à mão no IXC.
-    await this.ixc.create(
-      'fn_apagar_pagamentos_baixas',
-      buildBaixaContaPagarPayload({
-        idFnApagar,
-        contaPagamentoId,
-        contaContabilId,
-        filialId,
-        valor,
-        data: opcoes.data ? dataUtc(opcoes.data) : new Date(),
-        documento: textoOuNull(raw.documento),
-        historico:
-          opcoes.historico?.trim() ||
-          `Pagamento pelo ILNET FINANCE${usuarioNome ? ` (${usuarioNome})` : ''}`,
-      }),
-    );
+    let recusa: string | null = null;
+    try {
+      await this.ixc.create(
+        'fn_apagar_pagamentos_baixas',
+        buildBaixaContaPagarPayload({
+          idFnApagar,
+          contaPagamentoId,
+          contaContabilId,
+          filialId,
+          valor,
+          data: opcoes.data ? dataUtc(opcoes.data) : new Date(),
+          documento: textoOuNull(raw.documento),
+          historico:
+            opcoes.historico?.trim() ||
+            `Pagamento pelo ILNET FINANCE${usuarioNome ? ` (${usuarioNome})` : ''}`,
+        }),
+      );
+    } catch (err) {
+      /*
+       * A recusa é anotada, não relançada aqui.
+       *
+       * O IXC já recusou a baixa **e mesmo assim a gravou** — respondendo HTTP
+       * 200 com `type: error` e sem mensagem. Desistir na recusa deixava quem
+       * pagou diante de um "não saiu" para uma conta que lá constava quitada, e
+       * o passo seguinte natural — pagar de novo — tira o dinheiro duas vezes.
+       *
+       * Quem decide se saiu é o próprio IXC, na leitura abaixo.
+       */
+      recusa = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Título ${idFnApagar}: o IXC recusou a baixa (${recusa}). ` +
+          'Relendo o título para saber se ela pegou assim mesmo.',
+      );
+    }
 
-    this.logger.log(
-      `Título ${idFnApagar} baixado no IXC: ${valor} pela conta ${contaPagamentoId}.`,
-    );
-
-    // O IXC aceita a baixa e devolve o id do movimento; conferir a situação de
-    // volta custa uma leitura e responde a única pergunta que importa depois de
-    // pagar — a conta ficou mesmo quitada lá?
+    // A única pergunta que importa depois de mexer em dinheiro: a conta ficou
+    // quitada lá? Vale tanto para a baixa aceita quanto para a recusada.
     const depois = await this.ixc
       .getById<Record<string, unknown>>('fn_apagar', 'fn_apagar.id', idFnApagar)
       .catch(() => null);
+
+    if (!depois) {
+      // Sem conseguir reler, não dá para afirmar nada. Na recusa isso é grave o
+      // bastante para parar: dizer "pago" seria adivinhar sobre dinheiro.
+      if (recusa) {
+        throw new ServiceUnavailableException(
+          `O IXC recusou a baixa do título ${idFnApagar} (${recusa}) e não ` +
+            'respondeu à conferência. Confira no IXC se ela saiu antes de ' +
+            'pagar de novo.',
+        );
+      }
+      avisos.push(
+        'Não deu para reler o título no IXC depois da baixa — confira por lá.',
+      );
+    }
+
     const paga = depois ? lerSituacaoContaPagar(depois).pago : true;
-    if (depois && !paga) {
+
+    if (recusa && !paga) {
+      throw new ServiceUnavailableException(`IXC: ${recusa}`);
+    }
+    if (recusa && paga) {
+      this.logger.log(
+        `Título ${idFnApagar}: o IXC recusou a resposta mas a conta consta ` +
+          'quitada lá — baixa dada por boa.',
+      );
+      avisos.push(
+        `O IXC recusou a resposta da baixa (${recusa}), mas o título consta ` +
+          'quitado por lá. O pagamento saiu — não repita, e confira o ' +
+          'lançamento no IXC se quiser ter certeza.',
+      );
+    }
+    if (!recusa && depois && !paga) {
       avisos.push(
         'O IXC aceitou a baixa, mas o título continua aparecendo como aberto ' +
           'por lá. Confira no IXC antes de considerar essa conta paga.',
+      );
+    }
+
+    if (paga) {
+      this.logger.log(
+        `Título ${idFnApagar} baixado no IXC: ${valor} pela conta ${contaPagamentoId}.`,
       );
     }
 

@@ -1,6 +1,6 @@
 import { ServiceUnavailableException } from '@nestjs/common';
 import type { AxiosInstance } from 'axios';
-import { IxcClient } from './ixc.client';
+import { IxcClient, motivoDaRecusa } from './ixc.client';
 
 function makeHttp(requestImpl: jest.Mock): AxiosInstance {
   return { request: requestImpl } as unknown as AxiosInstance;
@@ -81,5 +81,48 @@ describe('IxcClient.listAll', () => {
 
     expect(all.map((r: any) => r.id)).toEqual(['1', '2', '3']);
     expect(request).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * O IXC recusa de dois jeitos: pelo status HTTP e por `type: "error"` com HTTP
+ * 200. No segundo, ele nem sempre manda `message` — e a mensagem antiga saía
+ * literalmente "HTTP 200", um código de sucesso apresentado como falha. Quem
+ * lia isso na tela não tinha o que fazer com a informação, e quem fosse
+ * investigar também não.
+ */
+describe('motivoDaRecusa', () => {
+  it('usa a mensagem do IXC quando ela existe', () => {
+    expect(
+      motivoDaRecusa(200, { type: 'error', message: 'Conta já baixada' }),
+    ).toBe('Conta já baixada');
+  });
+
+  it('sem mensagem, diz que não houve motivo e mostra o que veio', () => {
+    const m = motivoDaRecusa(200, { type: 'error' });
+
+    expect(m).toContain('recusou sem dizer o motivo');
+    expect(m).toContain('HTTP 200');
+    expect(m).toContain('{"type":"error"}');
+  });
+
+  it('corpo vazio não vira ruído na mensagem', () => {
+    expect(motivoDaRecusa(500, {})).toBe(
+      'recusou sem dizer o motivo (HTTP 500)',
+    );
+  });
+
+  /** Resposta em HTML (o IXC faz isso quando quebra de verdade) não pode
+      empurrar uma página inteira para dentro do aviso da tela. */
+  it('corta corpo comprido', () => {
+    const m = motivoDaRecusa(200, '<html>' + 'x'.repeat(1000) + '</html>');
+
+    expect(m.length).toBeLessThan(360);
+  });
+
+  it('mensagem só de espaços conta como ausente', () => {
+    expect(motivoDaRecusa(200, { type: 'error', message: '   ' })).toContain(
+      'recusou sem dizer o motivo',
+    );
   });
 });

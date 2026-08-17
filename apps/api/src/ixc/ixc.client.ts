@@ -149,7 +149,7 @@ export class IxcClient {
     const data = (res.data ?? {}) as IxcActionResponse;
     const tipo = String(data.type ?? '').toLowerCase();
     if (res.status >= 400 || tipo === 'error') {
-      const msg = data.message || `HTTP ${res.status}`;
+      const msg = motivoDaRecusa(res.status, res.data);
       this.logger.error(`IXC erro em ${method.toUpperCase()} ${url}: ${msg}`);
       throw new ServiceUnavailableException(`IXC (${url}): ${msg}`);
     }
@@ -187,6 +187,38 @@ export class IxcClient {
 
     return out;
   }
+}
+
+/**
+ * Por que o IXC recusou, dito de um jeito que dê para agir.
+ *
+ * Ele nem sempre manda `message`, e nem sempre usa o status HTTP para dizer que
+ * deu errado — recusa com `type: "error"` e HTTP 200 acontece. A mensagem
+ * antiga, nesse caso, saía literalmente "HTTP 200": um código de sucesso
+ * apresentado como falha, que não diz nada a quem lê e menos ainda a quem vai
+ * investigar.
+ *
+ * Sem `message`, o corpo cru vai junto (recortado): é a única pista que existe
+ * de por que ele recusou, e ela precisa chegar ao log e à tela.
+ */
+export function motivoDaRecusa(status: number, corpo: unknown): string {
+  const data = (corpo ?? {}) as IxcActionResponse;
+  const message = String(data.message ?? '').trim();
+  if (message) return message;
+
+  let cru: string;
+  try {
+    cru = typeof corpo === 'string' ? corpo : JSON.stringify(corpo);
+  } catch {
+    cru = String(corpo);
+  }
+  cru = (cru ?? '').trim().slice(0, 300);
+
+  return (
+    `recusou sem dizer o motivo (HTTP ${status}` +
+    (cru && cru !== '{}' ? `, resposta: ${cru}` : '') +
+    ')'
+  );
 }
 
 /** Extrai o id retornado por um insert do IXC, em qualquer formato comum. */

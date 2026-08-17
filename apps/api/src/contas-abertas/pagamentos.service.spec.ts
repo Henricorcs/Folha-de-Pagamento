@@ -30,6 +30,10 @@ function montarServico(
     titulo?: Record<string, unknown> | null;
     /** Como o título fica quando relido depois da baixa. */
     depoisDaBaixa?: Record<string, unknown>;
+    /** O IXC recusa a baixa com esta mensagem. */
+    recusaABaixa?: string;
+    /** A releitura de conferência também falha. */
+    naoDeixaReler?: boolean;
   } = {},
 ) {
   const titulo =
@@ -55,6 +59,7 @@ function montarServico(
       // A segunda leitura é a conferência de depois da baixa: por padrão o IXC
       // devolve o título já quitado, que é o que acontece quando dá certo.
       if (leituras > 1) {
+        if (opts.naoDeixaReler) throw new Error('IXC fora do ar');
         return (
           opts.depoisDaBaixa ?? {
             ...titulo,
@@ -69,6 +74,9 @@ function montarServico(
     }),
     create: jest.fn(async (recurso: string, payload: Record<string, unknown>) => {
       criados.push({ recurso, payload });
+      if (opts.recusaABaixa && recurso === 'fn_apagar_pagamentos_baixas') {
+        throw new Error(opts.recusaABaixa);
+      }
       return { id: 1, raw: {} };
     }),
   };
@@ -259,5 +267,76 @@ describe('buildBaixaContaPagarPayload', () => {
       tipo_lanc: 'P',
       data: '15/08/2026',
     });
+  });
+});
+
+/**
+ * O IXC recusando a baixa que ele mesmo gravou.
+ *
+ * Aconteceu em produção: HTTP 200, `type: "error"`, sem mensagem — e a conta
+ * quitada do outro lado. A tela dizia "0 contas pagas / 1 não saíram", e o
+ * passo seguinte natural de quem lê isso é pagar de novo, tirando o dinheiro
+ * duas vezes.
+ *
+ * A regra que este bloco fixa: quem decide se o pagamento saiu não é a resposta
+ * da chamada, é o estado do título no IXC depois dela.
+ */
+describe('PagamentosService.pagar — quando o IXC recusa a baixa', () => {
+  const RECUSA = 'IXC (/fn_apagar_pagamentos_baixas): recusou sem dizer o motivo (HTTP 200)';
+
+  it('recusou mas quitou: vale como pago, com o aviso para ninguém repetir', async () => {
+    const { service } = montarServico({ recusaABaixa: RECUSA });
+
+    const r = await service.pagar(4242, {
+      contaPagamento: CFG.contaPagamentoCaixaId,
+    });
+
+    expect(r.paga).toBe(true);
+    expect(r.valor).toBe(1500);
+    expect(r.avisos.join(' ')).toContain('não repita');
+  });
+
+  /** Recusou e a conta continua aberta: aí a recusa e recusa mesmo. */
+  it('recusou e não quitou: falha, para ninguém dar por pago o que não saiu', async () => {
+    const { service } = montarServico({
+      recusaABaixa: RECUSA,
+      depoisDaBaixa: {
+        id: '4242',
+        status: 'A',
+        valor: '1500.00',
+        valor_aberto: '1500.00',
+      },
+    });
+
+    await expect(
+      service.pagar(4242, { contaPagamento: CFG.contaPagamentoCaixaId }),
+    ).rejects.toThrow(/recusou sem dizer o motivo/);
+  });
+
+  /**
+   * Recusou e nem deu para conferir. Sem saber, o unico caminho honesto e
+   * parar e mandar olhar o IXC — dizer "pago" seria adivinhar sobre dinheiro,
+   * e dizer "não saiu" convidaria a pagar de novo.
+   */
+  it('recusou e não deu para conferir: manda olhar no IXC antes de repetir', async () => {
+    const { service } = montarServico({
+      recusaABaixa: RECUSA,
+      naoDeixaReler: true,
+    });
+
+    await expect(
+      service.pagar(4242, { contaPagamento: CFG.contaPagamentoCaixaId }),
+    ).rejects.toThrow(/antes de pagar de novo/);
+  });
+
+  it('baixa aceita continua sem aviso nenhum', async () => {
+    const { service } = montarServico();
+
+    const r = await service.pagar(4242, {
+      contaPagamento: CFG.contaPagamentoCaixaId,
+    });
+
+    expect(r.paga).toBe(true);
+    expect(r.avisos).toEqual([]);
   });
 });
