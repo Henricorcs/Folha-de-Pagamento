@@ -277,6 +277,38 @@ export function explicarFiltro(
       valor: texto('liberado') || '(vazio)',
       nota: 'N = título nunca liberado; não é conta a pagar de verdade',
     },
+    /*
+     * Os três campos abaixo não decidem nada nesta lista — decidem se o título
+     * aparece na tela do IXC. É a pergunta que este painel não sabia responder:
+     * "está aqui, e no IXC não está; por quê?". Sem eles, a conversa vira
+     * palavra contra palavra, com o registro na frente dos dois.
+     */
+    {
+      campo: 'previsao',
+      valor: texto('previsao') || '(vazio)',
+      nota:
+        'S = é previsão, não conta a pagar de verdade; o IXC não a mostra ' +
+        'junto com as contas a pagar. As lançadas daqui nascem com N.',
+    },
+    {
+      campo: 'status_auditoria',
+      valor: texto('status_auditoria') || '(vazio)',
+      nota:
+        'A = aprovada · R = reprovada · vazio = ainda não passou pela ' +
+        'auditoria, e o IXC não a oferece para pagar enquanto não passar',
+    },
+    {
+      campo: 'filial_id',
+      valor: texto('filial_id') || '(vazio)',
+      nota:
+        'a filial dona do título; esta tela lê todas, a tela do IXC mostra a ' +
+        'da sessão de quem está olhando',
+    },
+    {
+      campo: 'id_entrada',
+      valor: texto('id_entrada') || '(vazio)',
+      nota: 'preenchido = o título nasceu da entrada de uma nota fiscal',
+    },
     {
       campo: 'valor',
       valor: texto('valor') || '(vazio)',
