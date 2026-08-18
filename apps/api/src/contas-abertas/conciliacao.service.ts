@@ -21,6 +21,9 @@ import { PrismaService } from '../prisma/prisma.service';
  * as duas linhas nela: o título constava pago, o par existia, e não havia
  * movimento nenhum na conta que a conciliação lê.
  *
+ * Cuidado ao ler essas linhas: um título lançado por competência tem **dois**
+ * grupos, e só um é o pagamento. Ver `pernasDoPagamento`.
+ *
  * Não há como reescrever a linha errada — a movimentação financeira não tem
  * endpoint de edição no webservice. O conserto é o que se faria à mão: estornar
  * a baixa e refazê-la com a conta certa.
@@ -290,17 +293,9 @@ export class ConciliacaoService {
     const conta = razoes.get(contaPagamento);
     if (!conta) return null;
 
-    const pernas = await this.pernasDoBanco(idFnApagar);
-    /*
-     * Mais de uma linha `M` = mais de uma baixa no título, e aí não dá para
-     * dizer qual é a que vale. Estornar a errada não abre o título (a outra
-     * cobre o valor) mas deixa um estorno registrado que não consertou nada —
-     * foi o que aconteceu no primeiro título em que isto rodou.
-     *
-     * Quase metade dos títulos pagos desta base está assim. Enquanto não se
-     * souber ler qual baixa manda, eles ficam de fora: um conserto que erra o
-     * alvo é pior que nenhum.
-     */
+    const pernas = await this.pernasDoPagamento(idFnApagar);
+    // Mais de um pagamento no mesmo título: não dá para dizer qual é o que
+    // vale, e estornar o errado não conserta nada. Fica para alguém olhar.
     if (pernas.length > 1) return null;
     const linhaM = pernas[0];
     if (!linhaM) return null;
@@ -328,8 +323,24 @@ export class ConciliacaoService {
     };
   }
 
-  /** As linhas `M` do título — uma por baixa feita nele. */
-  private async pernasDoBanco(
+  /**
+   * A perna do dinheiro de cada **pagamento** do título.
+   *
+   * Um título pago tem dois grupos de linhas em `fn_movim_finan`, e eles são
+   * coisas diferentes:
+   *
+   * - `M` + `D` ("Cap 36911 - Fulano") — o título **nascendo**, a provisão da
+   *   despesa. Aparece em quem foi lançado por competência, e a conta dela não
+   *   tem nada a ver com o banco;
+   * - `M` + `P` ("Pag. Fulano - doc.: 36911") — o **pagamento**. É esta que a
+   *   conciliação lê, e é a única que interessa aqui.
+   *
+   * Os dois grupos começam com uma linha `M`, e ler a primeira que aparecer
+   * pega a provisão — foi o que fez esta tela listar 80 pagamentos que estavam
+   * certos. O que separa um grupo do outro é a segunda linha: só o do pagamento
+   * tem a `P`.
+   */
+  private async pernasDoPagamento(
     idFnApagar: number,
   ): Promise<Array<Record<string, unknown>>> {
     const linhas = await this.ixc.list<Record<string, unknown>>(
@@ -344,7 +355,18 @@ export class ConciliacaoService {
         sortorder: 'asc',
       },
     );
-    return linhas.registros.filter((l) => String(l.tipo_lanc) === 'M');
+    // Os grupos que têm uma linha `P` são os pagamentos; de cada um interessa
+    // a `M`, que é o dinheiro saindo da conta.
+    const grupoDePagamento = new Set(
+      linhas.registros
+        .filter((l) => String(l.tipo_lanc) === 'P')
+        .map((l) => String(l.id_movim_finan)),
+    );
+    return linhas.registros.filter(
+      (l) =>
+        String(l.tipo_lanc) === 'M' &&
+        grupoDePagamento.has(String(l.id_movim_finan)),
+    );
   }
 
   /** O razão de cada conta de pagamento, lido uma vez por execução. */

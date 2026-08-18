@@ -194,28 +194,36 @@ describe('ConciliacaoService.corrigir', () => {
 });
 
 /**
- * Quase metade dos títulos pagos desta base tem duas linhas `M` — duas baixas.
- * Pegar a primeira e estorná-la foi o que aconteceu no primeiro título em que
- * isto rodou de verdade: o estorno saiu, o título continuou pago pela outra
- * baixa, e ficou um estorno registrado que não consertou nada.
+ * Um título lançado por competência tem **dois** grupos de linhas, e só um é o
+ * pagamento:
+ *
+ *   M + D  "Cap 36911 - Fulano"            → o título nascendo (a provisão)
+ *   M + P  "Pag. Fulano - doc.: 36911"     → o pagamento
+ *
+ * Os dois começam com uma linha `M`. Ler a primeira pega a provisão, cuja conta
+ * não tem nada a ver com o banco — foi o que fez esta tela listar 80 pagamentos
+ * que estavam certos, e estornar um deles sem precisar.
  */
-describe('título com mais de uma baixa', () => {
-  function comDuasBaixas() {
+describe('título com provisão e pagamento', () => {
+  /** `contaDoPagamento` é a conta da perna M do grupo que tem a linha `P`. */
+  function comProvisao(contaDoPagamento: string) {
     const ixc = {
       listAll: jest.fn(async () => CONTAS),
       list: jest.fn(async () => ({
         registros: [
-          { id: '1', id_movim_finan: '1', id_conta: '324', tipo_lanc: 'M', data: '2026-08-10', credito: '160.00' },
-          { id: '2', id_movim_finan: '1', id_conta: '324', tipo_lanc: 'D', data: '2026-08-10' },
-          { id: '3', id_movim_finan: '3', id_conta: '324', tipo_lanc: 'M', data: '2026-08-10', credito: '160.00' },
-          { id: '4', id_movim_finan: '3', id_conta: '20055', tipo_lanc: 'P', data: '2026-08-10' },
+          // A provisão: conta qualquer do plano, e nunca a do banco.
+          { id: '1', id_movim_finan: '1', id_conta: '15529', tipo_lanc: 'M', data: '2026-08-13', credito: '200.00' },
+          { id: '2', id_movim_finan: '1', id_conta: '13916', tipo_lanc: 'D', data: '2026-08-13' },
+          // O pagamento.
+          { id: '3', id_movim_finan: '3', id_conta: contaDoPagamento, tipo_lanc: 'M', data: '2026-08-13', credito: '200.00', historico: 'Pag. Antônio - doc.: 36911' },
+          { id: '4', id_movim_finan: '3', id_conta: '15529', tipo_lanc: 'P', data: '2026-08-13' },
         ],
         total: 4,
         page: 1,
       })),
       getById: jest.fn(async () => ({
-        id: '37015', status: 'P', valor: '160.00', valor_aberto: '0',
-        valor_total_pago: '160.00', id_contas: '18', id_conta: '324', filial_id: '1',
+        id: '36911', status: 'P', valor: '200.00', valor_aberto: '0',
+        valor_total_pago: '200.00', id_contas: '18', id_conta: '13916', filial_id: '1',
       })),
       remove: jest.fn(),
       action: jest.fn(),
@@ -223,24 +231,38 @@ describe('título com mais de uma baixa', () => {
     const prisma = {
       contaPagar: {
         findMany: jest.fn(async () => [
-          { idFnApagarIxc: 37015, beneficiarioNome: 'Robson Araujo Ferreira' },
+          { idFnApagarIxc: 36911, beneficiarioNome: 'Antônio Reis' },
         ]),
       },
     };
     return { service: new ConciliacaoService(ixc as never, prisma as never), ixc };
   }
 
-  it('fica fora da lista: não dá para dizer qual baixa vale', async () => {
-    const { service } = comDuasBaixas();
+  it('pagamento na conta certa não entra na lista, mesmo com a provisão fora dela', async () => {
+    // 12833 é o razão da conta 18. A provisão está em 15529 e não importa.
+    const { service } = comProvisao('12833');
     expect(await service.pendentes()).toEqual([]);
   });
 
-  it('e mandando o id na marra, nada é estornado', async () => {
-    const { service, ixc } = comDuasBaixas();
-    const r = await service.corrigir([37015]);
+  it('mandando o id na marra, também não é tocado', async () => {
+    const { service, ixc } = comProvisao('12833');
+    const r = await service.corrigir([36911]);
 
     expect(ixc.remove).not.toHaveBeenCalled();
     expect(ixc.action).not.toHaveBeenCalled();
     expect(r.pulados).toHaveLength(1);
+  });
+
+  it('pagamento fora do razão entra — e é o grupo do pagamento que vai', async () => {
+    const { service } = comProvisao('324');
+    const [p] = await service.pendentes();
+
+    expect(p).toMatchObject({
+      idFnApagar: 36911,
+      contaAtual: 324,
+      contaCerta: 12833,
+      // O grupo do pagamento (3), não o da provisão (1).
+      idMovimFinan: 3,
+    });
   });
 });

@@ -79,7 +79,7 @@ export function Conciliacao() {
       <CabecalhoPagina
         secao="Contas a Pagar"
         titulo="Pagamentos fora da conciliação"
-        descricao="Pagamentos que este app deu por pagos antes de 18/08/2026 e que não aparecem na conciliação bancária do IXC: a baixa foi lançada na conta da despesa em vez da conta de onde o dinheiro saiu. Título com mais de uma baixa fica de fora — ali não dá para dizer qual vale, e estornar a errada não conserta nada."
+        descricao="Pagamentos que este app deu por pagos antes de 18/08/2026 e que não aparecem na conciliação bancária do IXC: a baixa foi lançada na conta da despesa em vez da conta de onde o dinheiro saiu. Conta lançada por competência tem duas linhas na movimentação: a da provisão e a do pagamento. Só a do pagamento conta aqui — a provisão fica em outra conta e é assim mesmo."
       />
 
       {resultado && <Resultado r={resultado} />}
