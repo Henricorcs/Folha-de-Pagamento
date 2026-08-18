@@ -4,6 +4,7 @@ import {
   LeitorDeCodigo,
   leitorDeCodigoSuportado,
 } from '../../components/LeitorDeCodigo';
+import { SeletorDeCategoria } from '../../components/SeletorDeCategoria';
 import { CampoDinheiro, Carregando, Janela, Selo } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
 import { formatBRL } from '../../lib/format';
@@ -927,21 +928,16 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
             <label className="rotulo" htmlFor="categoria">
               A que se refere
             </label>
-            <select
+            <SeletorDeCategoria
               id="categoria"
-              className="campo"
+              categorias={categorias.data}
               value={categoriaId}
-              disabled={categorias.isLoading}
-              onChange={(e) => setCategoriaId(e.target.value)}
+              vazio="Sem classificação"
+              ajuda="Ela entra no cadastro e já fica escolhida para esta despesa."
+              carregando={categorias.isLoading}
+              onChange={setCategoriaId}
               title="É por esta escolha que o dashboard separa os gastos. Fica guardada aqui — o IXC não tem onde recebê-la."
-            >
-              <option value="">Sem classificação</option>
-              {(categorias.data ?? []).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nome}
-                </option>
-              ))}
-            </select>
+            />
           </div>
         </div>
 

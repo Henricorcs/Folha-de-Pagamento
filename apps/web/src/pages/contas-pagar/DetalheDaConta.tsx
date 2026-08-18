@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { Aviso, Carregando, Janela, Selo } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
+import { SeletorDeCategoria } from '../../components/SeletorDeCategoria';
 import { formatBRL, formatData } from '../../lib/format';
 import { TIPO_LABEL } from '../../lib/status';
 import type {
@@ -151,23 +152,19 @@ export function DetalheDaConta({
               chegou por prop ainda é o antigo — sem este estado, o campo
               voltaria sozinho para a opção anterior na frente de quem acabou
               de escolher. */}
-          <select
+          <SeletorDeCategoria
             id="categoria"
-            className="campo"
+            categorias={categorias.data}
             value={categoriaId}
-            disabled={categorias.isLoading || classificar.isPending}
-            onChange={(e) => {
-              setCategoriaId(e.target.value);
-              classificar.mutate(e.target.value || null);
+            vazio="Sem classificação"
+            ajuda="Ela entra no cadastro e já fica valendo para este débito."
+            carregando={categorias.isLoading}
+            desabilitado={classificar.isPending}
+            onChange={(id) => {
+              setCategoriaId(id);
+              classificar.mutate(id || null);
             }}
-          >
-            <option value="">Sem classificação</option>
-            {(categorias.data ?? []).map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.nome}
-              </option>
-            ))}
-          </select>
+          />
           <p className="ajuda">
             {classificar.isPending
               ? 'Salvando…'

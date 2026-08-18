@@ -12,6 +12,7 @@ import {
   type Tom,
 } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
+import { SeletorDeCategoria } from '../../components/SeletorDeCategoria';
 import { formatBRL, formatData } from '../../lib/format';
 import { TIPO_LABEL } from '../../lib/status';
 import type {
@@ -330,20 +331,16 @@ export function Inicio() {
               ({visiveisMarcados.length} na tela agora)
             </span>
           )}
-          <select
+          <SeletorDeCategoria
             className="campo max-w-xs py-1.5 text-sm"
+            categorias={categorias.data}
             value={categoriaLote}
-            disabled={categorias.isLoading || classificarLote.isPending}
-            onChange={(e) => setCategoriaLote(e.target.value)}
-          >
-            <option value="">Escolha a categoria…</option>
-            {(categorias.data ?? []).map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.nome}
-              </option>
-            ))}
-            <option value="__limpar">— tirar a categoria —</option>
-          </select>
+            vazio="Escolha a categoria…"
+            carregando={categorias.isLoading}
+            desabilitado={classificarLote.isPending}
+            onChange={setCategoriaLote}
+            extras={<option value="__limpar">— tirar a categoria —</option>}
+          />
           <button
             onClick={() =>
               classificarLote.mutate(
