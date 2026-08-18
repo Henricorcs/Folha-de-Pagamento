@@ -368,7 +368,12 @@ export class PagamentosService {
    */
   async pagarEmLote(
     ids: number[],
-    opcoes: { contaPagamento?: number; data?: string; forma?: FormaDePagar },
+    opcoes: {
+      contaPagamento?: number;
+      data?: string;
+      jaSaiu?: boolean;
+      forma?: FormaDePagar;
+    },
     usuarioNome?: string,
   ): Promise<{
     pagas: ResultadoDoPagamento[];

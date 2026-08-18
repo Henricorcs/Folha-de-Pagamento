@@ -118,6 +118,37 @@ describe('PagamentosService.pagar', () => {
     expect(criados.map((c) => c.recurso)).toEqual(['fn_apagar_auditoria']);
   });
 
+  it('pela conta do ModoBank, com o dinheiro já saído: aprova e baixa nela', async () => {
+    // O único motivo de não baixar na conta do ModoBank é haver um pagamento
+    // do banco a esperar. Quem diz que o dinheiro já saiu desfaz essa premissa
+    // — e a baixa é a mesma que se daria à mão na tela do IXC, na data em que
+    // ele saiu, que é por onde a conciliação acha a linha do extrato.
+    const { service, criados } = montarServico();
+
+    const r = await service.pagar(
+      4242,
+      { contaPagamento: 18, data: '2026-08-08', jaSaiu: true },
+      'Aurelio',
+    );
+
+    expect(r).toMatchObject({
+      aprovada: true,
+      paga: true,
+      aguardandoBanco: false,
+    });
+    expect(criados.map((c) => c.recurso)).toEqual([
+      'fn_apagar_auditoria',
+      'botao_pagar_26409',
+    ]);
+
+    const baixa = criados.at(-1)!;
+    expect(baixa.payload).toMatchObject({
+      conta_: 18,
+      // A data informada, não a de hoje: foi nela que o dinheiro saiu.
+      data: '08/08/2026',
+    });
+  });
+
   it('por qualquer outra conta: aprova e dá a baixa nela', async () => {
     const { service, criados } = montarServico();
 

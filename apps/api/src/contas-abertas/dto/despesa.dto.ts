@@ -39,6 +39,17 @@ export class PagarTituloDto {
   /** Dia do pagamento (AAAA-MM-DD). Vazio = hoje. */
   @IsOptional() @IsISO8601() data?: string;
 
+  /**
+   * O dinheiro já saiu — este pagamento está sendo **registrado**, não feito.
+   *
+   * É o que destrava a baixa na conta do ModoBank. Ela normalmente só é
+   * aprovada, porque quem paga é o banco e dar por saído o que ainda está lá
+   * seria mentira. Quando quem clica afirma que a saída já aconteceu, não há
+   * pagamento futuro a esperar — e a baixa aqui é a mesma que se daria à mão
+   * na tela do IXC, com a data em que o dinheiro de fato saiu.
+   */
+  @IsOptional() @IsBoolean() jaSaiu?: boolean;
+
   /** O que aparece no histórico do lançamento no IXC. */
   @IsOptional() @IsString() @MaxLength(200) historico?: string;
 
@@ -65,6 +76,9 @@ export class PagarLoteDto {
 
   /** Dia do pagamento (AAAA-MM-DD). Vazio = hoje. */
   @IsOptional() @IsISO8601() data?: string;
+
+  /** O dinheiro de todas elas já saiu. Ver `PagarTituloDto`. */
+  @IsOptional() @IsBoolean() jaSaiu?: boolean;
 
   /** @deprecated A conta escolhida manda; fica por compatibilidade. */
   @IsOptional() @IsIn(['BANCO', 'EM_MAOS']) forma?: 'BANCO' | 'EM_MAOS';

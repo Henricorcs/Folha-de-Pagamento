@@ -57,6 +57,14 @@ export function PagarEmMaos({
   const queryClient = useQueryClient();
   const [data, setData] = useState(hojeISO);
   const [contaEscolhida, setContaEscolhida] = useState('');
+  /**
+   * O dinheiro já saiu — este pagamento está sendo registrado, não feito.
+   *
+   * É o que destrava a baixa na conta do ModoBank, que sozinha só é aprovada
+   * aqui. Serve para o caso comum de pagar o PIX pelo aplicativo do banco e vir
+   * registrar depois, com a data em que o dinheiro de fato saiu.
+   */
+  const [jaSaiu, setJaSaiu] = useState(false);
   const [resultado, setResultado] = useState<{
     pagas: number;
     total: number;
@@ -81,7 +89,14 @@ export function PagarEmMaos({
   const contaDoBanco = config.data?.contaPagamentoId;
   const contaAtual = Number(contaEscolhida) || contaDoBanco;
   const escolhida = contasIxc.data?.find((c) => c.id === contaAtual);
-  const soAprova = !!contaDoBanco && contaAtual === contaDoBanco;
+  /** A conta escolhida é a do banco que paga sozinho (ModoBank). */
+  const contaDoBancoEscolhida = !!contaDoBanco && contaAtual === contaDoBanco;
+  /**
+   * Só aprova, sem baixar: a conta do banco **e** ninguém tendo dito que o
+   * dinheiro já saiu. Dizer que saiu desfaz a única razão de não baixar aqui —
+   * não há mais pagamento futuro do banco para esperar.
+   */
+  const soAprova = contaDoBancoEscolhida && !jaSaiu;
 
   const total = contas.reduce((s, c) => s + c.valorAberto, 0);
 
@@ -95,6 +110,7 @@ export function PagarEmMaos({
         idsFnApagar: contas.map((c) => c.idFnApagar),
         contaPagamento: contaAtual,
         data,
+        jaSaiu,
       });
       return r;
     },
@@ -193,6 +209,18 @@ export function PagarEmMaos({
           </div>
         </div>
 
+        {contaDoBancoEscolhida && (
+          <label className="mt-3 flex flex-wrap items-center gap-2 text-sm text-tinta-600">
+            <input
+              type="checkbox"
+              className="accent-brand-600"
+              checked={jaSaiu}
+              onChange={(e) => setJaSaiu(e.target.checked)}
+            />
+            Já foi paga — o dinheiro já saiu desta conta
+          </label>
+        )}
+
         {/* O que vai acontecer, em uma linha, antes de confirmar. */}
         <p
           className={`mt-3 text-sm ${
@@ -202,10 +230,19 @@ export function PagarEmMaos({
           }`}
         >
           {soAprova
-            ? `Pelo ${escolhida?.nome ?? 'ModoBank'} a conta só é aprovada aqui — o pagamento sai na tela dele, no IXC.`
+            ? `Pelo ${escolhida?.nome ?? 'ModoBank'} a conta só é aprovada aqui — o pagamento sai na tela dele, no IXC. Marque acima se ela já foi paga.`
             : `Aprova e dá baixa no IXC: a conta fica paga, saindo de ${escolhida?.nome ?? 'conta escolhida'}. Não precisa repetir lá.`}
         </p>
       </div>
+
+      {contaDoBancoEscolhida && jaSaiu && (
+        <Aviso tom="atencao">
+          Isto registra um pagamento que já aconteceu — não move dinheiro
+          nenhum. Confira no extrato antes: dar por paga uma conta que o banco
+          ainda não pagou faz o ModoBank pagá-la depois, por cima, e o dinheiro
+          sai duas vezes.
+        </Aviso>
+      )}
 
       <div className="mt-4 max-h-[40vh] overflow-y-auto rolagem-fina rounded-xl border border-tinta-100">
         <table className="w-full text-sm">
@@ -240,17 +277,28 @@ export function PagarEmMaos({
       </div>
 
       {!soAprova && (
-        <div className="mt-4 max-w-[200px]">
-          <label className="rotulo" htmlFor="data-pagamento-lote">
-            Dia em que saiu
-          </label>
-          <input
-            id="data-pagamento-lote"
-            type="date"
-            value={data}
-            onChange={(e) => setData(e.target.value)}
-            className="campo"
-          />
+        <div className="mt-4">
+          <div className="max-w-[200px]">
+            <label className="rotulo" htmlFor="data-pagamento-lote">
+              Dia em que saiu
+            </label>
+            <input
+              id="data-pagamento-lote"
+              type="date"
+              value={data}
+              onChange={(e) => setData(e.target.value)}
+              className="campo"
+            />
+          </div>
+          {/* É esta data que vai para a movimentação financeira do IXC, e é
+              por ela que o movimento encontra a linha do extrato. O dia em
+              que se registra não serve: quem paga pelo aplicativo do banco e
+              lança dias depois concilia pelo dia em que o dinheiro saiu. */}
+          <p className="mt-1.5 text-xs text-tinta-400">
+            Pode ser um dia passado. É esta data que vai para o IXC e é por ela
+            que a conciliação acha a linha do extrato — não vale o dia de hoje
+            se o dinheiro saiu antes.
+          </p>
         </div>
       )}
 
@@ -274,7 +322,9 @@ export function PagarEmMaos({
             ? 'Enviando ao IXC…'
             : soAprova
               ? `Aprovar ${formatBRL(total)} para o banco pagar`
-              : `Confirmar pagamento de ${formatBRL(total)}`}
+              : jaSaiu
+                ? `Registrar ${formatBRL(total)} como pago`
+                : `Confirmar pagamento de ${formatBRL(total)}`}
         </button>
       </div>
     </Janela>
