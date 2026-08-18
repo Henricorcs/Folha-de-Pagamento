@@ -26,6 +26,21 @@
   --barra: 10 16 32;
 
   /*
+   * A faixa da linha par e o realce do ponteiro, na tabela.
+   *
+   * `--faixa` é o tom fraco que alterna com o fundo do cartão para separar uma
+   * conta da outra por área, e não só pelo fio de cima. Ele é de propósito quase
+   * imperceptível sozinho: o que se lê não é a cor, é a alternância. Um tom mais
+   * forte transformaria uma lista de 500 títulos numa grade listrada.
+   *
+   * `--linha-hover` precisa ficar acima dos dois — do cartão e da faixa —, ou o
+   * ponteiro sobre uma linha par não daria retorno nenhum. Era `tinta-50/70`,
+   * que sobre o branco dá quase exatamente a cor da faixa nova.
+   */
+  --faixa: 247 249 252;
+  --linha-hover: 232 237 245;
+
+  /*
    * O fundo do campo de digitar, e o dele em foco.
    *
    * Tem cor própria, e não a do cartão ou a da página, porque ele precisa se
@@ -99,6 +114,13 @@
 
   --papel: 23 33 54;
   --barra: 10 16 32;
+
+  /*
+   * No escuro a faixa é mais clara que o cartão, não mais escura: abaixo dele
+   * ela cairia no fundo da página e a linha par pareceria um buraco.
+   */
+  --faixa: 29 40 63;
+  --linha-hover: 39 53 83;
 
   /*
    * Mais claro que o cartão **e** que a página — as duas superfícies em que um
@@ -298,7 +320,7 @@
     @apply whitespace-nowrap px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.1em] text-tinta-400;
   }
   .td {
-    @apply px-3 py-3 align-middle text-tinta-700;
+    @apply px-3 py-2 align-middle text-tinta-700;
   }
   /*
    * O fio que separa uma linha da outra é `tinta-200`, e não `tinta-100`, por
@@ -314,7 +336,39 @@
    * fundo de superfície discreta.
    */
   .linha {
-    @apply border-t border-tinta-200 transition-colors hover:bg-tinta-50/70;
+    @apply border-t border-tinta-200 transition-colors;
+  }
+  /*
+   * Faixa alternada, como na tela do IXC: uma conta em cima do fundo do cartão,
+   * a seguinte sobre `--faixa`. O fio de cima continua, porque um separa o que
+   * o outro não separa — o fio marca a divisa exata, a faixa diz de relance
+   * quantas linhas cada item ocupa. Numa lista em que um item tem nome,
+   * observação e dois selos empilhados, essa segunda pergunta é a mais difícil.
+   *
+   * Tudo aqui é `background-color` na mesma origem, então a ordem destas regras
+   * é o que decide quem ganha: a faixa primeiro, o ponteiro depois (ou a linha
+   * par não acenderia ao passar o mouse) e a linha marcada por último, mais
+   * abaixo no arquivo. `:nth-child(even)` já vale 0,2,0 de especificidade e
+   * passaria por cima de `.linha-marcada`, que é uma classe só — por isso ela
+   * virou `.linha.linha-marcada` lá embaixo.
+   */
+  .linha:nth-child(even) {
+    background-color: rgb(var(--faixa));
+  }
+  .linha:hover,
+  .linha:nth-child(even):hover {
+    background-color: rgb(var(--linha-hover));
+  }
+  /*
+   * A mesma faixa, à mão, para as tabelas que agrupam: a Folha abre um `tbody`
+   * por funcionário, e o `:nth-child` reinicia a cada um deles — sozinho, ele
+   * pintaria todos os grupos iguais. Ali quem alterna é o índice do grupo.
+   *
+   * Uma classe só (0,1,0): perde do ponteiro e da linha marcada acima, que é
+   * exatamente o que se quer.
+   */
+  .linha-faixa {
+    background-color: rgb(var(--faixa));
   }
   /*
    * A mesma divisória para as listas que não são tabela — as de `divide-y` e
@@ -335,7 +389,8 @@
    * linhas deixava a tabela ilegível. Véu com transparência funciona nos dois
    * temas porque escurece ou clareia o que já está lá, em vez de trocar.
    */
-  .linha-marcada {
+  .linha.linha-marcada,
+  .linha.linha-marcada:hover {
     @apply bg-brand-500/10 dark:bg-brand-400/[0.14];
     box-shadow: inset 3px 0 0 theme('colors.brand.500');
   }

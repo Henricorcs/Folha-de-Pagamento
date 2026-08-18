@@ -1171,7 +1171,7 @@ export function Folha() {
                   <th className="th text-right">Total a pagar</th>
                 </tr>
               </thead>
-              {gruposVisiveis.map((g) => {
+              {gruposVisiveis.map((g, iGrupo) => {
                 // Linha zerada pelo dia 25 não conta: não há o que gerar nela.
                 const geraveis = g.indices.filter((i) => itens[i].valor > 0);
                 const marcadosGrupo = geraveis.filter(
@@ -1186,9 +1186,11 @@ export function Folha() {
                   <tbody key={g.funcionarioId}>
                     <tr
                       onClick={() => alternarDetalhe(g.funcionarioId)}
+                      // `tbody` por funcionário reinicia o `:nth-child`, então
+                      // aqui a faixa alternada vem do índice do grupo.
                       className={`linha cursor-pointer ${
-                        marcadosGrupo.length === 0 ? 'opacity-45' : ''
-                      }`}
+                        iGrupo % 2 === 1 ? 'linha-faixa' : ''
+                      } ${marcadosGrupo.length === 0 ? 'opacity-45' : ''}`}
                     >
                       <td className="td" onClick={(e) => e.stopPropagation()}>
                         <input
