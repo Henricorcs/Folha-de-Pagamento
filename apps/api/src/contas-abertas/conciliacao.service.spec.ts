@@ -303,9 +303,17 @@ describe('pagamento que saiu de outra conta bancária', () => {
     return { service: new ConciliacaoService(ixc as never, prisma as never), ixc };
   }
 
-  it('perna no razão do caixa (16942) fica de fora, com o título dizendo banco', async () => {
+  it('aparece na lista, mas dizendo de onde o dinheiro saiu de verdade', async () => {
+    // Sumir seria pior: continua fora da conciliacao, e ninguem o veria.
     const { service } = saidoDeOutroBanco('16942');
-    expect(await service.pendentes()).toEqual([]);
+    const [p] = await service.pendentes();
+
+    expect(p).toMatchObject({
+      idFnApagar: 36949,
+      corrigivel: false,
+      contaRealNome: 'CX - Werick',
+    });
+    expect(p.motivo).toMatch(/extrato/i);
   });
 
   it('e mandando o id na marra, nada é estornado', async () => {

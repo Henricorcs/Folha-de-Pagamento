@@ -1303,6 +1303,12 @@ export interface PagamentoTorto {
   idMovimFinan: number;
   historico: string;
   documento: string | null;
+  /** Dá para consertar daqui? Falso quando o dinheiro saiu de outra conta */
+  corrigivel: boolean;
+  /** Por que não dá, quando não dá */
+  motivo: string | null;
+  /** De onde o dinheiro realmente saiu, quando o título aponta outra conta */
+  contaRealNome: string | null;
 }
 
 export interface ResultadoDaCorrecao {

@@ -59,6 +59,21 @@ export interface PagamentoTorto {
   idMovimFinan: number;
   historico: string;
   documento: string | null;
+  /**
+   * Dá para consertar daqui? `false` quando o dinheiro saiu de uma conta
+   * diferente da que o título aponta — ali o conserto seria mudar de banco um
+   * pagamento que já aconteceu, e isso não é decisão de um serviço.
+   */
+  corrigivel: boolean;
+  /** Por que não dá, quando não dá. */
+  motivo: string | null;
+  /**
+   * De onde o dinheiro **realmente** saiu, quando a linha do pagamento aponta
+   * uma conta que não é a do título. O "de onde saiu" da tela vinha do título,
+   * e o título pode estar errado — foi o caso de um pagamento de R$ 50.000 que
+   * saiu do Bradesco com o título dizendo ModoBank.
+   */
+  contaRealNome: string | null;
 }
 
 /** O que aconteceu com cada título na correção. */
@@ -156,6 +171,15 @@ export class ConciliacaoService {
         resultado.pulados.push({
           idFnApagar: id,
           motivo: 'Já está na conta certa, ou não está mais pago no IXC.',
+        });
+        continue;
+      }
+
+      // Está na lista para ser visto, não para ser mexido.
+      if (!torto.corrigivel) {
+        resultado.pulados.push({
+          idFnApagar: id,
+          motivo: torto.motivo ?? 'Não dá para consertar daqui.',
         });
         continue;
       }
@@ -312,14 +336,17 @@ export class ConciliacaoService {
      * título é que aponta outra: alguém trocou a conta de pagamento depois de
      * pagar, ou pagou por uma conta e lançou por outra.
      *
-     * Reescrever isso moveria um pagamento de banco — e num caso destes eram
-     * R$ 50.000. Quem decide de qual conta saiu o dinheiro é o extrato, não
-     * este serviço.
+     * Reescrever moveria de banco um pagamento que já aconteceu — num caso
+     * destes eram R$ 50.000, saídos do Bradesco com o título dizendo ModoBank.
+     * Quem decide de qual conta saiu o dinheiro é o extrato.
+     *
+     * Mas some da tela seria pior: continua sendo um pagamento fora da
+     * conciliação, e agora ninguém o veria. Ele entra na lista dizendo de onde
+     * o dinheiro saiu de verdade, sem caixa de marcar.
      */
-    const ehRazaoDeOutraConta = [...razoes.values()].some(
-      (c) => c.razao === contaAtual,
+    const outraConta = [...razoes.entries()].find(
+      ([, c]) => c.razao === contaAtual,
     );
-    if (ehRazaoDeOutraConta) return null;
 
     const idMovimFinan = parseIxcId(linhaM.id_movim_finan);
     if (!idMovimFinan) return null;
@@ -330,6 +357,14 @@ export class ConciliacaoService {
       data: String(linhaM.data ?? ''),
       contaPagamento,
       contaPagamentoNome: conta.nome,
+      corrigivel: !outraConta,
+      motivo: outraConta
+        ? `O dinheiro saiu de "${outraConta[1].nome ?? `conta ${outraConta[0]}`}", ` +
+          `e o título aponta "${conta.nome ?? `conta ${contaPagamento}`}". ` +
+          'Refazer a baixa daqui mudaria o pagamento de conta. Acerte no IXC, ' +
+          'conferindo antes no extrato de qual conta o dinheiro saiu.'
+        : null,
+      contaRealNome: outraConta?.[1].nome ?? null,
       contaAtual,
       contaCerta: conta.razao,
       idMovimFinan,

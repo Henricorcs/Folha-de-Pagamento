@@ -57,7 +57,14 @@ export function Conciliacao() {
   });
 
   const lista = pendentes.data ?? [];
-  const total = lista
+  /*
+   * O que dá para consertar daqui. O resto aparece na lista — continua fora da
+   * conciliação, e escondê-lo seria pior — mas sem caixa de marcar: ali o
+   * dinheiro saiu de uma conta e o título aponta outra, e refazer a baixa
+   * mudaria o pagamento de banco.
+   */
+  const corrigiveis = lista.filter((p) => p.corrigivel);
+  const total = corrigiveis
     .filter((p) => marcados.has(p.idFnApagar))
     .reduce((s, p) => s + p.valor, 0);
 
@@ -71,7 +78,9 @@ export function Conciliacao() {
   }
 
   function marcarTodos(marcar: boolean) {
-    setMarcados(marcar ? new Set(lista.map((p) => p.idFnApagar)) : new Set());
+    setMarcados(
+      marcar ? new Set(corrigiveis.map((p) => p.idFnApagar)) : new Set(),
+    );
   }
 
   return (
@@ -112,6 +121,15 @@ export function Conciliacao() {
             <span>
               <strong className="num text-tinta-900">{lista.length}</strong>{' '}
               pagamento(s) fora da conciliação
+              {corrigiveis.length !== lista.length && (
+                <>
+                  {' '}
+                  — <strong className="num text-tinta-900">
+                    {corrigiveis.length}
+                  </strong>{' '}
+                  que dá para consertar daqui
+                </>
+              )}
             </span>
             <button
               onClick={() => marcarTodos(true)}
@@ -143,12 +161,21 @@ export function Conciliacao() {
                 {lista.map((p) => (
                   <tr key={p.idFnApagar} className="linha">
                     <td className="td">
-                      <input
-                        type="checkbox"
-                        className="accent-brand-600"
-                        checked={marcados.has(p.idFnApagar)}
-                        onChange={() => alternar(p.idFnApagar)}
-                      />
+                      {p.corrigivel ? (
+                        <input
+                          type="checkbox"
+                          className="accent-brand-600"
+                          checked={marcados.has(p.idFnApagar)}
+                          onChange={() => alternar(p.idFnApagar)}
+                        />
+                      ) : (
+                        <span
+                          className="text-tinta-300"
+                          title="Este não se conserta daqui — ver a coluna ao lado."
+                        >
+                          —
+                        </span>
+                      )}
                     </td>
                     <td className="td">
                       <div className="text-tinta-800">{p.beneficiario}</div>
@@ -160,18 +187,37 @@ export function Conciliacao() {
                       {p.data ? formatData(p.data) : '—'}
                     </td>
                     <td className="td text-tinta-500">
-                      {p.contaPagamentoNome ?? p.contaPagamento}
+                      {/* O nome vem do título — e o título pode estar errado.
+                          Quando a linha do pagamento aponta outra conta, é ela
+                          que diz por onde o dinheiro passou. */}
+                      {p.contaRealNome ? (
+                        <>
+                          <div className="text-tinta-800">{p.contaRealNome}</div>
+                          <div className="text-xs text-amber-700 dark:text-amber-300">
+                            o título diz{' '}
+                            {p.contaPagamentoNome ?? p.contaPagamento}
+                          </div>
+                        </>
+                      ) : (
+                        (p.contaPagamentoNome ?? p.contaPagamento)
+                      )}
                     </td>
                     <td className="td">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <Selo tom="erro" pequeno titulo="Onde a baixa foi lançada — a conta da despesa.">
-                          está em {p.contaAtual}
-                        </Selo>
-                        <span className="text-tinta-300">→</span>
-                        <Selo tom="pago" pequeno titulo="A conta de onde o dinheiro saiu; é dela que a conciliação lê.">
-                          vai para {p.contaCerta}
-                        </Selo>
-                      </div>
+                      {p.corrigivel ? (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Selo tom="erro" pequeno titulo="Onde a baixa foi lançada — a conta da despesa.">
+                            está em {p.contaAtual}
+                          </Selo>
+                          <span className="text-tinta-300">→</span>
+                          <Selo tom="pago" pequeno titulo="A conta de onde o dinheiro saiu; é dela que a conciliação lê.">
+                            vai para {p.contaCerta}
+                          </Selo>
+                        </div>
+                      ) : (
+                        <p className="max-w-md text-xs leading-relaxed text-amber-700 dark:text-amber-300">
+                          {p.motivo}
+                        </p>
+                      )}
                     </td>
                     <td className="td whitespace-nowrap text-right">
                       <span className="valor">{formatBRL(p.valor)}</span>
@@ -189,7 +235,7 @@ export function Conciliacao() {
                 {formatBRL(total)}
               </p>
               <p className="mt-0.5 text-xs text-tinta-400">
-                {marcados.size} de {lista.length} pagamento(s)
+                {marcados.size} de {corrigiveis.length} pagamento(s)
               </p>
             </div>
             <button
