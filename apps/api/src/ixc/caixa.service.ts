@@ -13,6 +13,7 @@ import {
   mapCaixa,
   TABELAS_CONTAS_CAIXA,
   TABELAS_MOVIMENTO_CAIXA,
+  TABELAS_MOVIMENTO_LEITURA,
   type CaixaIxc,
   type CamposMovimento,
   type LancamentoCaixaInput,
@@ -68,9 +69,11 @@ export class CaixaService {
   /** undefined = ainda não procurou; null = procurou e não achou. */
   private tabelaContas: string | null | undefined;
   private tabelaMovimento: string | null | undefined;
+  /** A de leitura tem cache próprio: a lista de candidatas é outra. */
+  private tabelaLeitura: string | null | undefined;
   private campos: CamposMovimento | null | undefined;
   /** Quando cada "não achei" foi guardado, para saber quando está velho. */
-  private naoAchei = { contas: 0, movimento: 0, campos: 0 };
+  private naoAchei = { contas: 0, movimento: 0, leitura: 0, campos: 0 };
   /** O que o IXC respondeu na última busca que não achou nada. */
   private ultimaFalha: string | null = null;
 
@@ -80,8 +83,9 @@ export class CaixaService {
   reset(): void {
     this.tabelaContas = undefined;
     this.tabelaMovimento = undefined;
+    this.tabelaLeitura = undefined;
     this.campos = undefined;
-    this.naoAchei = { contas: 0, movimento: 0, campos: 0 };
+    this.naoAchei = { contas: 0, movimento: 0, leitura: 0, campos: 0 };
     this.ultimaFalha = null;
   }
 
@@ -177,7 +181,7 @@ export class CaixaService {
      * o que fazer. (`lancarSaida`, logo abaixo, continua lançando `Error`
      * porque ali quem chama captura e transforma no aviso da diária.)
      */
-    const tabela = await this.resolverTabelaMovimento(cfg.caixaTabelaMovimento);
+    const tabela = await this.resolverTabelaLeitura(cfg.caixaTabelaMovimento);
     if (!tabela) {
       throw new ServiceUnavailableException(
         'Não encontrei a tabela da movimentação financeira no seu IXC — é ' +
@@ -267,7 +271,7 @@ export class CaixaService {
     ultimaFalha: string | null;
   }> {
     const tabelaContas = await this.resolverTabelaContas(cfg.caixaTabelaContas);
-    const tabelaMovimento = await this.resolverTabelaMovimento(
+    const tabelaMovimento = await this.resolverTabelaLeitura(
       cfg.caixaTabelaMovimento,
     );
 
@@ -374,6 +378,30 @@ export class CaixaService {
     );
     if (this.tabelaContas === null) this.naoAchei.contas = Date.now();
     return this.tabelaContas;
+  }
+
+  /**
+   * A tabela de onde se leem os lançamentos. Separada da de escrita de
+   * propósito — ver `TABELAS_MOVIMENTO_LEITURA`.
+   */
+  private async resolverTabelaLeitura(
+    configurada?: string | null,
+  ): Promise<string | null> {
+    const fixa = (configurada ?? '').trim();
+    if (fixa && fixa !== this.tabelaLeitura) {
+      this.tabelaLeitura = undefined;
+      this.campos = undefined;
+    }
+
+    const lembrado = this.lembrado(this.tabelaLeitura, this.naoAchei.leitura);
+    if (lembrado !== undefined) return lembrado;
+
+    this.tabelaLeitura = await this.primeiraQueResponde(
+      fixa ? [fixa] : TABELAS_MOVIMENTO_LEITURA,
+      'movimentação financeira (leitura)',
+    );
+    if (this.tabelaLeitura === null) this.naoAchei.leitura = Date.now();
+    return this.tabelaLeitura;
   }
 
   private async resolverTabelaMovimento(

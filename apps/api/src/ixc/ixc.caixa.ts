@@ -55,6 +55,25 @@ export const TABELAS_MOVIMENTO_CAIXA = [
   'movimentacao_financeira',
 ];
 
+/**
+ * De onde se **leem** os lançamentos de um caixa.
+ *
+ * Lista à parte da de cima, e não um item acrescentado nela, por um motivo de
+ * segurança: aquela é a que o `lancarSaida` usa para **escrever**. Hoje ela não
+ * acha nada e a escrita fica desligada de propósito — o pagamento em mãos é
+ * marcado como "lançar no IXC à mão". Juntar as duas ligaria a escrita
+ * automática sem ninguém ter pedido, e logo numa tabela em que a baixa é um
+ * **par** de linhas (`M`, o dinheiro saindo, e `P`, a despesa): escrever meio
+ * par ali é o defeito que já custou três títulos tortos nesta base.
+ *
+ * `fn_movim_finan` é a que existe: é dela que a conciliação lê as pernas do
+ * pagamento, e é onde o IXC guarda a movimentação financeira desta instalação.
+ */
+export const TABELAS_MOVIMENTO_LEITURA = [
+  'fn_movim_finan',
+  ...TABELAS_MOVIMENTO_CAIXA,
+];
+
 /** Um caixa/conta do IXC, do jeito que a tela de configuração mostra. */
 export interface CaixaIxc {
   id: number;
