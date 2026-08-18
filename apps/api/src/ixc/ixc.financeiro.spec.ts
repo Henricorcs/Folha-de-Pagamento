@@ -157,6 +157,39 @@ describe('tipo da chave PIX vindo do cadastro', () => {
     });
     expect(body).toMatchObject({ pix_tipo: 'E-mail' });
   });
+
+  /*
+   * Aprende-se um tipo de cada conta que já existe no IXC, então uma base onde
+   * ninguém nunca pagou por chave aleatória não tem de onde ensinar essa. Foi o
+   * que travou um lançamento em 18/08/2026: o mapa sabia CPF/CNPJ, celular,
+   * e-mail e copia-e-cola, a conta ia com chave aleatória, e o rótulo acentuado
+   * voltou como "Tipo da chave Pix inválido!".
+   */
+  it('tipo que faltou no aprendizado usa o código conhecido, na coluna conhecida', () => {
+    const body = buildContaPagarPayload({
+      ...base,
+      chavePix: '8e2b1f4a-3c7d-4e51-9a06-b2f8d1c47e93',
+      mapaTipoChave: {
+        campo: 'tipo_pix',
+        codigos: {
+          'CPF/CNPJ': 'CPF_CNPJ',
+          Celular: 'CELULAR',
+          'E-mail': 'EMAIL',
+          'Código copia e cola': 'COPIA_E_COLA',
+        },
+      },
+    });
+    expect(body).toMatchObject({ tipo_pix: 'ALEATORIA' });
+  });
+
+  it('o que o aprendizado sabe continua mandando sobre o código conhecido', () => {
+    const body = buildContaPagarPayload({
+      ...base,
+      chavePix: 'ana@pix.com',
+      mapaTipoChave: { campo: 'tipo_pix', codigos: { 'E-mail': 'E' } },
+    });
+    expect(body).toMatchObject({ tipo_pix: 'E' });
+  });
 });
 
 /**

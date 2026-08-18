@@ -274,12 +274,29 @@ export function codificarTipoChavePix(
   const campo = mapa?.campo || MAPA_TIPO_PIX_CONHECIDO.campo;
   if (!tipo) return { campo, valor: '' };
 
-  // Base com mapa próprio manda inteira: se ela guarda o tipo numa coluna sua,
-  // com códigos seus, o código conhecido do IXC não vale ali — e o rótulo por
-  // extenso continua sendo o palpite menos errado para o tipo que faltou.
-  if (mapa) return { campo, valor: mapa.codigos[tipo] ?? tipo };
+  const aprendido = mapa?.codigos[tipo];
+  if (aprendido) return { campo, valor: aprendido };
 
-  return { campo, valor: MAPA_TIPO_PIX_CONHECIDO.codigos[tipo] ?? tipo };
+  /*
+   * O tipo que o aprendizado não alcançou.
+   *
+   * Ele existe: aprende-se um tipo de cada conta que já está no IXC, e uma base
+   * onde ninguém nunca pagou por chave aleatória não tem de onde ensinar essa.
+   * Foi o que travou um lançamento de 18/08/2026 — o mapa desta base sabia
+   * CPF/CNPJ, celular, e-mail e copia-e-cola, e a conta ia com chave aleatória.
+   * Sem código, mandava-se o rótulo da tela, com acento e tudo, e o IXC
+   * respondia "Tipo da chave Pix inválido!".
+   *
+   * Estando o aprendizado na mesma coluna que o jeito conhecido do IXC, o
+   * código conhecido é o melhor palpite para o que faltou: é a mesma convenção,
+   * só que num tipo de que ainda não houve exemplo. Coluna diferente é outra
+   * convenção, e aí código conhecido não significa nada — só resta o rótulo.
+   */
+  if (campo === MAPA_TIPO_PIX_CONHECIDO.campo) {
+    return { campo, valor: MAPA_TIPO_PIX_CONHECIDO.codigos[tipo] ?? tipo };
+  }
+
+  return { campo, valor: tipo };
 }
 
 /** Monta o corpo do POST /fn_apagar (conta a pagar). */
