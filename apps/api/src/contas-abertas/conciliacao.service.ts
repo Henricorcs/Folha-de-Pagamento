@@ -303,6 +303,24 @@ export class ConciliacaoService {
     const contaAtual = parseIxcId(linhaM.id_conta);
     if (contaAtual === null || contaAtual === conta.razao) return null;
 
+    /*
+     * A perna do pagamento já está no razão de **outra** conta de pagamento.
+     *
+     * Isso não é o defeito daqui. O defeito escreve a perna numa conta de
+     * despesa (324, 2420) — conta que não é razão de banco nenhum. Cair no
+     * razão da conta 15 quer dizer que o dinheiro saiu mesmo por ali, e que o
+     * título é que aponta outra: alguém trocou a conta de pagamento depois de
+     * pagar, ou pagou por uma conta e lançou por outra.
+     *
+     * Reescrever isso moveria um pagamento de banco — e num caso destes eram
+     * R$ 50.000. Quem decide de qual conta saiu o dinheiro é o extrato, não
+     * este serviço.
+     */
+    const ehRazaoDeOutraConta = [...razoes.values()].some(
+      (c) => c.razao === contaAtual,
+    );
+    if (ehRazaoDeOutraConta) return null;
+
     const idMovimFinan = parseIxcId(linhaM.id_movim_finan);
     if (!idMovimFinan) return null;
 

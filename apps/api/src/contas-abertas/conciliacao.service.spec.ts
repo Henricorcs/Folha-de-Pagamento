@@ -266,3 +266,59 @@ describe('título com provisão e pagamento', () => {
     });
   });
 });
+
+/**
+ * O defeito daqui escreve a perna do pagamento numa conta de **despesa** (324,
+ * 2420). Quando ela cai no razão de outra conta de pagamento, a história é
+ * outra: o dinheiro saiu por aquela conta e o título aponta uma diferente.
+ * Reescrever isso moveria um pagamento de banco — e no caso real eram
+ * R$ 50.000.
+ */
+describe('pagamento que saiu de outra conta bancária', () => {
+  function saidoDeOutroBanco(contaDaPerna: string) {
+    const ixc = {
+      listAll: jest.fn(async () => CONTAS),
+      list: jest.fn(async () => ({
+        registros: [
+          { id: '1', id_movim_finan: '1', id_conta: contaDaPerna, tipo_lanc: 'M', data: '2026-08-17', credito: '50000.00' },
+          { id: '2', id_movim_finan: '1', id_conta: '324', tipo_lanc: 'P', data: '2026-08-17' },
+        ],
+        total: 2,
+        page: 1,
+      })),
+      getById: jest.fn(async () => ({
+        id: '36949', status: 'P', valor: '50000.00', valor_aberto: '0',
+        valor_total_pago: '50000.00', id_contas: '18', id_conta: '324', filial_id: '1',
+      })),
+      remove: jest.fn(),
+      action: jest.fn(),
+    };
+    const prisma = {
+      contaPagar: {
+        findMany: jest.fn(async () => [
+          { idFnApagarIxc: 36949, beneficiarioNome: 'Moises de Oliveira Sousa' },
+        ]),
+      },
+    };
+    return { service: new ConciliacaoService(ixc as never, prisma as never), ixc };
+  }
+
+  it('perna no razão do caixa (16942) fica de fora, com o título dizendo banco', async () => {
+    const { service } = saidoDeOutroBanco('16942');
+    expect(await service.pendentes()).toEqual([]);
+  });
+
+  it('e mandando o id na marra, nada é estornado', async () => {
+    const { service, ixc } = saidoDeOutroBanco('16942');
+    const r = await service.corrigir([36949]);
+
+    expect(ixc.remove).not.toHaveBeenCalled();
+    expect(r.pulados).toHaveLength(1);
+  });
+
+  it('mas conta de despesa continua entrando: aquilo é o defeito', async () => {
+    const { service } = saidoDeOutroBanco('324');
+    const [p] = await service.pendentes();
+    expect(p).toMatchObject({ idFnApagar: 36949, contaAtual: 324, contaCerta: 12833 });
+  });
+});
