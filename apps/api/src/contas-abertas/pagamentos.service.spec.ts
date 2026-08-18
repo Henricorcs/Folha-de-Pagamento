@@ -34,6 +34,8 @@ function montarServico(
     recusaABaixa?: string;
     /** A releitura de conferência também falha. */
     naoDeixaReler?: boolean;
+    /** O cadastro da conta não traz a conta do razão. */
+    contaSemPlanejamento?: boolean;
   } = {},
 ) {
   const titulo =
@@ -54,7 +56,20 @@ function montarServico(
   let leituras = 0;
 
   const ixc = {
-    getById: jest.fn(async () => {
+    getById: jest.fn(async (recurso: string) => {
+      /*
+       * O cadastro da conta de onde o dinheiro sai. O `id_planejamento` é a
+       * conta do razão dela, e é ela que a baixa manda no `id_conta` — sem
+       * isso o lançamento não chega ao banco e o pagamento não aparece para
+       * conciliar. Não conta como leitura do título.
+       */
+      if (recurso === 'contas') {
+        return opts.contaSemPlanejamento
+          ? { id: '23', conta: 'CX - Werick' }
+          : { id: '23', conta: 'CX - Werick', id_planejamento: '12833' };
+      }
+      if (recurso === 'filial') return { id: '1', filial: 'Matriz' };
+
       leituras += 1;
       // A segunda leitura é a conferência de depois da baixa: por padrão o IXC
       // devolve o título já quitado, que é o que acontece quando dá certo.
@@ -167,12 +182,49 @@ describe('PagamentosService.pagar', () => {
       id_pagar: 4242,
       // O dinheiro sai do caixa configurado, não da conta do banco do título.
       conta_: CFG.contaPagamentoCaixaId,
-      id_conta: 2420,
+      // A conta do **razão** daquela conta de pagamento, não a contábil do
+      // título (2420). É ela que faz a baixa lançar na conta de onde o
+      // dinheiro saiu — e é dessa conta que a conciliação lê os movimentos.
+      id_conta: 12833,
       data: '15/08/2026',
       documento: 'NF 123',
       valor_total_pago: '1500,00',
     });
     expect(r.paga).toBe(true);
+  });
+
+  it('a baixa lança na conta do razão do banco, que é o que a conciliação lê', async () => {
+    /*
+     * A baixa cria um par de linhas em `fn_movim_finan`: uma `M`, o dinheiro
+     * saindo da conta bancária, e uma `P`, a despesa. A conciliação lê a `M`,
+     * e ela só existe na conta do razão do banco.
+     *
+     * Mandando aqui a conta contábil do título, o IXC escrevia as duas linhas
+     * nela e nada era lançado no banco: o pagamento constava pago e não
+     * aparecia para conciliar, sem erro em lugar nenhum. Comparado com um
+     * título pago pela tela do IXC, as duas linhas dele têm contas diferentes;
+     * nos nossos, tinham a mesma.
+     */
+    const { service, criados } = montarServico();
+
+    await service.pagar(4242, { contaPagamento: 23 }, 'Aurelio');
+
+    const baixa = criados.at(-1)!.payload;
+    // 12833 é o `id_planejamento` do cadastro da conta; 2420 é a contábil do
+    // título, que era o que ia antes.
+    expect(baixa.id_conta).toBe(12833);
+    expect(baixa.id_conta).not.toBe(2420);
+  });
+
+  it('sem a conta do razão, paga assim mesmo e avisa', async () => {
+    // Uma consulta que não respondeu não pode barrar um pagamento. Mas quem
+    // pagou precisa saber que aquele lançamento pode não chegar à conciliação.
+    const { service } = montarServico({ contaSemPlanejamento: true });
+
+    const r = await service.pagar(4242, { contaPagamento: 23 }, 'Aurelio');
+
+    expect(r.paga).toBe(true);
+    expect(r.avisos.join(' ')).toMatch(/conciliação bancária/i);
   });
 
   it('título já pago não é pago de novo', async () => {
@@ -291,7 +343,7 @@ describe('buildBaixaContaPagarPayload', () => {
     const p = buildBaixaContaPagarPayload({
       idFnApagar: 7,
       contaPagamentoId: 23,
-      contaContabilId: 2420,
+      contaPlanejamentoId: 2420,
       filialId: 1,
       valor: 340.5,
       data: new Date(Date.UTC(2026, 7, 15)),

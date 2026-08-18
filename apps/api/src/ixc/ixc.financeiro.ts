@@ -361,8 +361,14 @@ export interface BaixaContaPagarInput {
   idFnApagar: number;
   /** Conta de onde o dinheiro saiu (`id_contas` — o caixa, o banco). */
   contaPagamentoId: number;
-  /** Conta contábil do título (`id_conta`). */
-  contaContabilId: number;
+  /**
+   * A conta do **razão** daquela conta de pagamento — o `id_planejamento` do
+   * cadastro dela em `contas` (12833 para a Conta ModoBank PIX).
+   *
+   * É ela que vai no `id_conta` da baixa, e é o que decide se o pagamento
+   * aparece para conciliar. Ver `buildBaixaContaPagarPayload`.
+   */
+  contaPlanejamentoId: number;
   filialId: number;
   /** Quanto foi pago. Igual ao saldo em aberto quando se quita de uma vez. */
   valor: number;
@@ -432,11 +438,8 @@ export function semAcento(texto: string): string {
  * transferência, "X" pix.
  *
  * O título guarda a forma como **rótulo** ("Pix", "Dinheiro"); a baixa quer o
- * código. Traduzir os dois era o que faltava: sem isso toda baixa feita daqui
- * ia como dinheiro, inclusive um PIX saindo da conta do banco — e um movimento
- * de dinheiro numa conta bancária não é movimento de banco, então ele não
- * entrava na conciliação. O pagamento constava pago no título e não existia
- * para quem ia conciliar o extrato.
+ * código. Sem traduzir, toda baixa feita daqui ia como dinheiro — inclusive um
+ * PIX saindo da conta do banco, que passava a constar como saída de espécie.
  *
  * Sem rótulo reconhecível, decide de onde o dinheiro saiu: do caixa é dinheiro,
  * de qualquer conta bancária é transferência. Errar para "transferência" deixa
@@ -473,11 +476,29 @@ export function buildBaixaContaPagarPayload(
     filial: input.filialId,
     filial_id: input.filialId,
     filial_label: input.filialNome ?? '',
-    // `conta_` é de onde o dinheiro sai; `id_conta` é a conta contábil do
-    // título. Os nomes são parecidos e as duas são obrigatórias.
+    /*
+     * `conta_` é a conta de onde o dinheiro sai (18, 23); `id_conta` é a conta
+     * do **razão** dela — o `id_planejamento` do cadastro em `contas`.
+     *
+     * Aqui estava o que fazia o pagamento sumir da conciliação. A baixa cria um
+     * par de linhas em `fn_movim_finan`: uma `M`, que é o dinheiro saindo da
+     * conta bancária, e uma `P`, que é a despesa. A conciliação lê a `M`, e ela
+     * só existe na conta do banco — 12833 na Conta ModoBank PIX, onde moram os
+     * 135 mil movimentos que a tela de conciliação lista.
+     *
+     * O app mandava aqui a conta contábil do título (324, a da despesa). O IXC
+     * escrevia as duas linhas nessa conta, e nada era lançado no razão do
+     * banco: o título constava pago, o par de linhas existia, e não havia
+     * movimento nenhum na conta que a conciliação lê. Comparado com um título
+     * pago pela tela: `M` em 12833 e `P` em 2468, contas diferentes; nos
+     * nossos, as duas na mesma.
+     *
+     * A conta da despesa não se perde — o IXC a lê do próprio título para a
+     * linha `P`, e é por isso que ela não precisa vir no corpo.
+     */
     conta_: input.contaPagamentoId,
     conta__label: input.contaPagamentoNome ?? '',
-    id_conta: input.contaContabilId,
+    id_conta: input.contaPlanejamentoId,
     tipo_pagamento: input.tipoPagamento ?? 'D',
     chave_pix: '',
     cheque_banco: '',

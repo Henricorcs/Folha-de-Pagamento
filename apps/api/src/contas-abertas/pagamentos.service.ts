@@ -240,16 +240,30 @@ export class PagamentosService {
      * foi decidida.
      */
     const documento = textoOuNull(raw.documento);
-    const [contaNome, filialNome] = await Promise.all([
-      this.nomeDaConta(contaPagamentoId),
+    const [conta, filialNome] = await Promise.all([
+      this.contaDePagamento(contaPagamentoId),
       this.nomeDaFilial(filialId),
     ]);
+
+    /*
+     * Sem o razão da conta de pagamento a baixa não lança no banco, e o
+     * pagamento não chega à conciliação. Cair na conta contábil do título é o
+     * comportamento antigo — errado, mas melhor do que recusar o pagamento por
+     * causa de uma consulta que não respondeu.
+     */
+    if (conta.planejamento === null) {
+      avisos.push(
+        `Não consegui ler a conta do razão da conta de pagamento ` +
+          `${contaPagamentoId} no IXC. A baixa foi feita, mas o lançamento pode ` +
+          'não aparecer na conciliação bancária — confira por lá.',
+      );
+    }
 
     const payloadDaBaixa = buildBaixaContaPagarPayload({
       idFnApagar,
       contaPagamentoId,
-      contaPagamentoNome: contaNome,
-      contaContabilId,
+      contaPagamentoNome: conta.nome,
+      contaPlanejamentoId: conta.planejamento ?? contaContabilId,
       filialId,
       filialNome,
       valor,
@@ -513,15 +527,33 @@ export class PagamentosService {
    * um pagamento não sair.
    */
   private async nomeDaConta(id: number): Promise<string | null> {
+    return (await this.contaDePagamento(id)).nome;
+  }
+
+  /**
+   * O cadastro da conta de onde o dinheiro sai: o nome e, sobretudo, a conta do
+   * **razão** dela (`id_planejamento`).
+   *
+   * O razão é o que faz a baixa lançar na conta bancária, e é dessa conta que a
+   * tela de conciliação lê os movimentos. Sem ele a baixa escreve as duas
+   * pernas do lançamento na conta da despesa e o banco não vê nada.
+   */
+  private async contaDePagamento(
+    id: number,
+  ): Promise<{ nome: string | null; planejamento: number | null }> {
     try {
       const conta = await this.ixc.getById<Record<string, unknown>>(
         'contas',
         'contas.id',
         id,
       );
-      return conta ? textoOuNull(conta.conta ?? conta.descricao) : null;
+      if (!conta) return { nome: null, planejamento: null };
+      return {
+        nome: textoOuNull(conta.conta ?? conta.descricao),
+        planejamento: parseIxcId(conta.id_planejamento),
+      };
     } catch {
-      return null;
+      return { nome: null, planejamento: null };
     }
   }
 

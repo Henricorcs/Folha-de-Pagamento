@@ -79,7 +79,7 @@ describe('buildBaixaContaPagarPayload', () => {
     idFnApagar: 37019,
     contaPagamentoId: 18,
     contaPagamentoNome: 'Conta ModoBank PIX',
-    contaContabilId: 324,
+    contaPlanejamentoId: 12833,
     filialId: 1,
     filialNome: 'Filial (Alterar)',
     valor: 167,
