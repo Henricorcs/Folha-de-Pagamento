@@ -95,12 +95,21 @@ export function Conciliacao() {
 
       {corrigir.isError && <Aviso tom="erro">{mensagemErro(corrigir.error)}</Aviso>}
 
+      <Aviso tom="erro">
+        <strong>O conserto automático está desligado.</strong> Ele estornava a
+        baixa para refazê-la na conta certa, mas o estorno do webservice apaga a
+        linha do dinheiro <em>sem</em> desfazer o pagamento — e o serviço, lendo
+        “ainda pago”, concluía errado nos dois caminhos. Três títulos ficaram
+        com o lançamento pela metade (37015, 36992, 37010): seguem pagos e com
+        valor aberto zero, mas falta uma perna na movimentação. Estes precisam
+        ser refeitos na tela do IXC.
+      </Aviso>
+
       <Aviso tom="atencao">
-        Consertar é <strong>estornar a baixa e refazê-la</strong> no IXC, um
-        título de cada vez. Entre uma coisa e outra o título fica em aberto por
-        instantes — se algo falhar no meio, a fila para na hora e o título que
-        ficou aberto aparece aqui, com o número. Não rode isto junto com alguém
-        pagando contas no IXC.
+        A lista abaixo continua valendo — ela só lê. É por ela que se sabe quais
+        pagamentos não chegam à conciliação, para acertar um a um no IXC:
+        estornar a baixa por lá e refazê-la escolhendo a conta de onde o dinheiro
+        saiu.
       </Aviso>
 
       {pendentes.isLoading ? (
@@ -239,13 +248,11 @@ export function Conciliacao() {
               </p>
             </div>
             <button
-              onClick={() => corrigir.mutate()}
-              disabled={corrigir.isPending || marcados.size === 0}
+              disabled
+              title="Desligado: o estorno pelo webservice deixa o lançamento pela metade. Refaça na tela do IXC."
               className="btn btn-primario"
             >
-              {corrigir.isPending
-                ? 'Refazendo no IXC…'
-                : `Refazer ${marcados.size} baixa(s) no IXC`}
+              Refazer no IXC (desligado)
             </button>
           </div>
         </div>

@@ -135,92 +135,38 @@ export class ConciliacaoService {
   }
 
   /**
-   * Estorna e refaz a baixa dos títulos indicados, um de cada vez.
+   * DESLIGADO — não conserta, e chegou a estragar.
    *
-   * Cada um é reconferido na hora: o que já estiver certo, ou não estiver mais
-   * pago, é pulado sem ser tocado. A lista de entrada é uma intenção, não uma
-   * ordem — entre ver a tela e clicar o botão o IXC pode ter mudado.
+   * O plano era estornar a baixa e refazê-la na conta certa. Mas
+   * `DELETE fn_apagar_baixas/{id}` **apaga a linha do dinheiro sem desfazer o
+   * pagamento**: o título continua `status = F`, com valor aberto zero. As duas
+   * conferências que este serviço fazia liam "ainda pago" e tiravam a
+   * conclusão errada — uma abortava achando que o estorno não tinha pegado, a
+   * outra dava sucesso por um pagamento que não foi refeito. Nos dois caminhos
+   * a perna do dinheiro já tinha ido embora.
+   *
+   * Três títulos ficaram com o grupo de movimentação pela metade:
+   *
+   *   37015  R$ 160,00   sobrou só a linha D
+   *   36992  R$ 519,00   sobrou só a linha P
+   *   37010  R$ 375,00   sobrou só a linha P
+   *
+   * Todos seguem pagos e com valor aberto zero — o dinheiro está certo. O que
+   * ficou torto é o lançamento, e agora de um jeito pior que o original: antes
+   * havia um par completo na conta errada, hoje falta uma perna.
+   *
+   * A listagem (`pendentes`) continua valendo: ela só lê, e é ela que mostra o
+   * que precisa de conserto. O conserto volta quando alguém souber, com prova
+   * numa base de teste, como estornar de fato uma baixa por aqui. Até lá é na
+   * tela do IXC.
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async corrigir(ids: number[]): Promise<ResultadoDaCorrecao> {
-    if (ids.length === 0) {
-      throw new BadRequestException('Nenhum pagamento indicado.');
-    }
-
-    const razoes = await this.razaoPorConta();
-    const resultado: ResultadoDaCorrecao = {
-      corrigidos: [],
-      pulados: [],
-      emAberto: [],
-      naoTentados: [],
-    };
-
-    const fila = [...new Set(ids)];
-    for (const [i, id] of fila.entries()) {
-      let torto: Omit<PagamentoTorto, 'beneficiario'> | null;
-      try {
-        torto = await this.conferir(id, razoes);
-      } catch (err) {
-        resultado.pulados.push({
-          idFnApagar: id,
-          motivo: err instanceof Error ? err.message : String(err),
-        });
-        continue;
-      }
-
-      if (!torto) {
-        resultado.pulados.push({
-          idFnApagar: id,
-          motivo: 'Já está na conta certa, ou não está mais pago no IXC.',
-        });
-        continue;
-      }
-
-      // Está na lista para ser visto, não para ser mexido.
-      if (!torto.corrigivel) {
-        resultado.pulados.push({
-          idFnApagar: id,
-          motivo: torto.motivo ?? 'Não dá para consertar daqui.',
-        });
-        continue;
-      }
-
-      try {
-        await this.refazer(torto);
-        resultado.corrigidos.push(id);
-        this.logger.log(
-          `Título ${id}: baixa refeita na conta ${torto.contaCerta} ` +
-            `(estava em ${torto.contaAtual}).`,
-        );
-      } catch (err) {
-        const erro = err instanceof Error ? err.message : String(err);
-        resultado.naoTentados = fila.slice(i + 1);
-
-        if (err instanceof EstornoSemEfeito) {
-          /*
-           * O título continua pago: não há perigo nenhum aqui. Mas a fila para
-           * do mesmo jeito — se este tem mais de uma baixa, os outros também
-           * devem ter, e seguir adiante só espalharia estornos que não
-           * consertam nada.
-           */
-          resultado.pulados.push({ idFnApagar: id, motivo: erro });
-          this.logger.warn(
-            `Título ${id}: estorno sem efeito (${erro}). A fila parou aqui; ` +
-              `${resultado.naoTentados.length} título(s) não foram tentados.`,
-          );
-          break;
-        }
-
-        resultado.emAberto.push({ idFnApagar: id, erro });
-        this.logger.error(
-          `Título ${id} ficou EM ABERTO no IXC: o estorno saiu e a nova baixa ` +
-            `não (${erro}). A fila parou aqui; ${resultado.naoTentados.length} ` +
-            'título(s) não foram tentados.',
-        );
-        break;
-      }
-    }
-
-    return resultado;
+    throw new BadRequestException(
+      'O conserto automático está desligado: o estorno pelo webservice apaga a ' +
+        'linha do dinheiro sem desfazer o pagamento, e deixa o lançamento pela ' +
+        'metade. Os títulos desta lista precisam ser refeitos na tela do IXC.',
+    );
   }
 
   /**

@@ -139,57 +139,18 @@ describe('ConciliacaoService.pendentes', () => {
 });
 
 describe('ConciliacaoService.corrigir', () => {
-  it('estorna e refaz a baixa na conta do razão', async () => {
-    const { service, chamadas } = montarServico();
-    const r = await service.corrigir([37020]);
-
-    expect(chamadas).toEqual(['estorno', 'baixa:12833']);
-    expect(r.corrigidos).toEqual([37020]);
-    expect(r.emAberto).toEqual([]);
-  });
-
-  it('o que já está certo é pulado sem ser tocado', async () => {
-    const { service, chamadas } = montarServico({ contaDaPernaM: '12833' });
-    const r = await service.corrigir([37020]);
-
-    expect(chamadas).toEqual([]);
-    expect(r.corrigidos).toEqual([]);
-    expect(r.pulados).toHaveLength(1);
-  });
-
-  it('estorno sem efeito nao vira baixa nova, e nao e alarme falso', async () => {
-    const { service, chamadas } = montarServico({ estornoNaoPega: true });
-    const r = await service.corrigir([37020, 37021]);
-
-    // Estornou, mas o titulo seguiu pago — a outra baixa dele cobre o valor.
-    expect(chamadas).toEqual(['estorno']);
-    expect(r.corrigidos).toEqual([]);
-    // Nada ficou em aberto: o titulo continua pago. Dizer o contrario manda
-    // alguem correr para o IXC atras de um problema que nao existe.
-    expect(r.emAberto).toEqual([]);
-    expect(r.pulados).toHaveLength(1);
-    // Mas a fila para: se este tem mais de uma baixa, os outros tambem tem.
-    expect(r.naoTentados).toEqual([37021]);
-  });
-
-  it('baixa que não quita deixa o título em aberto — e a fila para ali', async () => {
-    const { service } = montarServico({ baixaNaoQuita: true });
-    const r = await service.corrigir([37020, 37021, 37022]);
-
-    expect(r.corrigidos).toEqual([]);
-    expect(r.emAberto).toEqual([
-      {
-        idFnApagar: 37020,
-        erro: expect.stringContaining('em aberto') as unknown as string,
-      },
-    ]);
-    // Os seguintes nem foram tentados: um título aberto é assunto para agora.
-    expect(r.naoTentados).toEqual([37021, 37022]);
-  });
-
-  it('sem nenhum id, recusa em vez de rodar em cima de nada', async () => {
-    const { service } = montarServico();
-    await expect(service.corrigir([])).rejects.toThrow();
+  /*
+   * O conserto automatico esta desligado. O estorno do webservice apaga a
+   * linha do dinheiro sem desfazer o pagamento, e as conferencias deste
+   * servico liam "ainda pago" e concluiam errado — deixando o lancamento pela
+   * metade em tres titulos de verdade. Enquanto nao houver prova de como
+   * estornar por aqui, ele recusa em vez de tentar.
+   */
+  it('recusa em vez de mexer no IXC', async () => {
+    const { service, ixc } = montarServico();
+    await expect(service.corrigir([37020])).rejects.toThrow(/desligado/i);
+    expect(ixc.remove).not.toHaveBeenCalled();
+    expect(ixc.action).not.toHaveBeenCalled();
   });
 });
 
@@ -244,14 +205,6 @@ describe('título com provisão e pagamento', () => {
     expect(await service.pendentes()).toEqual([]);
   });
 
-  it('mandando o id na marra, também não é tocado', async () => {
-    const { service, ixc } = comProvisao('12833');
-    const r = await service.corrigir([36911]);
-
-    expect(ixc.remove).not.toHaveBeenCalled();
-    expect(ixc.action).not.toHaveBeenCalled();
-    expect(r.pulados).toHaveLength(1);
-  });
 
   it('pagamento fora do razão entra — e é o grupo do pagamento que vai', async () => {
     const { service } = comProvisao('324');
@@ -316,13 +269,6 @@ describe('pagamento que saiu de outra conta bancária', () => {
     expect(p.motivo).toMatch(/extrato/i);
   });
 
-  it('e mandando o id na marra, nada é estornado', async () => {
-    const { service, ixc } = saidoDeOutroBanco('16942');
-    const r = await service.corrigir([36949]);
-
-    expect(ixc.remove).not.toHaveBeenCalled();
-    expect(r.pulados).toHaveLength(1);
-  });
 
   it('mas conta de despesa continua entrando: aquilo é o defeito', async () => {
     const { service } = saidoDeOutroBanco('324');
