@@ -53,6 +53,12 @@ export class FechamentoCaixaService {
     return { tabela, caixas, emUso };
   }
 
+  /** O que a descoberta achou no IXC — a primeira pergunta quando falha. */
+  async diagnostico() {
+    const cfg = await this.config.obter();
+    return this.caixa.diagnostico(cfg);
+  }
+
   async extrato(caixaId: number, de: string, ate: string) {
     const inicio = dataDoDia(de, 'inicial');
     const fim = dataDoDia(ate, 'final');

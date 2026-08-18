@@ -1,4 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { IxcClient } from './ixc.client';
 import { parseIxcDate, parseIxcDecimal, parseIxcId } from './ixc.parse';
 import {
@@ -166,11 +170,19 @@ export class CaixaService {
     ate: Date,
     cfg: { caixaTabelaMovimento: string },
   ): Promise<{ tabela: string; lancamentos: LancamentoDoCaixa[] }> {
+    /*
+     * Exceção do Nest, e não `Error` pelado: o que sai daqui vai direto para a
+     * tela de quem está batendo o caixa, e `Error` vira "Internal server
+     * error" — a pessoa fica com um 500 anônimo no lugar de uma frase que diz
+     * o que fazer. (`lancarSaida`, logo abaixo, continua lançando `Error`
+     * porque ali quem chama captura e transforma no aviso da diária.)
+     */
     const tabela = await this.resolverTabelaMovimento(cfg.caixaTabelaMovimento);
     if (!tabela) {
-      throw new Error(
-        'Não encontrei a tabela da movimentação financeira no seu IXC. ' +
-          'Informe o nome dela em Configurações.' +
+      throw new ServiceUnavailableException(
+        'Não encontrei a tabela da movimentação financeira no seu IXC — é ' +
+          'dela que saem os lançamentos do caixa. Informe o nome dela em ' +
+          'Configurações.' +
           (this.ultimaFalha
             ? ` (última resposta do IXC: ${this.ultimaFalha})`
             : ''),
@@ -179,9 +191,10 @@ export class CaixaService {
 
     const campos = await this.resolverCampos(tabela);
     if (!campos) {
-      throw new Error(
-        `A tabela "${tabela}" não tem nenhum lançamento de onde eu possa ` +
-          'copiar o formato das colunas (caixa, valor, data e histórico).',
+      throw new ServiceUnavailableException(
+        `A tabela "${tabela}" respondeu, mas não achei nela um lançamento de ` +
+          'onde copiar o formato das colunas (caixa, valor, data e ' +
+          'histórico). Faça um lançamento à mão no IXC e tente de novo.',
       );
     }
 
@@ -232,6 +245,61 @@ export class CaixaService {
       .sort((a, b) => a.data.getTime() - b.data.getTime() || a.id - b.id);
 
     return { tabela, lancamentos };
+  }
+
+  /**
+   * O que a descoberta achou nesta base, para quando a leitura do caixa falha.
+   *
+   * Nome de tabela e de coluna não estão documentados e variam por instalação,
+   * então quando algo não vem a primeira pergunta é sempre a mesma: em que
+   * tabela ele foi olhar, e que colunas achou lá. Sem isto a resposta depende
+   * de alguém abrir o log do servidor.
+   */
+  async diagnostico(cfg: {
+    caixaTabelaContas: string;
+    caixaTabelaMovimento: string;
+  }): Promise<{
+    tabelaContas: string | null;
+    tabelaMovimento: string | null;
+    campos: CamposMovimento | null;
+    /** Colunas do primeiro lançamento, para conferir a olho. */
+    colunasDoModelo: string[];
+    ultimaFalha: string | null;
+  }> {
+    const tabelaContas = await this.resolverTabelaContas(cfg.caixaTabelaContas);
+    const tabelaMovimento = await this.resolverTabelaMovimento(
+      cfg.caixaTabelaMovimento,
+    );
+
+    let campos: CamposMovimento | null = null;
+    let colunasDoModelo: string[] = [];
+    if (tabelaMovimento) {
+      campos = await this.resolverCampos(tabelaMovimento);
+      try {
+        const res = await this.ixc.list<Record<string, unknown>>(
+          tabelaMovimento,
+          {
+            qtype: `${tabelaMovimento}.id`,
+            query: '0',
+            oper: '>',
+            rp: 1,
+            sortname: `${tabelaMovimento}.id`,
+            sortorder: 'desc',
+          },
+        );
+        colunasDoModelo = Object.keys(res.registros[0] ?? {});
+      } catch {
+        colunasDoModelo = [];
+      }
+    }
+
+    return {
+      tabelaContas,
+      tabelaMovimento,
+      campos,
+      colunasDoModelo,
+      ultimaFalha: this.ultimaFalha,
+    };
   }
 
   async lancarSaida(

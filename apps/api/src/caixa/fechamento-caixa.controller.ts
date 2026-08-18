@@ -37,6 +37,15 @@ export class FechamentoCaixaController {
     return this.service.listarCaixas();
   }
 
+  /**
+   * Em que tabela do IXC ele foi olhar e que colunas achou. Antes das rotas
+   * com parâmetro, para não ser lida como um id de caixa.
+   */
+  @Get('diagnostico')
+  diagnostico() {
+    return this.service.diagnostico();
+  }
+
   /** Os lançamentos do período, com o que já foi conferido e o que está na rua. */
   @Get(':caixaId/extrato')
   extrato(
