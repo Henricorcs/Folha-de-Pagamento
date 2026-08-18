@@ -314,24 +314,42 @@ export function buildContaPagarPayload(
     documento: input.documento ?? '',
     numero_nota: input.numeroNota ?? '',
     /*
-     * Regime contábil do título. É o campo que a tela do IXC mostra como
-     * "Regime contábil (Previsão)": `S` = Caixa (Previsão sim), `N` =
-     * Competência (Previsão não).
-     *
-     * **É ele que decide se o pagamento aparece para conciliar.** O título em
-     * competência gera a linha de movimentação financeira e não entra no fluxo
-     * de caixa, então a baixa constava no título e não existia para quem ia
-     * bater o extrato — o pagamento sumia da conciliação sem erro nenhum, em
-     * lugar nenhum.
+     * Regime contábil do título — "Regime contábil (Previsão)" na tela do IXC:
+     * `S` = Caixa (Previsão sim), `N` = Competência (Previsão não).
      *
      * Ia `N` porque é o que o exemplo da coleção traz, marcado como
      * obrigatório. Mas o exemplo é um exemplo: nesta base, dos títulos pagos
      * pela conta do banco, 4.449 estão em `S` e 483 em `N` — e os `N` são os
-     * que este app criou. A tela do IXC grava `S`, e é dela que a empresa vive.
-     * Conferido nos logs de dois títulos, um de cada regime: o de `S` concilia,
-     * o de `N` não.
+     * que este app criou. A tela grava `S`, e é dela que a empresa vive.
+     *
+     * Não é o que segurava a conciliação (um título nosso já em `S` continuou
+     * fora dela) — quem segurava é o `comunicado`, logo abaixo. Fica em `S`
+     * porque é o regime da empresa, não porque conserta alguma coisa.
      */
     previsao: 'S',
+    /*
+     * "Comunicado com a Modobank" — se este título já foi passado ao banco que
+     * paga por integração.
+     *
+     * **É ele que decide se o pagamento aparece para conciliar.** A tela do IXC
+     * grava `N` em todo título que nasce nela; o app não mandava nada, e o
+     * campo ficava vazio. Vazio não é `N`: a conciliação procura os títulos
+     * marcados como não comunicados, e o que está em branco não é achado por
+     * essa procura. O pagamento constava pago, o movimento existia em
+     * `fn_movim_finan`, e a tela de conciliação não o listava — sem erro em
+     * lugar nenhum.
+     *
+     * Conferido nos títulos: os que aparecem para conciliar têm `N` (31832,
+     * 31833, 36890); os nossos tinham vazio. `S` é o que o próprio ModoBank
+     * escreve quando comunica o pagamento — não é para sair daqui.
+     */
+    comunicado: 'N',
+    /*
+     * "Despesa veículo". Mesma história do `comunicado`: a tela grava `N`,
+     * nós deixávamos vazio. Nenhum sintoma conhecido, mas um campo de sim/não
+     * em branco é um campo que nenhuma consulta acha.
+     */
+    eh_despesa_veiculo: 'N',
     liberado: 'S',
     obs: input.observacao,
   };
