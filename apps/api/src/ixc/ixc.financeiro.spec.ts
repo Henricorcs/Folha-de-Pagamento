@@ -46,7 +46,9 @@ describe('buildContaPagarPayload', () => {
       valor: '1270.80',
       data_emissao: '21/07/2026',
       data_vencimento: '21/07/2026',
-      previsao: 'N',
+      // Regime de caixa, como a tela do IXC grava. É o que põe o pagamento na
+      // conciliação; em competência ele não chega lá. Ver `buildContaPagarPayload`.
+      previsao: 'S',
       liberado: 'S',
       obs: 'saldo salarial referente ao mês 07/2026',
       tipo_pagamento: 'Pix', // padrão quando não informado

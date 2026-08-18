@@ -313,7 +313,25 @@ export function buildContaPagarPayload(
     codigo_barras: somenteDigitosDoBoleto(input.codigoBarras),
     documento: input.documento ?? '',
     numero_nota: input.numeroNota ?? '',
-    previsao: 'N',
+    /*
+     * Regime contábil do título. É o campo que a tela do IXC mostra como
+     * "Regime contábil (Previsão)": `S` = Caixa (Previsão sim), `N` =
+     * Competência (Previsão não).
+     *
+     * **É ele que decide se o pagamento aparece para conciliar.** O título em
+     * competência gera a linha de movimentação financeira e não entra no fluxo
+     * de caixa, então a baixa constava no título e não existia para quem ia
+     * bater o extrato — o pagamento sumia da conciliação sem erro nenhum, em
+     * lugar nenhum.
+     *
+     * Ia `N` porque é o que o exemplo da coleção traz, marcado como
+     * obrigatório. Mas o exemplo é um exemplo: nesta base, dos títulos pagos
+     * pela conta do banco, 4.449 estão em `S` e 483 em `N` — e os `N` são os
+     * que este app criou. A tela do IXC grava `S`, e é dela que a empresa vive.
+     * Conferido nos logs de dois títulos, um de cada regime: o de `S` concilia,
+     * o de `N` não.
+     */
+    previsao: 'S',
     liberado: 'S',
     obs: input.observacao,
   };
