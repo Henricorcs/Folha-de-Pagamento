@@ -234,26 +234,58 @@ export class CaixaService {
       chave = razao;
     }
 
-    const brutos = await this.ixc.listAll<Record<string, unknown>>(
-      tabela,
-      {
-        qtype: `${tabela}.${campos.caixa}`,
-        query: String(chave),
-        oper: '=',
-        sortname: `${tabela}.id`,
-        sortorder: 'desc',
-      },
-      // Teto por segurança: caixa antigo com muitos anos de movimento não pode
-      // virar uma leitura sem fim atrás de uma semana de lançamentos.
-      { pageSize: 500, maxPages: 40 },
-    );
-
     // O fim do dia entra: quem escolhe "até 18/08" quer o que aconteceu no dia
     // 18, e a data do IXC pode vir com hora.
     const inicio = new Date(de);
     inicio.setHours(0, 0, 0, 0);
     const fim = new Date(ate);
     fim.setHours(23, 59, 59, 999);
+
+    /*
+     * Ler de trás para frente e parar cedo, em vez de trazer a conta inteira.
+     *
+     * A primeira versão pedia até 20 mil linhas (quarenta páginas em sequência)
+     * para recortar dezoito dias em memória, e o resultado foi 502: o razão de
+     * uma conta movimentada não é pequeno — a conciliação registra 135 mil
+     * lançamentos no da Conta ModoBank PIX —, e quarenta idas ao IXC estouram
+     * o tempo do proxy antes de terminar.
+     *
+     * Do mais novo para o mais velho, uma página que caia inteira antes do
+     * início do período encerra a leitura: o que vem depois dela é mais antigo
+     * ainda. Para o recorte de sempre — este mês, a semana passada — são uma ou
+     * duas páginas.
+     *
+     * O corte é pela data, e não pelo id, mas quem ordena é o id: lançamento
+     * retroativo nasce com id alto e data velha, então aparece cedo nesta
+     * caminhada e é filtrado pela data — nunca fica para trás de uma parada
+     * antecipada. É o mesmo desenho da leitura de baixas em
+     * `historico-pagamentos`.
+     */
+    const PAGINA = 200;
+    const TETO_DE_PAGINAS = 25;
+    const brutos: Array<Record<string, unknown>> = [];
+
+    for (let pagina = 1; pagina <= TETO_DE_PAGINAS; pagina++) {
+      const res = await this.ixc.list<Record<string, unknown>>(tabela, {
+        qtype: `${tabela}.${campos.caixa}`,
+        query: String(chave),
+        oper: '=',
+        sortname: `${tabela}.id`,
+        sortorder: 'desc',
+        page: pagina,
+        rp: PAGINA,
+      });
+
+      if (res.registros.length === 0) break;
+      brutos.push(...res.registros);
+
+      const datas = res.registros
+        .map((r) => parseIxcDate(r[campos.data]))
+        .filter((d): d is Date => d !== null);
+      // Página inteira anterior ao início: daqui para trás só há mais antigo.
+      if (datas.length > 0 && datas.every((d) => d < inicio)) break;
+      if (res.registros.length < PAGINA) break;
+    }
 
     const lancamentos = brutos
       .map((raw): LancamentoDoCaixa | null => {

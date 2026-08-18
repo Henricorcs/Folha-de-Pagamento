@@ -29,7 +29,16 @@ function montarServico(linhas: Array<Record<string, unknown>>) {
       // com a conta, e a movimentação com uma linha qualquer.
       if (recurso === 'contas') return { registros: [CONTA], total: 1, page: 1 };
       if (recurso === 'fn_movim_finan') {
-        return { registros: linhas.slice(0, Number(params.rp) || 1), total: linhas.length, page: 1 };
+        // Pagina de verdade: a leitura para cedo, e sem paginação o teste da
+        // parada não provaria nada.
+        const rp = Number(params.rp) || 1;
+        const pagina = Number(params.page) || 1;
+        const inicio = (pagina - 1) * rp;
+        return {
+          registros: linhas.slice(inicio, inicio + rp),
+          total: linhas.length,
+          page: pagina,
+        };
       }
       throw new Error(`Recurso ${recurso} não está disponível!`);
     }),
@@ -122,6 +131,45 @@ describe('lendo os lançamentos do caixa', () => {
     await expect(service.listarLancamentos(7, DE, ATE, cfg)).rejects.toThrow(
       /razão/i,
     );
+  });
+
+  /*
+   * A primeira versão trazia a conta inteira e recortava em memória. O razão de
+   * uma conta movimentada tem dezenas de milhares de linhas — a conciliação
+   * registra 135 mil na Conta ModoBank PIX —, e a leitura estourava o tempo do
+   * proxy: a tela recebia 502.
+   */
+  it('para de ler quando a página inteira já é anterior ao período', async () => {
+    // 600 linhas antigas (três páginas de 200) depois de duas recentes.
+    const antigas = Array.from({ length: 600 }, (_, i) => ({
+      id: String(1000 + i),
+      data: '2026-03-10',
+      debito: '',
+      credito: '5,00',
+      historico: 'velho',
+    }));
+    const { service, consultas } = montarServico([
+      { id: '9002', data: '2026-08-15', debito: '', credito: '20,00', historico: 'novo' },
+      { id: '9001', data: '2026-08-14', debito: '', credito: '10,00', historico: 'novo' },
+      ...antigas,
+    ]);
+
+    const { lancamentos } = await service.listarLancamentos(7, DE, ATE, cfg);
+
+    expect(lancamentos).toHaveLength(2);
+
+    /*
+     * Duas páginas das quatro que a conta tem, e não uma: a parada exige a
+     * página **inteira** anterior ao início, então sempre se lê uma além da
+     * fronteira. É de propósito. Parar no meio da página só seria correto se
+     * id e data andassem sempre juntos, e não andam — lançamento retroativo
+     * nasce com id alto e data velha. Numa tela que confere dinheiro, uma
+     * página a mais custa menos que uma saída que não apareceu.
+     */
+    const paginas = consultas.filter(
+      (c) => c.recurso === 'fn_movim_finan' && c.params.oper === '=',
+    );
+    expect(paginas).toHaveLength(2);
   });
 
   it('ordena do mais antigo para o mais novo', async () => {
