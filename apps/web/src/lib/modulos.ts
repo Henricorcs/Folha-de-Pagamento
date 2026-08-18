@@ -1,4 +1,5 @@
 import {
+  IconeCaixa,
   IconeCalculo,
   IconeCalendarioVolta,
   IconeChave,
@@ -91,6 +92,9 @@ const contasPagar: Modulo = {
     { to: 'avulsos', label: 'Pagamentos Avulsos', icone: IconeRecibo },
     { to: 'recorrentes', label: 'Recorrentes', icone: IconeCalendarioVolta },
     { to: 'categorias', label: 'Categorias', icone: IconeEtiqueta },
+    // Bater o caixa do dinheiro em mãos: conferir as saídas do período,
+    // fotografar a nota e declarar o que ainda está na rua com alguém.
+    { to: 'fechamento-caixa', label: 'Fechamento de Caixa', icone: IconeCaixa },
     // Conserto de uma vez so: some da lista quando nao houver mais nada torto.
     {
       to: 'conciliacao',

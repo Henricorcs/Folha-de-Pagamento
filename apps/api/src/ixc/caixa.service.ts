@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { IxcClient } from './ixc.client';
+import { parseIxcDate, parseIxcDecimal, parseIxcId } from './ixc.parse';
 import {
   acharCaixaPorNome,
   buildLancamentoSaida,
@@ -23,6 +24,17 @@ import {
  * só e já passou quando alguém vai ao IXC e volta.
  */
 const FRACASSO_VALE_MS = 60_000;
+
+/** Um lançamento do caixa, do jeito que a conferência precisa vê-lo. */
+export interface LancamentoDoCaixa {
+  /** Id na tabela de movimento do IXC */
+  id: number;
+  data: Date;
+  /** Sempre positivo; o sinal está no `tipo`. */
+  valor: number;
+  historico: string;
+  tipo: 'ENTRADA' | 'SAIDA';
+}
 
 /** Onde o dinheiro em mãos saiu — ou por que não deu para lançar. */
 export interface ResultadoLancamentoCaixa {
@@ -138,6 +150,90 @@ export class CaixaService {
    * mostrar na tela quando não foi possível — quem chama guarda isso na diária
    * para a pessoa poder tentar de novo ou lançar na mão.
    */
+  /**
+   * Os lançamentos de um caixa num período, lidos do IXC.
+   *
+   * O filtro vai pelo caixa, e o recorte de datas é feito aqui depois. Seria
+   * melhor pedir os dois ao IXC, mas a consulta dele aceita um campo só por
+   * vez, e a coluna de data desta tabela é descoberta — não se sabe de antemão
+   * se ela guarda `2026-08-18` ou `18/08/2026`, e comparar a string errada
+   * devolveria o período errado calado. Filtrar pelo caixa é exato em qualquer
+   * base; o volume de um caixa de dinheiro em mãos cabe nessa leitura.
+   */
+  async listarLancamentos(
+    caixaId: number,
+    de: Date,
+    ate: Date,
+    cfg: { caixaTabelaMovimento: string },
+  ): Promise<{ tabela: string; lancamentos: LancamentoDoCaixa[] }> {
+    const tabela = await this.resolverTabelaMovimento(cfg.caixaTabelaMovimento);
+    if (!tabela) {
+      throw new Error(
+        'Não encontrei a tabela da movimentação financeira no seu IXC. ' +
+          'Informe o nome dela em Configurações.' +
+          (this.ultimaFalha
+            ? ` (última resposta do IXC: ${this.ultimaFalha})`
+            : ''),
+      );
+    }
+
+    const campos = await this.resolverCampos(tabela);
+    if (!campos) {
+      throw new Error(
+        `A tabela "${tabela}" não tem nenhum lançamento de onde eu possa ` +
+          'copiar o formato das colunas (caixa, valor, data e histórico).',
+      );
+    }
+
+    const brutos = await this.ixc.listAll<Record<string, unknown>>(
+      tabela,
+      {
+        qtype: `${tabela}.${campos.caixa}`,
+        query: String(caixaId),
+        oper: '=',
+        sortname: `${tabela}.id`,
+        sortorder: 'desc',
+      },
+      // Teto por segurança: caixa antigo com muitos anos de movimento não pode
+      // virar uma leitura sem fim atrás de uma semana de lançamentos.
+      { pageSize: 500, maxPages: 40 },
+    );
+
+    // O fim do dia entra: quem escolhe "até 18/08" quer o que aconteceu no dia
+    // 18, e a data do IXC pode vir com hora.
+    const inicio = new Date(de);
+    inicio.setHours(0, 0, 0, 0);
+    const fim = new Date(ate);
+    fim.setHours(23, 59, 59, 999);
+
+    const lancamentos = brutos
+      .map((raw): LancamentoDoCaixa | null => {
+        const id = parseIxcId(raw.id);
+        const data = parseIxcDate(raw[campos.data]);
+        if (id === null || !data) return null;
+
+        const valor = parseIxcDecimal(raw[campos.valor]);
+        const cru = campos.tipo ? String(raw[campos.tipo] ?? '').trim() : '';
+        // Sem coluna de tipo, quem diz é o sinal do valor.
+        const saida = campos.tipo
+          ? /^(s|saída|saida)$/i.test(cru)
+          : valor < 0;
+
+        return {
+          id,
+          data,
+          valor: Math.abs(valor),
+          historico: String(raw[campos.historico] ?? '').trim(),
+          tipo: saida ? 'SAIDA' : 'ENTRADA',
+        };
+      })
+      .filter((l): l is LancamentoDoCaixa => l !== null)
+      .filter((l) => l.data >= inicio && l.data <= fim)
+      .sort((a, b) => a.data.getTime() - b.data.getTime() || a.id - b.id);
+
+    return { tabela, lancamentos };
+  }
+
   async lancarSaida(
     input: LancamentoCaixaInput,
     cfg: { caixaTabelaMovimento: string },

@@ -177,3 +177,15 @@ export function IconeEtiqueta({ className }: IconeProps) {
     </svg>
   );
 }
+
+/** Gaveta de dinheiro, com a fresta e o puxador: o caixa que se bate. */
+export function IconeCaixa({ className }: IconeProps) {
+  return (
+    <svg {...base} className={className}>
+      <rect x="2.5" y="7.5" width="19" height="12" rx="2" />
+      <path d="M2.5 11.5h19" />
+      <path d="M10 15.5h4" />
+      <path d="M6.5 7.5 8 4.5h8l1.5 3" />
+    </svg>
+  );
+}

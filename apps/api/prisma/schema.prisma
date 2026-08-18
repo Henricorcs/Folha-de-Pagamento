@@ -193,12 +193,12 @@ model ConfiguracaoFinanceira {
   id Int @id @default(1)
 
   // Conta de pagamento (fn_apagar.id_contas)
-  contaPagamentoId Int @default(18) @map("conta_pagamento_id")
+  contaPagamentoId      Int @default(18) @map("conta_pagamento_id")
   /// A mesma coisa para quem recebe em mãos: o dinheiro sai do caixa (23), não
   /// do banco (18). É só esta conta que muda entre as duas formas de pagar.
   contaPagamentoCaixaId Int @default(23) @map("conta_pagamento_caixa_id")
   // Filial (fn_apagar.filial_id)
-  filialId         Int @default(1) @map("filial_id")
+  filialId              Int @default(1) @map("filial_id")
 
   // Contas contábeis / planejamento analítico (fn_apagar.id_conta)
   contaContabilSalario      Int @default(2420) @map("conta_contabil_salario")
@@ -711,23 +711,23 @@ model AssinaturaDiaria {
   expiraEm DateTime @map("expira_em")
 
   /// PNG da assinatura, em data URL. Vazio até alguém assinar.
-  assinaturaPng String?   @map("assinatura_png")
-  assinadoEm    DateTime? @map("assinado_em")
+  assinaturaPng String?        @map("assinatura_png")
+  assinadoEm    DateTime?      @map("assinado_em")
   /// Desenhada com o dedo, ou gerada a partir do nome de quem não escreve
   modo          ModoAssinatura @default(DESENHADA)
 
   // --- O retrato do pagamento, congelado na hora de assinar ---
   /// Nome que a pessoa confirmou ser o dela ao assinar
-  nomeAssinante String? @map("nome_assinante")
-  cpfAssinante  String? @map("cpf_assinante")
+  nomeAssinante String?  @map("nome_assinante")
+  cpfAssinante  String?  @map("cpf_assinante")
   /// Valor, serviço e data como estavam no recibo que ela viu
-  valor         Decimal @db.Decimal(14, 2)
+  valor         Decimal  @db.Decimal(14, 2)
   descricao     String
   dataDiaria    DateTime @map("data_diaria")
   detalhamento  String?
   /// Quem pagou, como aparece no cabeçalho do recibo
-  empresaNome   String  @map("empresa_nome")
-  empresaCnpj   String? @map("empresa_cnpj")
+  empresaNome   String   @map("empresa_nome")
+  empresaCnpj   String?  @map("empresa_cnpj")
 
   // --- De onde veio a assinatura, para o caso de alguém contestar ---
   ip        String?
@@ -833,15 +833,15 @@ model ContaPagar {
   beneficiarioNome String @map("beneficiario_nome")
   idFornecedorIxc  Int?   @map("id_fornecedor_ixc")
 
-  valor            Decimal  @db.Decimal(14, 2)
+  valor Decimal @db.Decimal(14, 2)
 
   // --- Quanto deste pagamento era comissão de venda ---
   // Só o salário traz isso preenchido: a comissão do mês entra dentro dele, e
   // sem gravar aqui não há como responder quanto o mês custou em venda. Fica
   // congelado no momento em que a folha é gerada — refazer a conta depois,
   // pelas vendas lançadas, dá um número que ninguém pagou.
-  vendas           Int      @default(0)
-  comissaoVendas   Decimal  @default(0) @map("comissao_vendas") @db.Decimal(14, 2)
+  vendas         Int     @default(0)
+  comissaoVendas Decimal @default(0) @map("comissao_vendas") @db.Decimal(14, 2)
 
   contaContabil    Int      @map("conta_contabil") // fn_apagar.id_conta
   contaPagamento   Int      @map("conta_pagamento") // fn_apagar.id_contas
@@ -856,19 +856,19 @@ model ContaPagar {
   /// Linha digitável/código de barras do boleto. É o que o IXC precisa para
   /// pagar por boleto; sem ele a conta chega lá e não tem como ser paga.
   /// Guardado só de dígitos, que é o formato que o fn_apagar aceita.
-  codigoBarras     String?  @map("codigo_barras")
+  codigoBarras String? @map("codigo_barras")
   /// Número do documento no IXC (`fn_apagar.documento`)
-  documento        String?
+  documento    String?
   /// Número da nota fiscal, quando a despesa tem uma
-  numeroNota       String?  @map("numero_nota")
+  numeroNota   String? @map("numero_nota")
 
   // --- PIX desta conta ---
   /// Chave PIX informada na hora de lançar, quando ela não é a do cadastro:
   /// é o caso do QR Code lido de uma cobrança, cujo "copia e cola" vale só
   /// para aquele pagamento. Vazio = usa a chave do fornecedor no IXC.
-  chavePix         String?  @map("chave_pix")
+  chavePix     String? @map("chave_pix")
   /// Tipo da chave acima, como o IXC o nomeia ("Código copia e cola", "CPF/CNPJ"…)
-  tipoChavePix     String?  @map("tipo_chave_pix")
+  tipoChavePix String? @map("tipo_chave_pix")
 
   /// A despesa recorrente que gerou esta conta, quando foi o caso
   recorrente   DespesaRecorrente? @relation(fields: [recorrenteId], references: [id], onDelete: SetNull)
@@ -1149,4 +1149,116 @@ model ClassificacaoConta {
 
   @@index([categoriaId])
   @@map("classificacoes_conta")
+}
+
+// ---------------------------------------------------------------------------
+// Fechamento de caixa: conferir, no fim do período, o dinheiro em mãos.
+//
+// O caixa é do IXC — os lançamentos são lidos de lá e nada é escrito de volta.
+// O que mora aqui é o que o IXC não tem onde guardar: o "já conferi este", a
+// foto da nota, e o dinheiro que saiu com alguém e ainda não voltou.
+//
+// Este último é o que fazia o caixa não fechar no papel. Sai R$ 100,00 com o
+// Jeferson para pagar algo na rua; até ele voltar com a nota e o troco, aquele
+// dinheiro não está na gaveta nem virou despesa — está com ele. Sem registrar
+// isso, a contagem nunca bate, e a explicação vive na memória de quem entregou.
+// ---------------------------------------------------------------------------
+
+/// Um lançamento do caixa do IXC, conferido por aqui.
+///
+/// A chave é o par caixa + id do lançamento no IXC, e não o fechamento: um
+/// lançamento conferido continua conferido se a mesma data for consultada de
+/// novo, ou se o período for aberto com outro recorte.
+model ConferenciaCaixa {
+  id String @id @default(uuid())
+
+  /// Caixa no IXC (o `id` da tabela de contas de caixa)
+  caixaId         Int @map("caixa_id")
+  /// Id do lançamento na tabela de movimento do IXC
+  idLancamentoIxc Int @map("id_lancamento_ixc")
+
+  conferido    Boolean   @default(false)
+  conferidoEm  DateTime? @map("conferido_em")
+  conferidoPor String?   @map("conferido_por")
+
+  /// Foto da nota, em data URL. É ela que substitui o papel grampeado.
+  notaFoto   String? @map("nota_foto")
+  observacao String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([caixaId, idLancamentoIxc])
+  @@index([caixaId])
+  @@map("conferencias_caixa")
+}
+
+/// Dinheiro que saiu do caixa com uma pessoa e ainda não prestou contas.
+///
+/// Enquanto está aberto, o valor conta como saldo do caixa: ele saiu da gaveta
+/// mas ainda é da empresa. Ao voltar, o que virou despesa e o troco devolvido
+/// são registrados, e é a soma dos dois que precisa fechar com o que saiu.
+model DinheiroNaRua {
+  id String @id @default(uuid())
+
+  caixaId    Int      @map("caixa_id")
+  /// Com quem está. Texto livre: nem todo mundo que leva dinheiro é
+  /// funcionário cadastrado aqui.
+  pessoa     String
+  valor      Decimal  @db.Decimal(14, 2)
+  /// Dia em que o dinheiro saiu com a pessoa
+  entregueEm DateTime @map("entregue_em")
+  /// Para que era
+  motivo     String?
+
+  // --- A prestação de contas ---
+  /// Vazio enquanto está na rua
+  baixadoEm  DateTime? @map("baixado_em")
+  baixadoPor String?   @map("baixado_por")
+  /// Quanto virou despesa de fato
+  valorGasto Decimal?  @map("valor_gasto") @db.Decimal(14, 2)
+  /// Quanto voltou para a gaveta
+  troco      Decimal?  @db.Decimal(14, 2)
+  /// Foto da nota que a pessoa trouxe
+  notaFoto   String?   @map("nota_foto")
+  observacao String?
+
+  criadoPor String?  @map("criado_por")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([caixaId, baixadoEm])
+  @@map("dinheiro_na_rua")
+}
+
+/// O período dado por conferido, com os números do momento em que fechou.
+///
+/// Os totais são copiados, e não recalculados na leitura: um fechamento é o
+/// que se viu naquele dia. Lançamento que apareça no IXC depois, com data do
+/// período já fechado, não pode reescrever o que foi assinado.
+model FechamentoCaixa {
+  id String @id @default(uuid())
+
+  caixaId   Int      @map("caixa_id")
+  caixaNome String   @map("caixa_nome")
+  /// Recorte conferido, pelas datas dos lançamentos
+  de        DateTime
+  ate       DateTime
+
+  /// Somas do período, como estavam no fechamento
+  totalEntradas Decimal @map("total_entradas") @db.Decimal(14, 2)
+  totalSaidas   Decimal @map("total_saidas") @db.Decimal(14, 2)
+  /// Quantos lançamentos havia, e quantos foram marcados
+  lancamentos   Int
+  conferidos    Int
+  /// O que estava fora, com pessoas, no instante do fechamento
+  totalNaRua    Decimal @map("total_na_rua") @db.Decimal(14, 2)
+
+  observacao String?
+
+  fechadoPor String?  @map("fechado_por")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([caixaId, de])
+  @@map("fechamentos_caixa")
 }

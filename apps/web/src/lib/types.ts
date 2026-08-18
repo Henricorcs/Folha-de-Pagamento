@@ -1320,3 +1320,73 @@ export interface ResultadoDaCorrecao {
   /** A fila parou por causa de um `emAberto` */
   naoTentados: number[];
 }
+
+// --- Fechamento de caixa ---
+
+export interface LancamentoDoCaixa {
+  id: number;
+  data: string;
+  valor: number;
+  historico: string;
+  tipo: 'ENTRADA' | 'SAIDA';
+  conferido: boolean;
+  conferidoEm: string | null;
+  temNota: boolean;
+  observacao: string | null;
+}
+
+/** Dinheiro que saiu com alguém e ainda não prestou contas. */
+export interface DinheiroNaRua {
+  id: string;
+  caixaId: number;
+  pessoa: string;
+  valor: string;
+  entregueEm: string;
+  motivo: string | null;
+  baixadoEm: string | null;
+  valorGasto: string | null;
+  troco: string | null;
+  observacao: string | null;
+  temNota: boolean;
+  createdAt: string;
+}
+
+export interface FechamentoCaixa {
+  id: string;
+  caixaId: number;
+  caixaNome: string;
+  de: string;
+  ate: string;
+  totalEntradas: string;
+  totalSaidas: string;
+  lancamentos: number;
+  conferidos: number;
+  totalNaRua: string;
+  observacao: string | null;
+  fechadoPor: string | null;
+  createdAt: string;
+}
+
+export interface ExtratoDoCaixa {
+  caixa: { id: number; nome: string };
+  de: string;
+  ate: string;
+  lancamentos: LancamentoDoCaixa[];
+  naRua: DinheiroNaRua[];
+  resumo: {
+    entradas: number;
+    saidas: number;
+    lancamentos: number;
+    conferidos: number;
+    naRua: number;
+    pessoasNaRua: number;
+  };
+  fechamentos: FechamentoCaixa[];
+}
+
+export interface CaixasDoFechamento {
+  tabela: string | null;
+  caixas: CaixaIxc[];
+  /** O caixa configurado para o pagamento em mãos, quando há um. */
+  emUso: number | null;
+}
