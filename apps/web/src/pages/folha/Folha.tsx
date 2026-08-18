@@ -909,9 +909,6 @@ export function Folha() {
     return lista;
   }, [itens]);
 
-  /** Pessoas em que dá para escolher descontar o dia 25 ou não. */
-  const comOpcaoDia25 = grupos.filter((g) => g.temOpcaoDia25);
-
   // A busca só esconde linhas; nada sai da seleção por não estar à vista. Quem
   // procurou "Dão" para conferir um valor não quer que os outros 53 pagamentos
   // se desmarquem sozinhos.
@@ -923,12 +920,16 @@ export function Folha() {
     : grupos;
 
   /**
-   * Quem tem salário nesta prévia — só nessas pessoas faz sentido trocar o
-   * salário por férias. No dia 25 a lista é vazia, e a barra some.
+   * O que a caixa do cabeçalho manda: as linhas à vista que viram conta. As
+   * zeradas ficam de fora — não há o que gerar nelas.
    */
-  const comSalario = grupos.filter((g) => g.salarioIdx !== null);
-  const comSalarioVisivel = gruposVisiveis.filter((g) => g.salarioIdx !== null);
-  const deFerias = comSalario.filter((g) => g.ferias);
+  const geraveisVisiveis = gruposVisiveis
+    .flatMap((g) => g.indices)
+    .filter((i) => itens[i].valor > 0);
+  const marcadosVisiveis = geraveisVisiveis.filter((i) => itens[i].selecionado);
+  const todosVisiveis =
+    geraveisVisiveis.length > 0 &&
+    marcadosVisiveis.length === geraveisVisiveis.length;
 
   /** Marca (ou desmarca) tudo que está à vista agora. */
   function marcarVisiveis(marcar: boolean) {
@@ -1110,35 +1111,6 @@ export function Folha() {
 
       {feedback && <Aviso tom="marca">{feedback}</Aviso>}
 
-      {comOpcaoDia25.length > 0 && (
-        <div className="surgir card mb-6 flex flex-wrap items-center gap-3 p-4 text-sm text-tinta-600">
-          <span>
-            Adiantamento do dia 25 em{' '}
-            <strong className="num text-tinta-900">
-              {comOpcaoDia25.length}
-            </strong>{' '}
-            pessoa(s):
-          </span>
-          <button
-            onClick={() => descontarDia25(comOpcaoDia25, true)}
-            className="btn btn-neutro btn-p"
-          >
-            Descontar de todos
-          </button>
-          <button
-            onClick={() => descontarDia25(comOpcaoDia25, false)}
-            className="btn btn-neutro btn-p"
-          >
-            Não descontar de ninguém
-          </button>
-          <span className="text-xs text-tinta-400">
-            Desligue quando o pagamento do dia 25 não chegou a sair. Quem tem
-            carteira assinada vem sem desconto — ligue só se a empresa for
-            abater também aqui.
-          </span>
-        </div>
-      )}
-
       {itens.length === 0 && !preview.isPending && (
         <div className="card">
           <Vazio titulo="Nada calculado ainda">
@@ -1156,71 +1128,13 @@ export function Folha() {
             placeholder="Buscar por nome ou apelido…"
             className="campo max-w-xs"
           />
-          <button
-            onClick={() => marcarVisiveis(true)}
-            className="btn btn-neutro btn-p"
-          >
-            {procurado
-              ? `Marcar ${gruposVisiveis.length} encontrado(s)`
-              : 'Marcar todos'}
-          </button>
-          <button
-            onClick={() => marcarVisiveis(false)}
-            className="btn btn-neutro btn-p"
-          >
-            {procurado
-              ? `Desmarcar ${gruposVisiveis.length} encontrado(s)`
-              : 'Desmarcar todos'}
-          </button>
           {procurado && (
             <span className="text-xs text-tinta-400">
               A busca só esconde linhas — quem está fora dela continua marcado
-              como estava, e vai ser gerado do mesmo jeito.
+              como estava, e vai ser gerado do mesmo jeito. A caixa do cabeçalho
+              marca só {gruposVisiveis.length} à vista.
             </span>
           )}
-        </div>
-      )}
-
-      {comSalarioVisivel.length > 0 && (
-        <div className="surgir card mb-6 flex flex-wrap items-center gap-3 p-4 text-sm text-tinta-600">
-          <span>
-            Férias{' '}
-            {procurado ? (
-              <>
-                nos{' '}
-                <strong className="num text-tinta-900">
-                  {comSalarioVisivel.length}
-                </strong>{' '}
-                encontrado(s)
-              </>
-            ) : (
-              <>
-                em{' '}
-                <strong className="num text-tinta-900">{deFerias.length}</strong>{' '}
-                de {comSalario.length} pessoa(s)
-              </>
-            )}
-            :
-          </span>
-          <button
-            onClick={() => marcarFerias(comSalarioVisivel, true)}
-            className="btn btn-neutro btn-p"
-          >
-            {procurado
-              ? `Marcar os ${comSalarioVisivel.length} como férias`
-              : 'Marcar todos como férias'}
-          </button>
-          <button
-            onClick={() => marcarFerias(comSalarioVisivel, false)}
-            className="btn btn-neutro btn-p"
-          >
-            {procurado ? 'Tirar de férias' : 'Ninguém de férias'}
-          </button>
-          <span className="text-xs text-tinta-400">
-            {procurado
-              ? 'Os botões valem só para quem a busca está mostrando — é assim que se marca uma pessoa só.'
-              : 'Busque a pessoa acima para marcar só ela, ou abra a linha dela e marque ali. Férias saem no lugar do salário, com o valor que a contabilidade apurou.'}
-          </span>
         </div>
       )}
 
@@ -1230,7 +1144,29 @@ export function Folha() {
             <table className="w-full text-sm">
               <thead>
                 <tr>
-                  <th className="th w-10"></th>
+                  <th className="th w-10">
+                    {/* Marca e desmarca a folha inteira. Com a busca ligada,
+                        vale só para quem está à vista — é assim que se marca
+                        uma pessoa só. */}
+                    <input
+                      type="checkbox"
+                      className="accent-brand-600"
+                      checked={todosVisiveis}
+                      disabled={geraveisVisiveis.length === 0}
+                      title={
+                        procurado
+                          ? `Marcar ou desmarcar ${gruposVisiveis.length} pessoa(s) encontrada(s).`
+                          : 'Marcar ou desmarcar a folha inteira.'
+                      }
+                      ref={(el) => {
+                        if (el) {
+                          el.indeterminate =
+                            marcadosVisiveis.length > 0 && !todosVisiveis;
+                        }
+                      }}
+                      onChange={() => marcarVisiveis(!todosVisiveis)}
+                    />
+                  </th>
                   <th className="th">Pessoa</th>
                   <th className="th text-right">Total a pagar</th>
                 </tr>
