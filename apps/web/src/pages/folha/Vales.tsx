@@ -474,6 +474,7 @@ function NovoVale({ onCriado }: { onCriado: () => void }) {
   const valido =
     !!funcionarioId &&
     descricao.trim().length >= 2 &&
+    Number.isInteger(qtd) &&
     qtd >= 1 &&
     Number(valorParcela) > 0;
 
@@ -525,6 +526,7 @@ function NovoVale({ onCriado }: { onCriado: () => void }) {
           <input
             type="number"
             min={1}
+            step={1}
             value={parcelas}
             onChange={(e) => setParcelas(e.target.value)}
             className="campo"

@@ -8,7 +8,6 @@ import {
   IsOptional,
   IsString,
   Matches,
-  Max,
   Min,
   MinLength,
 } from 'class-validator';
@@ -47,10 +46,10 @@ export class CriarValeDto {
   @Min(0.01)
   valorParcela?: number;
 
-  /** 1 = vale avulso (desconto de uma vez). */
-  @IsInt()
-  @Min(1)
-  @Max(120)
+  /** 1 = vale avulso (desconto de uma vez). Sem teto: parcelamento longo é
+   * decisão de quem lança, não do sistema. */
+  @IsInt({ message: 'O número de parcelas precisa ser um número inteiro' })
+  @Min(1, { message: 'O vale precisa de pelo menos 1 parcela' })
   quantidadeParcelas!: number;
 
   /** Competência da folha em que a primeira parcela é descontada. */

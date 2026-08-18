@@ -47,4 +47,21 @@ describe('montarParcelas', () => {
       '2027-01',
     ]);
   });
+
+  it('parcelamento longo: 134 meses atravessam 11 viradas de ano', () => {
+    const v = montarParcelas({
+      valorParcela: 500,
+      quantidadeParcelas: 134,
+      competenciaInicio: '2026-08',
+    });
+    expect(v.valorTotal).toBe(67_000);
+    expect(v.parcelas).toHaveLength(134);
+    expect(v.parcelas[0].competencia).toBe('2026-08');
+    expect(v.parcelas[133].competencia).toBe('2037-09');
+    // Nenhum mês pulado nem repetido no caminho.
+    expect(new Set(v.parcelas.map((p) => p.competencia)).size).toBe(134);
+    expect(v.parcelas.every((p) => /^\d{4}-(0[1-9]|1[0-2])$/.test(p.competencia))).toBe(
+      true,
+    );
+  });
 });
