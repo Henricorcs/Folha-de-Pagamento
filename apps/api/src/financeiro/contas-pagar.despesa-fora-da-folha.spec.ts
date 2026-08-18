@@ -111,6 +111,43 @@ describe('a folha não mostra despesa lançada à mão', () => {
   });
 });
 
+/*
+ * O outro lado da moeda: a folha esconde a despesa de propósito, e a lista de
+ * contas em aberto é lida do IXC. A despesa que o IXC recusou não cabia em
+ * nenhuma das duas — ficava gravada aqui, com o motivo, e invisível. Esta
+ * consulta é a única que a mostra, e por isso o corte dela importa.
+ */
+describe('despesas que não chegaram ao IXC', () => {
+  it('pede só despesa, sem número do IXC, parada em erro ou rascunho', async () => {
+    const { service, prisma } = montarServico();
+
+    await service.despesasNaoEnviadas();
+
+    const [{ where, orderBy }] = prisma.contaPagar.findMany.mock.calls[0];
+    expect(where).toEqual({
+      tipo: TipoLancamento.DESPESA,
+      idFnApagarIxc: null,
+      status: {
+        in: [StatusContaPagar.ERRO, StatusContaPagar.RASCUNHO],
+      },
+    });
+    // A mais recente primeiro: é a que a pessoa acabou de tentar lançar.
+    expect(orderBy).toEqual({ createdAt: 'desc' });
+  });
+
+  it('conta que chegou ao IXC não entra, nem estando em erro', async () => {
+    const { service, prisma } = montarServico();
+
+    await service.despesasNaoEnviadas();
+
+    const [{ where }] = prisma.contaPagar.findMany.mock.calls[0];
+    // O corte é o número do IXC, e não o status: erro depois do envio é outra
+    // história, e aquela conta existe lá — mostrá-la aqui convidaria a
+    // reenviar e duplicar.
+    expect(where.idFnApagarIxc).toBeNull();
+  });
+});
+
 describe('despesa nasce aprovada no IXC', () => {
   const dados = {
     idFornecedorIxc: 196,

@@ -53,6 +53,11 @@ export class DespesasService {
     private readonly pagamentos: PagamentosService,
   ) {}
 
+  /** As despesas que não chegaram ao IXC, para a tela poder mostrá-las. */
+  naoEnviadas() {
+    return this.contasPagar.despesasNaoEnviadas();
+  }
+
   async lancar(
     dto: CriarDespesaDto,
     usuarioId?: string,

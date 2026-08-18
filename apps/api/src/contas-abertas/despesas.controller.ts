@@ -112,6 +112,15 @@ export class DespesasController {
   }
 
   /** Cria a conta a pagar no IXC e a etiqueta com a categoria escolhida. */
+  /**
+   * As despesas que ficaram sem chegar ao IXC. Antes de qualquer rota com
+   * parâmetro, para não ser lida como id.
+   */
+  @Get('contas-abertas/despesas-nao-enviadas')
+  naoEnviadas() {
+    return this.service.naoEnviadas();
+  }
+
   @Post('contas-abertas/despesa')
   @HttpCode(201)
   lancar(@Body() dto: CriarDespesaDto, @Req() req: Request) {

@@ -1022,6 +1022,34 @@ export class ContasPagarService {
     };
   }
 
+  /**
+   * As despesas que ficaram pelo caminho: gravadas aqui e nunca aceitas pelo
+   * IXC.
+   *
+   * Elas não cabiam em tela nenhuma. `listar` é da folha e exclui despesa por
+   * definição; a lista de contas em aberto é lida do IXC, e é justamente lá que
+   * estas não estão. O resultado era uma despesa que a pessoa deu por lançada,
+   * marcada como erro num canto do banco, sem nada que a mostrasse — e o
+   * caminho de volta (reenviar) existindo só na API.
+   *
+   * O corte é `idFnApagarIxc` vazio, e não o status: é ele que diz "não chegou
+   * lá". Rascunho entra junto porque o envio acontece dentro do mesmo pedido
+   * que cria a conta — ficar em rascunho é o envio ter morrido no meio, que dá
+   * no mesmo lugar.
+   */
+  async despesasNaoEnviadas(): Promise<ContaPagar[]> {
+    return this.prisma.contaPagar.findMany({
+      where: {
+        tipo: TipoLancamento.DESPESA,
+        idFnApagarIxc: null,
+        status: {
+          in: [StatusContaPagar.ERRO, StatusContaPagar.RASCUNHO],
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async buscar(id: string): Promise<ContaPagar> {
     const conta = await this.prisma.contaPagar.findUnique({ where: { id } });
     if (!conta) throw new NotFoundException('Conta a pagar não encontrada');

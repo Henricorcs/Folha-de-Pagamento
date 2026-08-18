@@ -21,6 +21,7 @@ import type {
   ContasAbertas,
 } from '../../lib/types';
 import { EditarConta, ExcluirConta, PagarEmMaos } from './AcoesDaConta';
+import { DespesasNaoEnviadas } from './DespesasNaoEnviadas';
 import { DetalheDaConta } from './DetalheDaConta';
 import { NovaDespesa } from './NovaDespesa';
 import { TornarRecorrente } from './TornarRecorrente';
@@ -224,6 +225,10 @@ export function Inicio() {
           {aviso}
         </Aviso>
       ))}
+
+      {/* Acima dos indicadores de propósito: uma despesa que não chegou ao IXC
+          não está somada em nenhum deles, e é a primeira coisa a resolver. */}
+      <DespesasNaoEnviadas />
 
       {resumo && (
         <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
