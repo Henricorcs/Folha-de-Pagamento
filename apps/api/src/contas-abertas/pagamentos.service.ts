@@ -9,8 +9,10 @@ import { IxcClient } from '../ixc/ixc.client';
 import {
   buildAuditoriaPayload,
   buildBaixaContaPagarPayload,
+  codigoTipoPagamentoBaixa,
   lerSituacaoContaPagar,
   lerStatusAuditoria,
+  montarHistoricoBaixa,
 } from '../ixc/ixc.financeiro';
 import { parseIxcId } from '../ixc/ixc.parse';
 import { PrismaService } from '../prisma/prisma.service';
@@ -223,19 +225,46 @@ export class PagamentosService {
       };
     }
 
-    // Qualquer outra conta é dinheiro que sai por fora da integração — caixa,
-    // outro banco, cartão. Aqui a baixa é a mesma que se daria à mão no IXC.
+    /*
+     * Qualquer outra conta é dinheiro que sai por fora da integração — caixa,
+     * outro banco, cartão. Aqui a baixa é a mesma que se daria à mão no IXC, e
+     * "a mesma" é para valer: o corpo sai igual ao que a tela de baixa manda,
+     * campo por campo, incluindo os rótulos dos campos de seleção.
+     *
+     * O que faltava era o `tipo_pagamento`. Ele ia sempre como "D" (dinheiro),
+     * porque ninguém o informava e o padrão servia ao pagamento em mãos — então
+     * um PIX saindo da conta do banco entrava na movimentação financeira como
+     * dinheiro. O título constava pago, e o movimento não aparecia para
+     * conciliar com o extrato: dinheiro em conta bancária não é movimento de
+     * banco. Agora ele sai do próprio título, que é onde a forma de pagamento
+     * foi decidida.
+     */
+    const documento = textoOuNull(raw.documento);
+    const [contaNome, filialNome] = await Promise.all([
+      this.nomeDaConta(contaPagamentoId),
+      this.nomeDaFilial(filialId),
+    ]);
+
     const payloadDaBaixa = buildBaixaContaPagarPayload({
       idFnApagar,
       contaPagamentoId,
+      contaPagamentoNome: contaNome,
       contaContabilId,
       filialId,
+      filialNome,
       valor,
       data: opcoes.data ? dataUtc(opcoes.data) : new Date(),
-      documento: textoOuNull(raw.documento),
+      documento,
+      tipoPagamento: codigoTipoPagamentoBaixa(
+        textoOuNull(raw.tipo_pagamento),
+        contaPagamentoId === cfg.contaPagamentoCaixaId,
+      ),
       historico:
         opcoes.historico?.trim() ||
-        `Pagamento pelo ILNET FINANCE${usuarioNome ? ` (${usuarioNome})` : ''}`,
+        montarHistoricoBaixa({
+          beneficiario: await this.nomeDoBeneficiario(idFnApagar, raw),
+          documento,
+        }),
     });
 
     let recusa: string | null = null;
@@ -470,6 +499,61 @@ export class PagamentosService {
    * Só lê e só registra: nunca lança, porque isto roda depois de uma falha e
    * não pode virar uma segunda falha por cima dela.
    */
+  /**
+   * O nome da conta de onde o dinheiro sai ("CX - Werick", "Conta ModoBank
+   * PIX"), para o rótulo que a tela de baixa manda junto do id.
+   *
+   * Falhar aqui não derruba o pagamento: o rótulo é enfeite ao lado do id, que
+   * é quem de fato aponta a conta. Uma consulta a mais não pode ser o motivo de
+   * um pagamento não sair.
+   */
+  private async nomeDaConta(id: number): Promise<string | null> {
+    try {
+      const conta = await this.ixc.getById<Record<string, unknown>>(
+        'contas',
+        'contas.id',
+        id,
+      );
+      return conta ? textoOuNull(conta.conta ?? conta.descricao) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** O nome da filial, pelo mesmo motivo — e com a mesma tolerância a falha. */
+  private async nomeDaFilial(id: number): Promise<string | null> {
+    try {
+      const filial = await this.ixc.getById<Record<string, unknown>>(
+        'filial',
+        'filial.id',
+        id,
+      );
+      return filial ? textoOuNull(filial.filial ?? filial.razao_social) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Quem recebeu, para o histórico sair como o do IXC ("Pag. Fulano - doc.: 9").
+   *
+   * O cadastro daqui vem primeiro porque é o nome que a pessoa escolheu na
+   * tela; depois o que o próprio título trouxer. Sem nenhum dos dois o
+   * histórico sai só com o documento — melhor curto do que errado.
+   */
+  private async nomeDoBeneficiario(
+    idFnApagar: number,
+    raw: Record<string, unknown>,
+  ): Promise<string | null> {
+    const local = await this.prisma.contaPagar.findFirst({
+      where: { idFnApagarIxc: idFnApagar },
+      select: { beneficiarioNome: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (local?.beneficiarioNome) return local.beneficiarioNome;
+    return textoOuNull(raw.fornecedor ?? raw.razao_social ?? raw.nome);
+  }
+
   /** Um passo de auditoria no IXC: aprovar ou reprovar com o motivo. */
   private async auditar(
     idFnApagar: number,

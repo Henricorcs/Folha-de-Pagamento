@@ -86,7 +86,12 @@ function montarServico(
 
   const config = { obter: jest.fn().mockResolvedValue(CFG) };
   const prisma = {
-    contaPagar: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    contaPagar: {
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      // De onde sai o nome de quem recebeu, para o histórico da baixa. Sem
+      // cadastro daqui o serviço cai no que o título trouxer.
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
   };
   const service = new PagamentosService(
     ixc as never,

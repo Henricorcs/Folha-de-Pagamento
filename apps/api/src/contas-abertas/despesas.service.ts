@@ -164,7 +164,11 @@ export class DespesasService {
           {
             contaPagamento: dto.contaPagamento,
             data,
-            historico: `Pago antes do lançamento — ${dto.observacao.trim()}`.slice(0, 200),
+            // Sem histórico próprio: quem monta é a baixa, no formato do
+            // IXC ("Pag. Fulano - doc.: 9"). O texto que ia aqui — "Pago
+            // antes do lançamento — <observação>" — não é o que o IXC
+            // escreve, e um pagamento feito daqui tem de ser indistinguível
+            // de um feito na tela dele. A observação já está no título.
             // O dinheiro saiu antes de o título existir: não há pagamento do
             // banco a esperar, nem na conta que ele costuma pagar.
             jaSaiu: true,

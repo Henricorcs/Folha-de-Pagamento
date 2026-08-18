@@ -337,9 +337,85 @@ export interface BaixaContaPagarInput {
   documento?: string | null;
   /**
    * Como se pagou, no código do IXC: "D" dinheiro, "T" transferência, "X" pix.
-   * Dinheiro é o padrão porque esta baixa serve ao pagamento em mãos.
+   *
+   * **Não deixe cair no padrão sem pensar.** É este campo que diz ao IXC que
+   * natureza tem o lançamento que a baixa cria na movimentação financeira, e
+   * dinheiro numa conta de banco não é movimento de banco — não aparece para
+   * conciliar. Ver `codigoTipoPagamentoBaixa`.
    */
   tipoPagamento?: string;
+  /**
+   * Nome da conta de onde o dinheiro saiu ("CX - Werick", "Conta ModoBank
+   * PIX"). A tela do IXC manda o rótulo junto do id em todo campo de seleção, e
+   * a baixa feita à mão por lá vai com ele.
+   */
+  contaPagamentoNome?: string | null;
+  /** Nome da filial, pelo mesmo motivo do `contaPagamentoNome`. */
+  filialNome?: string | null;
+}
+
+/**
+ * O histórico de uma baixa, no formato em que o IXC a escreve quando o
+ * pagamento é feito pela tela dele: `Pag. <quem recebeu> - doc.: <documento>`.
+ *
+ * É o mesmo formato do exemplo oficial da coleção ("Pag. Salários à pagar -
+ * doc.: 1") e o que aparece na aba "Pagamentos" de um título pago à mão. Uma
+ * baixa feita daqui tem de ser indistinguível de uma feita lá: quem abre o
+ * título depois não deveria conseguir dizer por onde ela entrou.
+ *
+ * Sai sem acento de propósito. O IXC lê o que mandamos como Latin-1 e grava o
+ * estrago: "lançamento" virou "lanÃ§amento" e o travessão virou "?" na tela
+ * dele. Enquanto a codificação não for acertada na origem, texto sem acento é
+ * o que se lê igual dos dois lados.
+ */
+export function montarHistoricoBaixa(input: {
+  beneficiario?: string | null;
+  documento?: string | null;
+}): string {
+  const nome = semAcento((input.beneficiario ?? '').trim());
+  const doc = (input.documento ?? '').trim();
+  const quem = nome ? `Pag. ${nome}` : 'Pag.';
+  return (doc ? `${quem} - doc.: ${doc}` : quem).slice(0, 200);
+}
+
+/** Tira acento e o que o Latin-1 não escreve — ver `montarHistoricoBaixa`. */
+export function semAcento(texto: string): string {
+  return texto
+    // NFD separa a letra do acento; \p{M} varre os acentos que sobraram.
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    // O que não é ASCII imprimível (travessão, aspa curva) vira espaço: é o
+    // que o IXC escreveria como "?".
+    .replace(/[^\x20-\x7E]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * A forma de pagamento da baixa, no código que o IXC usa: "D" dinheiro, "T"
+ * transferência, "X" pix.
+ *
+ * O título guarda a forma como **rótulo** ("Pix", "Dinheiro"); a baixa quer o
+ * código. Traduzir os dois era o que faltava: sem isso toda baixa feita daqui
+ * ia como dinheiro, inclusive um PIX saindo da conta do banco — e um movimento
+ * de dinheiro numa conta bancária não é movimento de banco, então ele não
+ * entrava na conciliação. O pagamento constava pago no título e não existia
+ * para quem ia conciliar o extrato.
+ *
+ * Sem rótulo reconhecível, decide de onde o dinheiro saiu: do caixa é dinheiro,
+ * de qualquer conta bancária é transferência. Errar para "transferência" deixa
+ * o movimento na conciliação, onde alguém o vê e corrige; errar para "dinheiro"
+ * o esconde.
+ */
+export function codigoTipoPagamentoBaixa(
+  rotulo: string | null | undefined,
+  ehCaixa: boolean,
+): string {
+  const t = semAcento(String(rotulo ?? '')).toLowerCase();
+  if (/pix/.test(t)) return 'X';
+  if (/dinheiro|especie|maos/.test(t)) return 'D';
+  if (/transfer|ted|doc|deposito|boleto|debito|cartao/.test(t)) return 'T';
+  return ehCaixa ? 'D' : 'T';
 }
 
 /**
@@ -360,9 +436,11 @@ export function buildBaixaContaPagarPayload(
     id_pagar_label: String(input.idFnApagar),
     filial: input.filialId,
     filial_id: input.filialId,
+    filial_label: input.filialNome ?? '',
     // `conta_` é de onde o dinheiro sai; `id_conta` é a conta contábil do
     // título. Os nomes são parecidos e as duas são obrigatórias.
     conta_: input.contaPagamentoId,
+    conta__label: input.contaPagamentoNome ?? '',
     id_conta: input.contaContabilId,
     tipo_pagamento: input.tipoPagamento ?? 'D',
     chave_pix: '',
@@ -371,6 +449,7 @@ export function buildBaixaContaPagarPayload(
     cheque_nome: '',
     cheque_predatado: '',
     id_conta_class_finan_a: '',
+    id_conta_class_finan_a_label: '',
     data: formatDataIxc(input.data),
     documento: input.documento ?? '',
     pdesconto: '',
