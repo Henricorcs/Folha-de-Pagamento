@@ -246,6 +246,16 @@ function Conferencia({
   const visiveis = soSaidas
     ? lancamentos.filter((l) => l.tipo === 'SAIDA')
     : lancamentos;
+  /*
+   * Duas áreas, e não uma coluna de marcados no meio da lista.
+   *
+   * A fila de cima é o que falta olhar; a de baixo, o que já passou. O que foi
+   * revisado sai da frente em vez de virar uma linha apagada no meio das
+   * outras — numa conferência de cinquenta saídas, achar a próxima é o gesto
+   * que mais se repete, e ele fica mais curto a cada OK.
+   */
+  const aConferir = visiveis.filter((l) => !l.conferido);
+  const revisados = visiveis.filter((l) => l.conferido);
 
   return (
     <>
@@ -298,60 +308,56 @@ function Conferencia({
       />
 
       <Bloco
-        titulo={soSaidas ? 'Saídas do período' : 'Saídas e entradas do período'}
+        titulo={soSaidas ? 'Saídas a conferir' : 'Lançamentos a conferir'}
         semPadding
         className="surgir surgir-3"
         acao={
-          <button
-            type="button"
-            onClick={() => setSoSaidas((v) => !v)}
-            className="btn btn-p btn-neutro"
-            title="Os recebimentos entram no saldo, mas não é deles que se pede nota"
-          >
-            {soSaidas
-              ? `Mostrar as ${qtdEntradas} entradas também`
-              : 'Mostrar só as saídas'}
-          </button>
+          <div className="flex items-center gap-3">
+            {aConferir.length > 0 && (
+              <span className="text-xs text-tinta-500">
+                {aConferir.length === 1
+                  ? 'falta 1'
+                  : `faltam ${aConferir.length}`}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setSoSaidas((v) => !v)}
+              className="btn btn-p btn-neutro"
+              title="Os recebimentos entram no saldo, mas não é deles que se pede nota"
+            >
+              {soSaidas
+                ? `Mostrar as ${qtdEntradas} entradas também`
+                : 'Mostrar só as saídas'}
+            </button>
+          </div>
         }
       >
-        {visiveis.length === 0 ? (
+        {aConferir.length === 0 ? (
           <Vazio
             titulo={
-              soSaidas
-                ? 'Nenhuma saída neste período'
-                : 'Nenhum lançamento neste período'
+              visiveis.length === 0
+                ? soSaidas
+                  ? 'Nenhuma saída neste período'
+                  : 'Nenhum lançamento neste período'
+                : 'Tudo conferido'
             }
           >
-            {soSaidas && qtdEntradas > 0
-              ? `Houve ${qtdEntradas} entrada(s) — o botão acima mostra.`
-              : 'Confira as datas, ou se este é mesmo o caixa do dinheiro em mãos.'}
+            {visiveis.length === 0
+              ? soSaidas && qtdEntradas > 0
+                ? `Houve ${qtdEntradas} entrada(s) — o botão acima mostra.`
+                : 'Confira as datas, ou se este é mesmo o caixa do dinheiro em mãos.'
+              : 'O fechamento fica logo abaixo, na lista dos revisados.'}
           </Vazio>
         ) : (
-          <div className="overflow-x-auto rolagem-fina">
-            <table className="w-full text-sm">
-              <thead>
-                <tr>
-                  <th className="th w-10">OK</th>
-                  <th className="th">Data</th>
-                  <th className="th">Histórico</th>
-                  <th className="th text-right">Valor</th>
-                  <th className="th">Nota</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visiveis.map((l) => (
-                  <LinhaDoLancamento
-                    key={l.id}
-                    caixaId={caixaId}
-                    lancamento={l}
-                    onConferiu={marcarNoCache}
-                    onMudouNota={marcarNotaNoCache}
-                    onErro={setErro}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <TabelaDeLancamentos
+            caixaId={caixaId}
+            itens={aConferir}
+            revisados={false}
+            onConferiu={marcarNoCache}
+            onMudouNota={marcarNotaNoCache}
+            onErro={setErro}
+          />
         )}
       </Bloco>
 
@@ -361,12 +367,52 @@ function Conferencia({
         </div>
       )}
 
-      <Fechar
-        faltam={faltam}
-        naRua={resumo.naRua}
-        pendente={fechar.isPending}
-        onFechar={(obs) => fechar.mutate(obs)}
-      />
+      {/* O que já passou, e onde o período se fecha. */}
+      <Bloco
+        titulo="Revisados"
+        semPadding
+        className="surgir mt-5"
+        acao={
+          revisados.length > 0 ? (
+            <Selo tom="pago">
+              {revisados.length === 1
+                ? '1 revisado'
+                : `${revisados.length} revisados`}
+            </Selo>
+          ) : undefined
+        }
+      >
+        {revisados.length > 0 && (
+          <TabelaDeLancamentos
+            caixaId={caixaId}
+            itens={revisados}
+            revisados
+            onConferiu={marcarNoCache}
+            onMudouNota={marcarNotaNoCache}
+            onErro={setErro}
+          />
+        )}
+
+        {revisados.length === 0 && qtdSaidas > 0 && (
+          <Vazio titulo="Nada revisado ainda">
+            Dê OK nas saídas acima; elas passam para cá, e é daqui que o período
+            se fecha.
+          </Vazio>
+        )}
+
+        {/* Semana sem saída nenhuma também se fecha: "olhei, não saiu nada" é
+            uma conferência como outra qualquer, e sem isto o botão ficaria
+            preso atrás de uma lista que nunca vai existir. */}
+        {(revisados.length > 0 || qtdSaidas === 0) && (
+          <Fechar
+            faltam={faltam}
+            naRua={resumo.naRua}
+            semSaidas={qtdSaidas === 0}
+            pendente={fechar.isPending}
+            onFechar={(obs) => fechar.mutate(obs)}
+          />
+        )}
+      </Bloco>
 
       {fechamentos.length > 0 && (
         <Bloco titulo="Fechamentos deste período" className="surgir mt-5">
@@ -399,15 +445,63 @@ function Conferencia({
   );
 }
 
+/** A mesma tabela nas duas áreas: o que muda é a coluna da ação. */
+function TabelaDeLancamentos({
+  caixaId,
+  itens,
+  revisados,
+  onConferiu,
+  onMudouNota,
+  onErro,
+}: {
+  caixaId: number;
+  itens: LancamentoDoCaixa[];
+  revisados: boolean;
+  onConferiu: (id: number, conferido: boolean) => void;
+  onMudouNota: (id: number, temNota: boolean) => void;
+  onErro: (m: string) => void;
+}) {
+  return (
+    <div className="overflow-x-auto rolagem-fina">
+      <table className="w-full text-sm">
+        <thead>
+          <tr>
+            <th className="th">Data</th>
+            <th className="th">Histórico</th>
+            <th className="th text-right">Valor</th>
+            <th className="th">Nota</th>
+            <th className="th text-right">{revisados ? '' : 'Conferir'}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {itens.map((l) => (
+            <LinhaDoLancamento
+              key={l.id}
+              caixaId={caixaId}
+              lancamento={l}
+              revisado={revisados}
+              onConferiu={onConferiu}
+              onMudouNota={onMudouNota}
+              onErro={onErro}
+            />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function LinhaDoLancamento({
   caixaId,
   lancamento: l,
+  revisado,
   onConferiu,
   onMudouNota,
   onErro,
 }: {
   caixaId: number;
   lancamento: LancamentoDoCaixa;
+  revisado: boolean;
   onConferiu: (id: number, conferido: boolean) => void;
   onMudouNota: (id: number, temNota: boolean) => void;
   onErro: (m: string) => void;
@@ -436,18 +530,7 @@ function LinhaDoLancamento({
 
   return (
     <>
-      <tr className={`linha ${l.conferido ? 'opacity-60' : ''}`}>
-        <td className="td">
-          <input
-            type="checkbox"
-            className="marcador"
-            checked={l.conferido}
-            disabled={conferir.isPending}
-            onChange={(e) => conferir.mutate(e.target.checked)}
-            aria-label={`Conferir o lançamento ${l.id}`}
-            title="Marcar como conferido"
-          />
-        </td>
+      <tr className="linha">
         <td className="td num whitespace-nowrap">{formatData(l.data)}</td>
         <td className="td">
           {l.historico || <span className="text-tinta-400">sem histórico</span>}
@@ -469,6 +552,31 @@ function LinhaDoLancamento({
             onTirar={() => salvarNota.mutate(null)}
             onErro={onErro}
           />
+        </td>
+        <td className="td text-right">
+          {revisado ? (
+            /* Desfazer: um OK dado por engano tem de ter volta, ou a
+               conferência vira uma armadilha de um clique. */
+            <button
+              type="button"
+              onClick={() => conferir.mutate(false)}
+              disabled={conferir.isPending}
+              className="btn btn-p btn-sutil"
+              title="Devolve este lançamento para a lista de cima"
+            >
+              Desfazer
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => conferir.mutate(true)}
+              disabled={conferir.isPending}
+              className="btn btn-p btn-pagar"
+              title="Confere este lançamento e manda para os revisados"
+            >
+              {conferir.isPending ? '…' : 'OK'}
+            </button>
+          )}
         </td>
       </tr>
       {vendoNota && (
@@ -900,18 +1008,24 @@ function PrestarContas({
 function Fechar({
   faltam,
   naRua,
+  semSaidas,
   pendente,
   onFechar,
 }: {
   faltam: number;
   naRua: number;
+  /** Período sem saída nenhuma: não há o que conferir, e ainda assim fecha. */
+  semSaidas: boolean;
   pendente: boolean;
   onFechar: (observacao: string) => void;
 }) {
   const [observacao, setObservacao] = useState('');
 
   return (
-    <Bloco titulo="Fechar o período" className="surgir mt-5">
+    /* Sem cartão próprio: ele já vive dentro do cartão dos revisados, e um
+       cartão dentro do outro só empurraria o botão para longe da lista que o
+       habilita. */
+    <div className="border-t border-tinta-200 px-5 py-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="flex-1">
           <label className="rotulo" htmlFor="obs-fechamento">
@@ -947,6 +1061,8 @@ function Fechar({
             conferir. O fechamento diz "olhei tudo" — por isso ele espera. Os
             recebimentos entram no saldo, mas não seguram o fechamento.
           </>
+        ) : semSaidas ? (
+          'Nenhuma saída no período — dá para fechar assim mesmo.'
         ) : naRua > 0 ? (
           <>
             Fecha com <strong>{formatBRL(naRua)}</strong> ainda na rua. Isso não
@@ -957,6 +1073,6 @@ function Fechar({
           'Tudo conferido e nada na rua.'
         )}
       </p>
-    </Bloco>
+    </div>
   );
 }
