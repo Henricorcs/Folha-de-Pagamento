@@ -32,6 +32,12 @@ import { PrismaService } from '../prisma/prisma.service';
  * que vinte títulos abertos sem ninguém saber quais.
  */
 
+/**
+ * O estorno passou e o título continuou pago: sobrou outra baixa cobrindo o
+ * valor. Nada foi perdido e nada foi consertado — só não há o que refazer.
+ */
+class EstornoSemEfeito extends Error {}
+
 /** Um pagamento que ficou fora da conciliação, e o que seria feito com ele. */
 export interface PagamentoTorto {
   idFnApagar: number;
@@ -160,8 +166,24 @@ export class ConciliacaoService {
         );
       } catch (err) {
         const erro = err instanceof Error ? err.message : String(err);
-        resultado.emAberto.push({ idFnApagar: id, erro });
         resultado.naoTentados = fila.slice(i + 1);
+
+        if (err instanceof EstornoSemEfeito) {
+          /*
+           * O título continua pago: não há perigo nenhum aqui. Mas a fila para
+           * do mesmo jeito — se este tem mais de uma baixa, os outros também
+           * devem ter, e seguir adiante só espalharia estornos que não
+           * consertam nada.
+           */
+          resultado.pulados.push({ idFnApagar: id, motivo: erro });
+          this.logger.warn(
+            `Título ${id}: estorno sem efeito (${erro}). A fila parou aqui; ` +
+              `${resultado.naoTentados.length} título(s) não foram tentados.`,
+          );
+          break;
+        }
+
+        resultado.emAberto.push({ idFnApagar: id, erro });
         this.logger.error(
           `Título ${id} ficou EM ABERTO no IXC: o estorno saiu e a nova baixa ` +
             `não (${erro}). A fila parou aqui; ${resultado.naoTentados.length} ` +
@@ -194,11 +216,19 @@ export class ConciliacaoService {
 
     const situacao = lerSituacaoContaPagar(raw);
     if (situacao.pago) {
-      // O estorno não pegou: o título continua pago, com a linha antiga. Nada
-      // foi perdido — melhor sair sem tocar do que baixar duas vezes.
-      throw new Error(
-        'O IXC aceitou o estorno mas o título continua pago; a baixa antiga ' +
-          'ainda está lá. Nada foi refeito.',
+      /*
+       * O IXC aceitou o estorno e o título continua pago — quase sempre porque
+       * ele tem mais de uma baixa e sobrou outra cobrindo o valor.
+       *
+       * Não é perigo: nada foi perdido e o título segue quitado. Mas também não
+       * é conserto, e refazer a baixa agora pagaria duas vezes. Sai por aqui,
+       * sem tocar em mais nada — e quem chama trata isto como o que é: um
+       * título que ficou como estava, não um título aberto.
+       */
+      throw new EstornoSemEfeito(
+        'O IXC aceitou o estorno e o título continua pago — ele deve ter mais ' +
+          'de uma baixa. Nada foi refeito, e o pagamento segue lá do jeito ' +
+          'que estava.',
       );
     }
 
@@ -260,7 +290,19 @@ export class ConciliacaoService {
     const conta = razoes.get(contaPagamento);
     if (!conta) return null;
 
-    const linhaM = await this.pernaDoBanco(idFnApagar);
+    const pernas = await this.pernasDoBanco(idFnApagar);
+    /*
+     * Mais de uma linha `M` = mais de uma baixa no título, e aí não dá para
+     * dizer qual é a que vale. Estornar a errada não abre o título (a outra
+     * cobre o valor) mas deixa um estorno registrado que não consertou nada —
+     * foi o que aconteceu no primeiro título em que isto rodou.
+     *
+     * Quase metade dos títulos pagos desta base está assim. Enquanto não se
+     * souber ler qual baixa manda, eles ficam de fora: um conserto que erra o
+     * alvo é pior que nenhum.
+     */
+    if (pernas.length > 1) return null;
+    const linhaM = pernas[0];
     if (!linhaM) return null;
 
     const contaAtual = parseIxcId(linhaM.id_conta);
@@ -286,10 +328,10 @@ export class ConciliacaoService {
     };
   }
 
-  /** A linha `M` da baixa — a do dinheiro saindo da conta. */
-  private async pernaDoBanco(
+  /** As linhas `M` do título — uma por baixa feita nele. */
+  private async pernasDoBanco(
     idFnApagar: number,
-  ): Promise<Record<string, unknown> | null> {
+  ): Promise<Array<Record<string, unknown>>> {
     const linhas = await this.ixc.list<Record<string, unknown>>(
       'fn_movim_finan',
       {
@@ -302,7 +344,7 @@ export class ConciliacaoService {
         sortorder: 'asc',
       },
     );
-    return linhas.registros.find((l) => String(l.tipo_lanc) === 'M') ?? null;
+    return linhas.registros.filter((l) => String(l.tipo_lanc) === 'M');
   }
 
   /** O razão de cada conta de pagamento, lido uma vez por execução. */

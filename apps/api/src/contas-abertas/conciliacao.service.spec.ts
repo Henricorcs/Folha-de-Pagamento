@@ -157,14 +157,19 @@ describe('ConciliacaoService.corrigir', () => {
     expect(r.pulados).toHaveLength(1);
   });
 
-  it('estorno que não pega não vira baixa nova: nada é feito duas vezes', async () => {
+  it('estorno sem efeito nao vira baixa nova, e nao e alarme falso', async () => {
     const { service, chamadas } = montarServico({ estornoNaoPega: true });
-    const r = await service.corrigir([37020]);
+    const r = await service.corrigir([37020, 37021]);
 
-    // Estornou (ou tentou), mas o título seguiu pago — a baixa antiga está lá.
+    // Estornou, mas o titulo seguiu pago — a outra baixa dele cobre o valor.
     expect(chamadas).toEqual(['estorno']);
     expect(r.corrigidos).toEqual([]);
-    expect(r.emAberto).toHaveLength(1);
+    // Nada ficou em aberto: o titulo continua pago. Dizer o contrario manda
+    // alguem correr para o IXC atras de um problema que nao existe.
+    expect(r.emAberto).toEqual([]);
+    expect(r.pulados).toHaveLength(1);
+    // Mas a fila para: se este tem mais de uma baixa, os outros tambem tem.
+    expect(r.naoTentados).toEqual([37021]);
   });
 
   it('baixa que não quita deixa o título em aberto — e a fila para ali', async () => {
@@ -185,5 +190,57 @@ describe('ConciliacaoService.corrigir', () => {
   it('sem nenhum id, recusa em vez de rodar em cima de nada', async () => {
     const { service } = montarServico();
     await expect(service.corrigir([])).rejects.toThrow();
+  });
+});
+
+/**
+ * Quase metade dos títulos pagos desta base tem duas linhas `M` — duas baixas.
+ * Pegar a primeira e estorná-la foi o que aconteceu no primeiro título em que
+ * isto rodou de verdade: o estorno saiu, o título continuou pago pela outra
+ * baixa, e ficou um estorno registrado que não consertou nada.
+ */
+describe('título com mais de uma baixa', () => {
+  function comDuasBaixas() {
+    const ixc = {
+      listAll: jest.fn(async () => CONTAS),
+      list: jest.fn(async () => ({
+        registros: [
+          { id: '1', id_movim_finan: '1', id_conta: '324', tipo_lanc: 'M', data: '2026-08-10', credito: '160.00' },
+          { id: '2', id_movim_finan: '1', id_conta: '324', tipo_lanc: 'D', data: '2026-08-10' },
+          { id: '3', id_movim_finan: '3', id_conta: '324', tipo_lanc: 'M', data: '2026-08-10', credito: '160.00' },
+          { id: '4', id_movim_finan: '3', id_conta: '20055', tipo_lanc: 'P', data: '2026-08-10' },
+        ],
+        total: 4,
+        page: 1,
+      })),
+      getById: jest.fn(async () => ({
+        id: '37015', status: 'P', valor: '160.00', valor_aberto: '0',
+        valor_total_pago: '160.00', id_contas: '18', id_conta: '324', filial_id: '1',
+      })),
+      remove: jest.fn(),
+      action: jest.fn(),
+    };
+    const prisma = {
+      contaPagar: {
+        findMany: jest.fn(async () => [
+          { idFnApagarIxc: 37015, beneficiarioNome: 'Robson Araujo Ferreira' },
+        ]),
+      },
+    };
+    return { service: new ConciliacaoService(ixc as never, prisma as never), ixc };
+  }
+
+  it('fica fora da lista: não dá para dizer qual baixa vale', async () => {
+    const { service } = comDuasBaixas();
+    expect(await service.pendentes()).toEqual([]);
+  });
+
+  it('e mandando o id na marra, nada é estornado', async () => {
+    const { service, ixc } = comDuasBaixas();
+    const r = await service.corrigir([37015]);
+
+    expect(ixc.remove).not.toHaveBeenCalled();
+    expect(ixc.action).not.toHaveBeenCalled();
+    expect(r.pulados).toHaveLength(1);
   });
 });
