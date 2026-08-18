@@ -1362,6 +1362,8 @@ export interface FechamentoCaixa {
   lancamentos: number;
   conferidos: number;
   totalNaRua: string;
+  saldoInicial: string;
+  saldoFinal: string;
   observacao: string | null;
   fechadoPor: string | null;
   createdAt: string;
@@ -1383,6 +1385,12 @@ export interface ExtratoDoCaixa {
     saidasConferidas: number;
     naRua: number;
     pessoasNaRua: number;
+    /** Null = este caixa nunca foi fechado por aqui. */
+    saldoInicial: number | null;
+    entregueNoPeriodo: number;
+    trocoNoPeriodo: number;
+    /** O que deve estar na gaveta agora. Null enquanto falta o inicial. */
+    saldoEsperado: number | null;
   };
   fechamentos: FechamentoCaixa[];
 }

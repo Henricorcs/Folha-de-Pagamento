@@ -227,8 +227,16 @@ function Conferencia({
   }
 
   const fechar = useMutation({
-    mutationFn: async (observacao: string) =>
-      (await api.post('/caixa/fechar', { caixaId, de, ate, observacao })).data,
+    mutationFn: async (dados: { observacao: string; saldoInicial?: number }) =>
+      (
+        await api.post('/caixa/fechar', {
+          caixaId,
+          de,
+          ate,
+          observacao: dados.observacao,
+          saldoInicial: dados.saldoInicial,
+        })
+      ).data,
     onSuccess: recarregar,
     onError: (e) => setErro(mensagemErro(e)),
   });
@@ -277,17 +285,25 @@ function Conferencia({
                 : `${qtdEntradas} entradas — reforço, devolução ou troco`
           }
         />
+        {/* O que a gaveta deve ter agora. A contagem das saídas não some: ela
+            virou a etiqueta da fila lá embaixo, onde o trabalho acontece. */}
         <Indicador
-          rotulo="Saídas conferidas"
-          valor={`${resumo.saidasConferidas} de ${qtdSaidas}`}
-          detalhe={
-            faltam > 0
-              ? faltam === 1
-                ? 'falta 1'
-                : `faltam ${faltam}`
-              : 'tudo conferido'
+          rotulo="Saldo esperado na gaveta"
+          valor={
+            resumo.saldoEsperado === null
+              ? '—'
+              : formatBRL(resumo.saldoEsperado)
           }
-          alerta={faltam > 0 ? 'Ainda há o que olhar' : undefined}
+          detalhe={
+            resumo.saldoEsperado === null
+              ? 'informe o saldo inicial ao fechar'
+              : `de ${formatBRL(resumo.saldoInicial ?? 0)} no início do período`
+          }
+          alerta={
+            resumo.saldoEsperado === null
+              ? 'Este caixa nunca foi fechado aqui'
+              : undefined
+          }
         />
         <Indicador
           rotulo="Na rua"
@@ -408,8 +424,9 @@ function Conferencia({
             faltam={faltam}
             naRua={resumo.naRua}
             semSaidas={qtdSaidas === 0}
+            precisaSaldoInicial={resumo.saldoInicial === null}
             pendente={fechar.isPending}
-            onFechar={(obs) => fechar.mutate(obs)}
+            onFechar={(dados) => fechar.mutate(dados)}
           />
         )}
       </Bloco>
@@ -422,7 +439,9 @@ function Conferencia({
                 <span className="font-medium text-tinta-800">
                   {formatData(f.de)} a {formatData(f.ate)}
                 </span>{' '}
-                — {f.conferidos} lançamento(s), saídas de{' '}
+                — fechou com{' '}
+                <span className="valor">{formatBRL(Number(f.saldoFinal))}</span>
+                {' '}na gaveta, {f.conferidos} saída(s) conferida(s) somando{' '}
                 <span className="valor">{formatBRL(Number(f.totalSaidas))}</span>
                 {Number(f.totalNaRua) > 0 && (
                   <>
@@ -1009,6 +1028,7 @@ function Fechar({
   faltam,
   naRua,
   semSaidas,
+  precisaSaldoInicial,
   pendente,
   onFechar,
 }: {
@@ -1016,16 +1036,40 @@ function Fechar({
   naRua: number;
   /** Período sem saída nenhuma: não há o que conferir, e ainda assim fecha. */
   semSaidas: boolean;
+  /** Primeiro fechamento deste caixa: alguém tem de dizer de onde parte. */
+  precisaSaldoInicial: boolean;
   pendente: boolean;
-  onFechar: (observacao: string) => void;
+  onFechar: (dados: { observacao: string; saldoInicial?: number }) => void;
 }) {
   const [observacao, setObservacao] = useState('');
+  const [saldoInicial, setSaldoInicial] = useState('');
+  const faltaOSaldo = precisaSaldoInicial && saldoInicial.trim() === '';
 
   return (
     /* Sem cartão próprio: ele já vive dentro do cartão dos revisados, e um
        cartão dentro do outro só empurraria o botão para longe da lista que o
        habilita. */
     <div className="border-t border-tinta-200 px-5 py-4">
+      {/* Só no primeiro fechamento deste caixa: do segundo em diante, o
+          anterior diz de onde a gaveta parte. */}
+      {precisaSaldoInicial && (
+        <div className="mb-3">
+          <label className="rotulo" htmlFor="saldo-inicial">
+            Quanto havia na gaveta em {' '}
+            {/* O rótulo diz o dia para ninguém informar o saldo de hoje. */}
+            <span className="text-tinta-800">o início do período</span>
+          </label>
+          <div className="max-w-xs">
+            <CampoDinheiro valor={saldoInicial} onChange={setSaldoInicial} />
+          </div>
+          <p className="ajuda">
+            Este caixa nunca foi fechado por aqui, então a contagem precisa de
+            um ponto de partida. Do próximo fechamento em diante ele vem
+            sozinho, do anterior.
+          </p>
+        </div>
+      )}
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="flex-1">
           <label className="rotulo" htmlFor="obs-fechamento">
@@ -1041,13 +1085,22 @@ function Fechar({
         </div>
         <button
           type="button"
-          onClick={() => onFechar(observacao)}
-          disabled={faltam > 0 || pendente}
+          onClick={() =>
+            onFechar({
+              observacao,
+              saldoInicial: precisaSaldoInicial
+                ? Number(saldoInicial) || 0
+                : undefined,
+            })
+          }
+          disabled={faltam > 0 || faltaOSaldo || pendente}
           className="btn btn-acao shrink-0"
           title={
             faltam > 0
-              ? 'Confira todos os lançamentos antes de fechar'
-              : 'Guarda os números deste período'
+              ? 'Confira todas as saídas antes de fechar'
+              : faltaOSaldo
+                ? 'Informe quanto havia na gaveta no início'
+                : 'Guarda os números deste período'
           }
         >
           {pendente ? 'Fechando…' : 'Dar o período por conferido'}

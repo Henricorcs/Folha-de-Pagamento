@@ -1254,6 +1254,15 @@ model FechamentoCaixa {
   /// O que estava fora, com pessoas, no instante do fechamento
   totalNaRua    Decimal @map("total_na_rua") @db.Decimal(14, 2)
 
+  /// Saldo da gaveta ao abrir o período — o `saldoFinal` do fechamento
+  /// anterior, ou o valor informado à mão no primeiro de todos.
+  saldoInicial Decimal @map("saldo_inicial") @db.Decimal(14, 2)
+
+  /// O que deveria haver na gaveta ao fechar. Não é saldo contábil: o dinheiro
+  /// entregue na rua já saiu da gaveta sem virar saída no IXC, e o troco volta
+  /// do mesmo jeito. É este número que o próximo período usa como inicial.
+  saldoFinal Decimal @map("saldo_final") @db.Decimal(14, 2)
+
   observacao String?
 
   fechadoPor String?  @map("fechado_por")

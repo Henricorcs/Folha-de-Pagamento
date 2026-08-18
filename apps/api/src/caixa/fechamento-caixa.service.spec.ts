@@ -27,6 +27,10 @@ function montarServico(
     conferencias?: Array<{ idLancamentoIxc: number; conferido: boolean; notaFoto?: string }>;
     naRua?: Array<Record<string, unknown>>;
     entrega?: Record<string, unknown> | null;
+    /** O fechamento anterior deste caixa, de onde o saldo parte. */
+    anterior?: Record<string, unknown> | null;
+    /** Entregas e prestações com data dentro do período. */
+    movimentoDaRua?: Array<Record<string, unknown>>;
   } = {},
 ) {
   const lancamentos = opts.lancamentos ?? [];
@@ -43,7 +47,12 @@ function montarServico(
       findUnique: jest.fn().mockResolvedValue(null),
     },
     dinheiroNaRua: {
-      findMany: jest.fn().mockResolvedValue(opts.naRua ?? []),
+      // Primeira chamada: o que está aberto. Segunda: o que se mexeu no
+      // período, para o saldo da gaveta.
+      findMany: jest
+        .fn()
+        .mockResolvedValueOnce(opts.naRua ?? [])
+        .mockResolvedValue(opts.movimentoDaRua ?? []),
       findUnique: jest.fn().mockResolvedValue(opts.entrega ?? null),
       create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({
         id: 'r1',
@@ -60,6 +69,7 @@ function montarServico(
     },
     fechamentoCaixa: {
       findMany: jest.fn().mockResolvedValue([]),
+      findFirst: jest.fn().mockResolvedValue(opts.anterior ?? null),
       create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
         criados.push(data);
         return { id: 'f1', ...data };
@@ -205,6 +215,101 @@ describe('prestação de contas de quem levou dinheiro', () => {
   });
 });
 
+describe('o saldo que deve estar na gaveta', () => {
+  const DENTRO = new Date(2026, 7, 10);
+
+  it('sem fechamento anterior, não inventa saldo: fica nulo', async () => {
+    const { service } = montarServico({ lancamentos: [saida(1, 100)] });
+
+    const e = await service.extrato(7, '2026-08-01', '2026-08-31');
+
+    expect(e.resumo.saldoInicial).toBeNull();
+    expect(e.resumo.saldoEsperado).toBeNull();
+  });
+
+  /*
+   * O anterior tem de ser anterior de verdade. Sem o recorte por data, um
+   * período recém-fechado seria lido como o proprio saldo de partida na vez
+   * seguinte que a mesma tela abrisse, e o movimento entraria duas vezes.
+   */
+  it('procura o anterior só entre os que terminaram antes do início', async () => {
+    const { service, prisma } = montarServico({ anterior: { saldoFinal: 1000 } });
+
+    await service.extrato(7, '2026-08-01', '2026-08-31');
+
+    const [{ where, orderBy }] = prisma.fechamentoCaixa.findFirst.mock.calls[0];
+    expect(where.caixaId).toBe(7);
+    expect(where.ate.lt).toEqual(new Date(2026, 7, 1));
+    expect(orderBy).toEqual({ ate: 'desc' });
+  });
+
+  it('parte do saldo final do fechamento anterior', async () => {
+    const { service } = montarServico({
+      anterior: { saldoFinal: 1000 },
+      lancamentos: [saida(1, 300), { ...saida(2, 500), tipo: 'ENTRADA' as const }],
+    });
+
+    const e = await service.extrato(7, '2026-08-01', '2026-08-31');
+
+    // 1000 + 500 de entrada - 300 de saída
+    expect(e.resumo.saldoInicial).toBe(1000);
+    expect(e.resumo.saldoEsperado).toBe(1200);
+  });
+
+  /*
+   * O dinheiro entregue na rua sai da gaveta sem virar saída no IXC, e o troco
+   * volta do mesmo jeito. Sem os dois nesta conta, o número na tela não seria o
+   * que a pessoa tem na mão — que é a única coisa que este indicador serve para
+   * dizer.
+   */
+  it('o que saiu com alguém sai da gaveta, mesmo sem estar no IXC', async () => {
+    const { service } = montarServico({
+      anterior: { saldoFinal: 1000 },
+      lancamentos: [],
+      movimentoDaRua: [
+        { valor: 200, entregueEm: DENTRO, baixadoEm: null, troco: null },
+      ],
+    });
+
+    const e = await service.extrato(7, '2026-08-01', '2026-08-31');
+
+    expect(e.resumo.entregueNoPeriodo).toBe(200);
+    expect(e.resumo.saldoEsperado).toBe(800);
+  });
+
+  it('o troco devolvido volta para a gaveta', async () => {
+    const { service } = montarServico({
+      anterior: { saldoFinal: 1000 },
+      lancamentos: [],
+      movimentoDaRua: [
+        // Entregue no período anterior, prestou contas neste: só o troco entra.
+        { valor: 200, entregueEm: new Date(2026, 6, 20), baixadoEm: DENTRO, troco: 50 },
+      ],
+    });
+
+    const e = await service.extrato(7, '2026-08-01', '2026-08-31');
+
+    expect(e.resumo.entregueNoPeriodo).toBe(0);
+    expect(e.resumo.trocoNoPeriodo).toBe(50);
+    expect(e.resumo.saldoEsperado).toBe(1050);
+  });
+
+  it('entregue e prestado no mesmo período: sobra o que virou nota', async () => {
+    const { service } = montarServico({
+      anterior: { saldoFinal: 1000 },
+      lancamentos: [],
+      movimentoDaRua: [
+        { valor: 200, entregueEm: DENTRO, baixadoEm: DENTRO, troco: 50 },
+      ],
+    });
+
+    const e = await service.extrato(7, '2026-08-01', '2026-08-31');
+
+    // Saíram 200, voltaram 50: a gaveta ficou 150 menor.
+    expect(e.resumo.saldoEsperado).toBe(850);
+  });
+});
+
 describe('fechar o período', () => {
   it('recusa enquanto houver saída por conferir, e diz quantas', async () => {
     const { service } = montarServico({
@@ -232,7 +337,12 @@ describe('fechar o período', () => {
       conferencias: [{ idLancamentoIxc: 1, conferido: true }],
     });
 
-    await service.fechar({ caixaId: 7, de: '2026-08-01', ate: '2026-08-31' });
+    await service.fechar({
+      caixaId: 7,
+      de: '2026-08-01',
+      ate: '2026-08-31',
+      saldoInicial: 0,
+    });
 
     // O fechamento guarda a conferência que ele exigiu: a das saídas.
     expect(criados[0].lancamentos).toBe(1);
@@ -248,7 +358,13 @@ describe('fechar o período', () => {
     });
 
     await service.fechar(
-      { caixaId: 7, de: '2026-08-01', ate: '2026-08-31', observacao: 'ok' },
+      {
+        caixaId: 7,
+        de: '2026-08-01',
+        ate: '2026-08-31',
+        observacao: 'ok',
+        saldoInicial: 0,
+      },
       'u1',
     );
 
@@ -257,13 +373,64 @@ describe('fechar o período', () => {
     expect(criados[0].conferidos).toBe(1);
   });
 
+  /*
+   * Assumir zero em silêncio seria pior que recusar: o erro entraria no
+   * `saldoFinal`, e cada fechamento seguinte herdaria o dele — um caixa
+   * inteiro errado por um número que ninguém chegou a informar.
+   */
+  it('caixa nunca fechado recusa sem o saldo inicial', async () => {
+    const { service } = montarServico({
+      lancamentos: [saida(1, 100)],
+      conferencias: [{ idLancamentoIxc: 1, conferido: true }],
+    });
+
+    await expect(
+      service.fechar({ caixaId: 7, de: '2026-08-01', ate: '2026-08-31' }),
+    ).rejects.toThrow(/informe quanto havia na gaveta/i);
+  });
+
+  it('do segundo em diante, o anterior diz de onde parte', async () => {
+    const { service, criados } = montarServico({
+      anterior: { saldoFinal: 1000 },
+      lancamentos: [saida(1, 300)],
+      conferencias: [{ idLancamentoIxc: 1, conferido: true }],
+    });
+
+    // Sem informar nada: o saldo vem do fechamento anterior.
+    await service.fechar({ caixaId: 7, de: '2026-08-01', ate: '2026-08-31' });
+
+    expect(Number(criados[0].saldoInicial)).toBe(1000);
+    expect(Number(criados[0].saldoFinal)).toBe(700);
+  });
+
+  it('o saldo guardado é o da gaveta, com a rua descontada', async () => {
+    const { service, criados } = montarServico({
+      anterior: { saldoFinal: 1000 },
+      lancamentos: [saida(1, 100)],
+      conferencias: [{ idLancamentoIxc: 1, conferido: true }],
+      movimentoDaRua: [
+        { valor: 200, entregueEm: new Date(2026, 7, 10), baixadoEm: null, troco: null },
+      ],
+    });
+
+    await service.fechar({ caixaId: 7, de: '2026-08-01', ate: '2026-08-31' });
+
+    // 1000 - 100 de saída - 200 que saiu com alguém
+    expect(Number(criados[0].saldoFinal)).toBe(700);
+  });
+
   it('guarda os totais do momento, e não uma referência ao período', async () => {
     const { service, criados } = montarServico({
       lancamentos: [saida(1, 40), { ...saida(2, 60), tipo: 'ENTRADA' as const }],
       conferencias: [{ idLancamentoIxc: 1, conferido: true }],
     });
 
-    await service.fechar({ caixaId: 7, de: '2026-08-01', ate: '2026-08-31' });
+    await service.fechar({
+      caixaId: 7,
+      de: '2026-08-01',
+      ate: '2026-08-31',
+      saldoInicial: 0,
+    });
 
     expect(Number(criados[0].totalSaidas)).toBe(40);
     expect(Number(criados[0].totalEntradas)).toBe(60);

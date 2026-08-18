@@ -110,6 +110,50 @@ export class FechamentoCaixaService {
       orderBy: { de: 'desc' },
     });
 
+    /*
+     * De onde vem o saldo inicial.
+     *
+     * O webservice do IXC não devolve saldo de conta — o cadastro tem
+     * `saldo_abertura`, do dia em que a conta nasceu, e mais nada. Somar a
+     * história inteira a cada abertura de tela é a leitura que já derrubou esta
+     * página com 502. Então o saldo se encadeia: cada fechamento guarda com
+     * quanto o período fechou, e o seguinte começa dali. O primeiro de cada
+     * caixa pergunta a quem está contando a gaveta.
+     */
+    const anterior = await this.prisma.fechamentoCaixa.findFirst({
+      where: { caixaId, ate: { lt: inicio } },
+      orderBy: { ate: 'desc' },
+    });
+    const saldoInicial = anterior ? Number(anterior.saldoFinal) : null;
+
+    /*
+     * O dinheiro na rua mexe na gaveta sem passar pelo IXC.
+     *
+     * O que sai com alguém sai fisicamente e não vira saída lá; o troco volta
+     * do mesmo jeito. Por isso os dois entram nesta conta, e cada um no período
+     * em que aconteceu — a entrega pela data em que saiu, o troco pela data da
+     * prestação. Sem isso o número na tela não seria o que a pessoa tem na mão.
+     */
+    const doPeriodo = await this.prisma.dinheiroNaRua.findMany({
+      where: {
+        caixaId,
+        OR: [
+          { entregueEm: { gte: inicio, lte: fim } },
+          { baixadoEm: { gte: inicio, lte: fim } },
+        ],
+      },
+    });
+    const entregueNoPeriodo = arredondar(
+      doPeriodo
+        .filter((d) => d.entregueEm >= inicio && d.entregueEm <= fim)
+        .reduce((s, d) => s + Number(d.valor), 0),
+    );
+    const trocoNoPeriodo = arredondar(
+      doPeriodo
+        .filter((d) => d.baixadoEm && d.baixadoEm >= inicio && d.baixadoEm <= fim)
+        .reduce((s, d) => s + Number(d.troco ?? 0), 0),
+    );
+
     const soma = (t: 'ENTRADA' | 'SAIDA') =>
       arredondar(
         comConferencia
@@ -144,6 +188,21 @@ export class FechamentoCaixaService {
         ).length,
         naRua: arredondar(naRua.reduce((s, d) => s + Number(d.valor), 0)),
         pessoasNaRua: new Set(naRua.map((d) => d.pessoa.toLowerCase())).size,
+        /** Null = este caixa nunca foi fechado, e ninguém disse por onde começa. */
+        saldoInicial,
+        entregueNoPeriodo,
+        trocoNoPeriodo,
+        /** O que deve estar na gaveta agora. Null enquanto falta o inicial. */
+        saldoEsperado:
+          saldoInicial === null
+            ? null
+            : arredondar(
+                saldoInicial +
+                  soma('ENTRADA') -
+                  soma('SAIDA') -
+                  entregueNoPeriodo +
+                  trocoNoPeriodo,
+              ),
       },
       fechamentos,
     };
@@ -328,7 +387,14 @@ export class FechamentoCaixaService {
    * gaveta tem menos do que a soma diz, e vai registrado no fechamento.
    */
   async fechar(
-    dados: { caixaId: number; de: string; ate: string; observacao?: string },
+    dados: {
+      caixaId: number;
+      de: string;
+      ate: string;
+      observacao?: string;
+      /** Só no primeiro fechamento do caixa: de onde a contagem começa. */
+      saldoInicial?: number;
+    },
     usuarioId?: string,
   ) {
     const extrato = await this.extrato(dados.caixaId, dados.de, dados.ate);
@@ -341,6 +407,28 @@ export class FechamentoCaixaService {
       );
     }
 
+    /*
+     * O primeiro fechamento de um caixa precisa saber de onde a gaveta parte;
+     * do segundo em diante, o anterior responde. Recusar aqui, e não assumir
+     * zero, porque zero silencioso vira um saldo errado que se propaga por
+     * todos os fechamentos seguintes — cada um herdando o erro do anterior.
+     */
+    const saldoInicial = extrato.resumo.saldoInicial ?? dados.saldoInicial;
+    if (saldoInicial === undefined || saldoInicial === null) {
+      throw new BadRequestException(
+        'Este caixa nunca foi fechado por aqui: informe quanto havia na gaveta ' +
+          'no início do período para a contagem ter de onde partir.',
+      );
+    }
+
+    const saldoFinal = arredondar(
+      saldoInicial +
+        Number(extrato.resumo.entradas) -
+        Number(extrato.resumo.saidas) -
+        extrato.resumo.entregueNoPeriodo +
+        extrato.resumo.trocoNoPeriodo,
+    );
+
     const fechamento = await this.prisma.fechamentoCaixa.create({
       data: {
         caixaId: dados.caixaId,
@@ -352,14 +440,16 @@ export class FechamentoCaixaService {
         lancamentos: extrato.resumo.qtdSaidas,
         conferidos: extrato.resumo.saidasConferidas,
         totalNaRua: new Prisma.Decimal(extrato.resumo.naRua),
+        saldoInicial: new Prisma.Decimal(saldoInicial),
+        saldoFinal: new Prisma.Decimal(saldoFinal),
         observacao: dados.observacao?.trim() || null,
         fechadoPor: usuarioId ?? null,
       },
     });
     this.logger.log(
       `Caixa "${extrato.caixa.nome}" fechado de ${dados.de} a ${dados.ate}: ` +
-        `${extrato.resumo.conferidos} lançamento(s), ` +
-        `${extrato.resumo.naRua} ainda na rua`,
+        `${extrato.resumo.saidasConferidas} saída(s) conferida(s), ` +
+        `saldo de ${saldoFinal}, ${extrato.resumo.naRua} ainda na rua`,
     );
     return fechamento;
   }

@@ -140,4 +140,15 @@ export class FecharCaixaDto {
   @IsString()
   @MaxLength(1000)
   observacao?: string;
+
+  /**
+   * Quanto havia na gaveta no início do período.
+   *
+   * Só faz falta no primeiro fechamento de cada caixa: do segundo em diante, o
+   * anterior diz de onde a contagem parte.
+   */
+  @IsOptional()
+  @Transform(numeroOuIndefinido)
+  @IsNumber()
+  saldoInicial?: number;
 }
