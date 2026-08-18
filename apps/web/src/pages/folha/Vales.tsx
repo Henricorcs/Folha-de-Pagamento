@@ -551,7 +551,7 @@ function NovoVale({ onCriado }: { onCriado: () => void }) {
           />
         </Campo>
         <Campo>
-          <label className="flex h-[42px] items-center gap-2 text-sm text-tinta-700">
+          <label className="flex h-[42px] w-fit items-center gap-2 text-sm text-tinta-700">
             <input
               type="checkbox"
               className="accent-brand-600"

@@ -372,7 +372,7 @@ function OpcaoFerias({
 
   return (
     <div className="mb-4 rounded-lg bg-papel px-3 py-2 ring-1 ring-tinta-100">
-      <label className="flex flex-wrap items-center gap-2 text-xs text-tinta-600">
+      <label className="flex w-fit flex-wrap items-center gap-2 text-xs text-tinta-600">
         <input
           type="checkbox"
           className="accent-brand-600"
@@ -444,7 +444,7 @@ function OpcaoDia25({
   const naoGerado = grupo.adiantamento?.situacao === 'NAO_GERADO';
   return (
     <div className="mb-4 rounded-lg bg-papel px-3 py-2 ring-1 ring-tinta-100">
-      <label className="flex flex-wrap items-center gap-2 text-xs text-tinta-600">
+      <label className="flex w-fit flex-wrap items-center gap-2 text-xs text-tinta-600">
         <input
           type="checkbox"
           className="accent-brand-600"

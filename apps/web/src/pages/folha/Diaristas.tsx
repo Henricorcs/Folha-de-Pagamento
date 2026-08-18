@@ -552,7 +552,7 @@ export function Diaristas() {
           placeholder="Buscar por nome, fantasia ou CPF"
           className="campo max-w-xs"
         />
-        <label className="flex items-center gap-2 text-sm text-tinta-600">
+        <label className="flex w-fit items-center gap-2 text-sm text-tinta-600">
           <input
             type="checkbox"
             className="accent-brand-600"

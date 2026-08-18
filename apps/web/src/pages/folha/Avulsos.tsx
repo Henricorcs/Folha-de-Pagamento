@@ -714,7 +714,7 @@ export function Avulsos({ doIxc = false }: { doIxc?: boolean } = {}) {
                 : ''}
           </span>
         ) : (
-          <label className="flex items-center gap-2 text-sm text-tinta-600">
+          <label className="flex w-fit items-center gap-2 text-sm text-tinta-600">
             <input
               type="checkbox"
               className="accent-brand-600"

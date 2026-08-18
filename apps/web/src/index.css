@@ -307,10 +307,17 @@
    * clicável, e o preço foi alto: três opções viravam três blocos empilhados
    * que empurravam o resto do formulário para fora da tela. Num formulário
    * longo, o que atrapalha não é a opção discreta demais — é a tela que não
-   * cabe. O alvo de clique continua sendo a linha inteira.
+   * cabe.
+   *
+   * O que ela não pode ser é um alvo do tamanho da linha. Sendo `flex`, o
+   * rótulo era um bloco e ia até a borda direita do formulário: clicar no vazio
+   * ao lado do texto ligava ou desligava a opção sem querer, e numa tela em que
+   * a caixa decide se o dinheiro sai ou não isso custa caro. `w-fit` a encolhe
+   * até o conteúdo — ela continua sozinha na linha, mas só a caixa e o texto
+   * atendem ao clique.
    */
   .opcao {
-    @apply flex cursor-pointer items-center gap-2 text-sm leading-snug text-tinta-700 transition hover:text-tinta-900;
+    @apply flex w-fit cursor-pointer items-center gap-2 text-sm leading-snug text-tinta-700 transition hover:text-tinta-900;
   }
 
   /* --- Tabela --- */

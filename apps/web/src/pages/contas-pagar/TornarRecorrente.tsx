@@ -114,7 +114,7 @@ export function TornarRecorrente({
           próxima vencendo em {formatarDia(proximoVencimento)}.
         </p>
 
-        <label className="mt-3 flex items-center gap-2 text-sm text-tinta-700">
+        <label className="mt-3 flex w-fit items-center gap-2 text-sm text-tinta-700">
           <input
             type="checkbox"
             className="h-4 w-4 accent-brand-600"
@@ -157,7 +157,7 @@ export function TornarRecorrente({
             ))}
           </div>
 
-          <label className="mt-3 flex items-center gap-2 text-sm text-amber-900 dark:text-amber-200">
+          <label className="mt-3 flex w-fit items-center gap-2 text-sm text-amber-900 dark:text-amber-200">
             <input
               type="checkbox"
               className="h-4 w-4 accent-amber-600"

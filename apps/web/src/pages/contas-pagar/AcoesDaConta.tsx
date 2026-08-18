@@ -210,7 +210,7 @@ export function PagarEmMaos({
         </div>
 
         {contaDoBancoEscolhida && (
-          <label className="mt-3 flex flex-wrap items-center gap-2 text-sm text-tinta-600">
+          <label className="mt-3 flex w-fit flex-wrap items-center gap-2 text-sm text-tinta-600">
             <input
               type="checkbox"
               className="accent-brand-600"
