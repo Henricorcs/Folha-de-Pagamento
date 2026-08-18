@@ -206,7 +206,7 @@ describe('prestação de contas de quem levou dinheiro', () => {
 });
 
 describe('fechar o período', () => {
-  it('recusa enquanto houver lançamento por conferir, e diz quantos', async () => {
+  it('recusa enquanto houver saída por conferir, e diz quantas', async () => {
     const { service } = montarServico({
       lancamentos: [saida(1, 100), saida(2, 250), saida(3, 10)],
       conferencias: [{ idLancamentoIxc: 1, conferido: true }],
@@ -214,7 +214,30 @@ describe('fechar o período', () => {
 
     await expect(
       service.fechar({ caixaId: 7, de: '2026-08-01', ate: '2026-08-31' }),
-    ).rejects.toThrow(/faltam 2 lançamentos/i);
+    ).rejects.toThrow(/faltam 2 saídas/i);
+  });
+
+  /*
+   * Um caixa de provedor recebe muito mais do que paga: 109 recebimentos de
+   * cliente para 52 saídas, no mês em que esta tela estreou. Os recebimentos
+   * entram no saldo, mas exigir os 161 para fechar viraria marcação cega.
+   */
+  it('entrada não conferida não segura o fechamento', async () => {
+    const { service, criados } = montarServico({
+      lancamentos: [
+        saida(1, 100),
+        { ...saida(2, 900), tipo: 'ENTRADA' as const },
+        { ...saida(3, 40), tipo: 'ENTRADA' as const },
+      ],
+      conferencias: [{ idLancamentoIxc: 1, conferido: true }],
+    });
+
+    await service.fechar({ caixaId: 7, de: '2026-08-01', ate: '2026-08-31' });
+
+    // O fechamento guarda a conferência que ele exigiu: a das saídas.
+    expect(criados[0].lancamentos).toBe(1);
+    expect(criados[0].conferidos).toBe(1);
+    expect(Number(criados[0].totalEntradas)).toBe(940);
   });
 
   it('dinheiro na rua não impede fechar — vai registrado no fechamento', async () => {
@@ -237,10 +260,7 @@ describe('fechar o período', () => {
   it('guarda os totais do momento, e não uma referência ao período', async () => {
     const { service, criados } = montarServico({
       lancamentos: [saida(1, 40), { ...saida(2, 60), tipo: 'ENTRADA' as const }],
-      conferencias: [
-        { idLancamentoIxc: 1, conferido: true },
-        { idLancamentoIxc: 2, conferido: true },
-      ],
+      conferencias: [{ idLancamentoIxc: 1, conferido: true }],
     });
 
     await service.fechar({ caixaId: 7, de: '2026-08-01', ate: '2026-08-31' });

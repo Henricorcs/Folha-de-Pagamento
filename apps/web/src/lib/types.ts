@@ -1378,6 +1378,9 @@ export interface ExtratoDoCaixa {
     saidas: number;
     lancamentos: number;
     conferidos: number;
+    /** Só as saídas: são elas que se confere uma a uma. */
+    qtdSaidas: number;
+    saidasConferidas: number;
     naRua: number;
     pessoasNaRua: number;
   };

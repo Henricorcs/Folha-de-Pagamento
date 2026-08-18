@@ -157,6 +157,15 @@ function Conferencia({
 }) {
   const qc = useQueryClient();
   const [erro, setErro] = useState<string | null>(null);
+  /*
+   * A lista abre nas saídas.
+   *
+   * Um caixa de provedor recebe muito mais do que paga — 109 recebimentos de
+   * cliente para 52 saídas, no primeiro mês desta tela. Os recebimentos entram
+   * no saldo e por isso continuam à mão, mas quem vem bater o caixa vem olhar
+   * o que saiu: é disso que se pede nota, e é isso que o fechamento cobra.
+   */
+  const [soSaidas, setSoSaidas] = useState(true);
 
   const extrato = useQuery({
     queryKey: ['caixa', 'extrato', caixaId, de, ate],
@@ -168,9 +177,53 @@ function Conferencia({
       ).data,
   });
 
+  const chaveDoExtrato = ['caixa', 'extrato', caixaId, de, ate];
+
   function recarregar() {
     setErro(null);
     void qc.invalidateQueries({ queryKey: ['caixa', 'extrato'] });
+  }
+
+  /**
+   * Marcar um lançamento mexe só naquele lançamento, no cache.
+   *
+   * Antes disto cada clique invalidava o extrato inteiro, e o extrato é uma
+   * leitura do IXC: conferir os 52 do mês custava 52 releituras da conta lá,
+   * com a tela piscando em cada uma. O servidor já guardou a marca — o que
+   * falta é a tela concordar com ele.
+   */
+  function marcarNoCache(idLancamento: number, conferido: boolean) {
+    setErro(null);
+    qc.setQueryData<ExtratoDoCaixa>(chaveDoExtrato, (atual) => {
+      if (!atual) return atual;
+      const lancamentos = atual.lancamentos.map((l) =>
+        l.id === idLancamento ? { ...l, conferido } : l,
+      );
+      const conferidos = lancamentos.filter((l) => l.conferido).length;
+      const saidasConferidas = lancamentos.filter(
+        (l) => l.tipo === 'SAIDA' && l.conferido,
+      ).length;
+      return {
+        ...atual,
+        lancamentos,
+        resumo: { ...atual.resumo, conferidos, saidasConferidas },
+      };
+    });
+  }
+
+  /** A foto entrou ou saiu: mesma ideia, sem reler o IXC. */
+  function marcarNotaNoCache(idLancamento: number, temNota: boolean) {
+    setErro(null);
+    qc.setQueryData<ExtratoDoCaixa>(chaveDoExtrato, (atual) =>
+      atual
+        ? {
+            ...atual,
+            lancamentos: atual.lancamentos.map((l) =>
+              l.id === idLancamento ? { ...l, temNota } : l,
+            ),
+          }
+        : atual,
+    );
   }
 
   const fechar = useMutation({
@@ -187,11 +240,12 @@ function Conferencia({
   if (!extrato.data) return null;
 
   const { lancamentos, naRua, resumo, fechamentos } = extrato.data;
-  const faltam = resumo.lancamentos - resumo.conferidos;
-  // O indicador de saídas conta saídas: dizer "6 lançamentos" embaixo de um
-  // total que soma 5 deles faz quem confere procurar o erro que não existe.
-  const qtdSaidas = lancamentos.filter((l) => l.tipo === 'SAIDA').length;
+  const faltam = resumo.qtdSaidas - resumo.saidasConferidas;
+  const qtdSaidas = resumo.qtdSaidas;
   const qtdEntradas = lancamentos.length - qtdSaidas;
+  const visiveis = soSaidas
+    ? lancamentos.filter((l) => l.tipo === 'SAIDA')
+    : lancamentos;
 
   return (
     <>
@@ -214,9 +268,15 @@ function Conferencia({
           }
         />
         <Indicador
-          rotulo="Conferidos"
-          valor={`${resumo.conferidos} de ${resumo.lancamentos}`}
-          detalhe={faltam > 0 ? `faltam ${faltam}` : 'tudo conferido'}
+          rotulo="Saídas conferidas"
+          valor={`${resumo.saidasConferidas} de ${qtdSaidas}`}
+          detalhe={
+            faltam > 0
+              ? faltam === 1
+                ? 'falta 1'
+                : `faltam ${faltam}`
+              : 'tudo conferido'
+          }
           alerta={faltam > 0 ? 'Ainda há o que olhar' : undefined}
         />
         <Indicador
@@ -237,10 +297,34 @@ function Conferencia({
         onMudou={recarregar}
       />
 
-      <Bloco titulo="Saídas e entradas do período" semPadding className="surgir surgir-3">
-        {lancamentos.length === 0 ? (
-          <Vazio titulo="Nenhum lançamento neste período">
-            Confira as datas, ou se este é mesmo o caixa do dinheiro em mãos.
+      <Bloco
+        titulo={soSaidas ? 'Saídas do período' : 'Saídas e entradas do período'}
+        semPadding
+        className="surgir surgir-3"
+        acao={
+          <button
+            type="button"
+            onClick={() => setSoSaidas((v) => !v)}
+            className="btn btn-p btn-neutro"
+            title="Os recebimentos entram no saldo, mas não é deles que se pede nota"
+          >
+            {soSaidas
+              ? `Mostrar as ${qtdEntradas} entradas também`
+              : 'Mostrar só as saídas'}
+          </button>
+        }
+      >
+        {visiveis.length === 0 ? (
+          <Vazio
+            titulo={
+              soSaidas
+                ? 'Nenhuma saída neste período'
+                : 'Nenhum lançamento neste período'
+            }
+          >
+            {soSaidas && qtdEntradas > 0
+              ? `Houve ${qtdEntradas} entrada(s) — o botão acima mostra.`
+              : 'Confira as datas, ou se este é mesmo o caixa do dinheiro em mãos.'}
           </Vazio>
         ) : (
           <div className="overflow-x-auto rolagem-fina">
@@ -255,12 +339,13 @@ function Conferencia({
                 </tr>
               </thead>
               <tbody>
-                {lancamentos.map((l) => (
+                {visiveis.map((l) => (
                   <LinhaDoLancamento
                     key={l.id}
                     caixaId={caixaId}
                     lancamento={l}
-                    onMudou={recarregar}
+                    onConferiu={marcarNoCache}
+                    onMudouNota={marcarNotaNoCache}
                     onErro={setErro}
                   />
                 ))}
@@ -317,27 +402,35 @@ function Conferencia({
 function LinhaDoLancamento({
   caixaId,
   lancamento: l,
-  onMudou,
+  onConferiu,
+  onMudouNota,
   onErro,
 }: {
   caixaId: number;
   lancamento: LancamentoDoCaixa;
-  onMudou: () => void;
+  onConferiu: (id: number, conferido: boolean) => void;
+  onMudouNota: (id: number, temNota: boolean) => void;
   onErro: (m: string) => void;
 }) {
   const [vendoNota, setVendoNota] = useState(false);
 
   const conferir = useMutation({
-    mutationFn: async (conferido: boolean) =>
-      api.put(`/caixa/${caixaId}/lancamentos/${l.id}/conferir`, { conferido }),
-    onSuccess: onMudou,
+    mutationFn: async (conferido: boolean) => {
+      await api.put(`/caixa/${caixaId}/lancamentos/${l.id}/conferir`, {
+        conferido,
+      });
+      return conferido;
+    },
+    onSuccess: (conferido) => onConferiu(l.id, conferido),
     onError: (e) => onErro(mensagemErro(e)),
   });
 
   const salvarNota = useMutation({
-    mutationFn: async (notaFoto: string | null) =>
-      api.put(`/caixa/${caixaId}/lancamentos/${l.id}/nota`, { notaFoto }),
-    onSuccess: onMudou,
+    mutationFn: async (notaFoto: string | null) => {
+      await api.put(`/caixa/${caixaId}/lancamentos/${l.id}/nota`, { notaFoto });
+      return notaFoto;
+    },
+    onSuccess: (notaFoto) => onMudouNota(l.id, !!notaFoto),
     onError: (e) => onErro(mensagemErro(e)),
   });
 
@@ -850,8 +943,9 @@ function Fechar({
       <p className="ajuda mt-2">
         {faltam > 0 ? (
           <>
-            Faltam {faltam} lançamento(s) por conferir. O fechamento diz "olhei
-            tudo" — por isso ele espera.
+            {faltam === 1 ? 'Falta 1 saída' : `Faltam ${faltam} saídas`} por
+            conferir. O fechamento diz "olhei tudo" — por isso ele espera. Os
+            recebimentos entram no saldo, mas não seguram o fechamento.
           </>
         ) : naRua > 0 ? (
           <>

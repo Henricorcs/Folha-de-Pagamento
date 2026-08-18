@@ -128,6 +128,20 @@ export class FechamentoCaixaService {
         saidas: soma('SAIDA'),
         lancamentos: comConferencia.length,
         conferidos: comConferencia.filter((l) => l.conferido).length,
+        /*
+         * A conferência é das saídas.
+         *
+         * Um caixa de provedor recebe muito mais do que paga — neste, 109
+         * recebimentos de cliente para 52 saídas no mesmo mês. Os recebimentos
+         * contam no saldo e por isso continuam na lista, mas não é deles que
+         * se pede nota nem se confere um a um: o que sai é que precisa de
+         * papel. Exigir os 161 para fechar transformaria a conferência em
+         * marcação cega, que é o contrário do que ela serve.
+         */
+        qtdSaidas: comConferencia.filter((l) => l.tipo === 'SAIDA').length,
+        saidasConferidas: comConferencia.filter(
+          (l) => l.tipo === 'SAIDA' && l.conferido,
+        ).length,
         naRua: arredondar(naRua.reduce((s, d) => s + Number(d.valor), 0)),
         pessoasNaRua: new Set(naRua.map((d) => d.pessoa.toLowerCase())).size,
       },
@@ -318,11 +332,11 @@ export class FechamentoCaixaService {
     usuarioId?: string,
   ) {
     const extrato = await this.extrato(dados.caixaId, dados.de, dados.ate);
-    const faltam = extrato.resumo.lancamentos - extrato.resumo.conferidos;
+    const faltam = extrato.resumo.qtdSaidas - extrato.resumo.saidasConferidas;
     if (faltam > 0) {
       throw new BadRequestException(
         `Ainda ${
-          faltam === 1 ? 'falta 1 lançamento' : `faltam ${faltam} lançamentos`
+          faltam === 1 ? 'falta 1 saída' : `faltam ${faltam} saídas`
         } por conferir neste período.`,
       );
     }
@@ -335,8 +349,8 @@ export class FechamentoCaixaService {
         ate: dataDoDia(dados.ate, 'final'),
         totalEntradas: new Prisma.Decimal(extrato.resumo.entradas),
         totalSaidas: new Prisma.Decimal(extrato.resumo.saidas),
-        lancamentos: extrato.resumo.lancamentos,
-        conferidos: extrato.resumo.conferidos,
+        lancamentos: extrato.resumo.qtdSaidas,
+        conferidos: extrato.resumo.saidasConferidas,
         totalNaRua: new Prisma.Decimal(extrato.resumo.naRua),
         observacao: dados.observacao?.trim() || null,
         fechadoPor: usuarioId ?? null,
