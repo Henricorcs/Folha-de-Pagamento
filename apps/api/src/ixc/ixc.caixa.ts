@@ -80,6 +80,14 @@ export interface CaixaIxc {
   nome: string;
   /** Texto cru do tipo (Caixa, Banco…), quando a base informa. */
   tipo: string | null;
+  /**
+   * `contas.id_planejamento`: a conta do razão deste caixa.
+   *
+   * É por ela que a movimentação financeira se liga ao caixa — a linha do
+   * dinheiro em `fn_movim_finan` traz o razão em `id_conta`, e não o id do
+   * caixa. Obrigatório no cadastro do IXC, então na prática sempre vem.
+   */
+  razaoId: number | null;
 }
 
 /** Converte um registro cru da tabela de contas em caixa (null se sem id). */
@@ -90,6 +98,7 @@ export function mapCaixa(raw: Record<string, unknown>): CaixaIxc | null {
     id,
     nome: primeiroTexto(raw, ['descricao', 'nome', 'conta', 'apelido', 'titulo']) ?? `Conta ${id}`,
     tipo: primeiroTexto(raw, ['tipo', 'tipo_conta', 'especie']),
+    razaoId: parseIxcId(raw.id_planejamento),
   };
 }
 
@@ -110,6 +119,38 @@ export function acharCaixaPorNome(
     null
   );
 }
+
+/**
+ * O `fn_movim_finan`, que a documentação do IXC chama de "Contabilidade".
+ *
+ * Não é uma tabela de caixa com uma coluna de valor: é contabilidade de
+ * partida dobrada. O dinheiro mora em `debito` e `credito`, e a conta é o
+ * razão (`id_conta`), não o caixa. Por isso ela não passa pela detecção
+ * genérica de colunas — aquela procura um `valor` que aqui não existe, desiste,
+ * e a tela recebia "não achei o formato".
+ *
+ * Campos, da coleção do Postman (`Contabilidade (inserir)`):
+ *
+ *     id_conta*, data*, data2, documento, debito, credito,
+ *     historico*, historico2, tipo_lanc, id_movim_finan,
+ *     id_entrada, id_saida, ultima_atualizacao
+ *
+ * Débito e crédito, num caixa, são entrada e saída nesta ordem: caixa é conta
+ * de ativo, e ativo que diminui é crédito. Bate com o que esta base já mostrou
+ * — pagar um título pelo ModoBank escreve a perna `M` no razão daquela conta,
+ * que é o dinheiro saindo dela, e a `P` na despesa.
+ */
+export const CAMPOS_MOVIM_FINAN: CamposMovimento = {
+  caixa: 'id_conta',
+  /** Não há coluna única de valor: quem manda são `debito` e `credito`. */
+  valor: '',
+  data: 'data',
+  historico: 'historico',
+  tipo: null,
+  tipoSaida: '',
+};
+
+export const TABELA_MOVIM_FINAN = 'fn_movim_finan';
 
 /** Onde cada informação do lançamento mora, nesta base do IXC. */
 export interface CamposMovimento {

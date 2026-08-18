@@ -14,6 +14,8 @@ import {
   TABELAS_CONTAS_CAIXA,
   TABELAS_MOVIMENTO_CAIXA,
   TABELAS_MOVIMENTO_LEITURA,
+  TABELA_MOVIM_FINAN,
+  CAMPOS_MOVIM_FINAN,
   type CaixaIxc,
   type CamposMovimento,
   type LancamentoCaixaInput,
@@ -172,7 +174,7 @@ export class CaixaService {
     caixaId: number,
     de: Date,
     ate: Date,
-    cfg: { caixaTabelaMovimento: string },
+    cfg: { caixaTabelaMovimento: string; caixaTabelaContas?: string },
   ): Promise<{ tabela: string; lancamentos: LancamentoDoCaixa[] }> {
     /*
      * Exceção do Nest, e não `Error` pelado: o que sai daqui vai direto para a
@@ -193,7 +195,17 @@ export class CaixaService {
       );
     }
 
-    const campos = await this.resolverCampos(tabela);
+    /*
+     * O `fn_movim_finan` tem esquema documentado (a coleção do Postman o chama
+     * de "Contabilidade"), então ele não passa pela detecção genérica: aquela
+     * procura uma coluna `valor`, que aqui não existe — o dinheiro está em
+     * `debito` e `credito` —, desistiria, e a tela receberia "não achei o
+     * formato" numa tabela que está perfeitamente legível.
+     */
+    const daContabilidade = tabela === TABELA_MOVIM_FINAN;
+    const campos = daContabilidade
+      ? CAMPOS_MOVIM_FINAN
+      : await this.resolverCampos(tabela);
     if (!campos) {
       throw new ServiceUnavailableException(
         `A tabela "${tabela}" respondeu, mas não achei nela um lançamento de ` +
@@ -202,11 +214,31 @@ export class CaixaService {
       );
     }
 
+    /*
+     * A linha do dinheiro traz o **razão** do caixa em `id_conta`, não o id do
+     * caixa: é assim que a conciliação acha a perna do pagamento, e foi por
+     * confundir os dois que os pagamentos deste app sumiram dela em 758a992.
+     * Filtrar pelo id do caixa aqui devolveria lista vazia, calada.
+     */
+    let chave = caixaId;
+    if (daContabilidade) {
+      const razao = await this.razaoDoCaixa(caixaId, cfg);
+      if (razao === null) {
+        throw new ServiceUnavailableException(
+          `O caixa #${caixaId} não tem conta do razão no cadastro do IXC ` +
+            '(`contas.id_planejamento`), e é por ela que a movimentação se ' +
+            'liga a ele. Abra o cadastro da conta no IXC e informe o ' +
+            'planejamento dela.',
+        );
+      }
+      chave = razao;
+    }
+
     const brutos = await this.ixc.listAll<Record<string, unknown>>(
       tabela,
       {
         qtype: `${tabela}.${campos.caixa}`,
-        query: String(caixaId),
+        query: String(chave),
         oper: '=',
         sortname: `${tabela}.id`,
         sortorder: 'desc',
@@ -229,12 +261,26 @@ export class CaixaService {
         const data = parseIxcDate(raw[campos.data]);
         if (id === null || !data) return null;
 
-        const valor = parseIxcDecimal(raw[campos.valor]);
-        const cru = campos.tipo ? String(raw[campos.tipo] ?? '').trim() : '';
-        // Sem coluna de tipo, quem diz é o sinal do valor.
-        const saida = campos.tipo
-          ? /^(s|saída|saida)$/i.test(cru)
-          : valor < 0;
+        let valor: number;
+        let saida: boolean;
+
+        if (daContabilidade) {
+          /*
+           * Partida dobrada: caixa é conta de ativo, então o que entra é
+           * débito e o que sai é crédito. A linha preenche um lado só — a que
+           * não preenche nenhum não é movimento de dinheiro e cai fora.
+           */
+          const debito = parseIxcDecimal(raw.debito);
+          const credito = parseIxcDecimal(raw.credito);
+          if (Math.abs(debito) < 0.005 && Math.abs(credito) < 0.005) return null;
+          saida = Math.abs(credito) >= 0.005;
+          valor = saida ? credito : debito;
+        } else {
+          valor = parseIxcDecimal(raw[campos.valor]);
+          const cru = campos.tipo ? String(raw[campos.tipo] ?? '').trim() : '';
+          // Sem coluna de tipo, quem diz é o sinal do valor.
+          saida = campos.tipo ? /^(s|saída|saida)$/i.test(cru) : valor < 0;
+        }
 
         return {
           id,
@@ -249,6 +295,15 @@ export class CaixaService {
       .sort((a, b) => a.data.getTime() - b.data.getTime() || a.id - b.id);
 
     return { tabela, lancamentos };
+  }
+
+  /** A conta do razão de um caixa (`contas.id_planejamento`). */
+  private async razaoDoCaixa(
+    caixaId: number,
+    cfg: { caixaTabelaContas?: string },
+  ): Promise<number | null> {
+    const { caixas } = await this.listarCaixas(cfg.caixaTabelaContas);
+    return caixas.find((c) => c.id === caixaId)?.razaoId ?? null;
   }
 
   /**

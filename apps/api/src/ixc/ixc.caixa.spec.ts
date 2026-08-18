@@ -15,8 +15,33 @@ describe('mapCaixa / acharCaixaPorNome', () => {
   ];
 
   it('lê id, nome e tipo em qualquer das colunas conhecidas', () => {
-    expect(CAIXAS[0]).toEqual({ id: 18, nome: 'Banco Inter', tipo: 'Banco' });
-    expect(CAIXAS[2]).toEqual({ id: 31, nome: 'CX - Loja Centro', tipo: null });
+    expect(CAIXAS[0]).toEqual({
+      id: 18,
+      nome: 'Banco Inter',
+      tipo: 'Banco',
+      razaoId: null,
+    });
+    expect(CAIXAS[2]).toEqual({
+      id: 31,
+      nome: 'CX - Loja Centro',
+      tipo: null,
+      razaoId: null,
+    });
+  });
+
+  /*
+   * O razão é o que liga o caixa à movimentação financeira: a linha do
+   * dinheiro em `fn_movim_finan` traz `id_conta` com o planejamento da conta,
+   * e não com o id dela. Sem este campo a leitura do caixa procuraria pelo
+   * número errado e voltaria vazia, sem erro nenhum.
+   */
+  it('lê a conta do razão, quando o cadastro a traz', () => {
+    const comRazao = mapCaixa({
+      id: '18',
+      descricao: 'Conta ModoBank PIX',
+      id_planejamento: '12833',
+    })!;
+    expect(comRazao.razaoId).toBe(12833);
   });
 
   it('ignora registro sem id', () => {
