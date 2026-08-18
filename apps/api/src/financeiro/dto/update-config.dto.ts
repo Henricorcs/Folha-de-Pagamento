@@ -7,6 +7,7 @@ export class UpdateConfigFinanceiraDto {
   @IsOptional() @IsInt() @Min(1) contaContabilSalario?: number;
   @IsOptional() @IsInt() @Min(1) contaContabilAdiantamento?: number;
   @IsOptional() @IsInt() @Min(1) contaContabilBonus?: number;
+  @IsOptional() @IsInt() @Min(1) contaContabilFerias?: number;
   @IsOptional() @IsInt() @Min(1) contaContabilDiaria?: number;
   @IsOptional() @IsInt() @Min(1) contaContabilAvulso?: number;
   @IsOptional() @IsInt() @Min(1) cidadePadraoId?: number;
@@ -21,6 +22,7 @@ export class UpdateConfigFinanceiraDto {
   @IsOptional() @IsString() obsSalarioTemplate?: string;
   @IsOptional() @IsString() obsAdiantamentoTemplate?: string;
   @IsOptional() @IsString() obsBonusTemplate?: string;
+  @IsOptional() @IsString() obsFeriasTemplate?: string;
   // Filtro fornecedor → funcionário (vazio no campo = detecção automática)
   @IsOptional() @IsString() fornecedorCampoIcms?: string;
   @IsOptional() @IsString() fornecedorIcmsIsento?: string;

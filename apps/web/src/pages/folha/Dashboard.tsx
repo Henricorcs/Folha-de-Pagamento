@@ -50,6 +50,7 @@ const SERIES_CUSTO: SerieGrafico[] = [
 
 const SERIES_TIPO: SerieGrafico[] = [
   { chave: 'salario', rotulo: 'Salário', cor: PALETA[0] },
+  { chave: 'ferias', rotulo: 'Férias', cor: PALETA[5] },
   { chave: 'adiantamento', rotulo: 'Adiantamento', cor: PALETA[1] },
   { chave: 'bonus', rotulo: 'Bônus', cor: PALETA[2] },
   { chave: 'diaria', rotulo: 'Diária', cor: PALETA[3] },
@@ -66,6 +67,7 @@ const SERIES_TIPO: SerieGrafico[] = [
  */
 const COR_DO_TIPO: Partial<Record<TipoLancamento, string>> = {
   SALARIO: PALETA[0],
+  FERIAS: PALETA[5],
   ADIANTAMENTO: PALETA[1],
   BONUS: PALETA[2],
   DIARIA: PALETA[3],

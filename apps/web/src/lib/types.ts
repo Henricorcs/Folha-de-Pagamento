@@ -83,6 +83,8 @@ export interface VariavelMes {
 
 export type TipoLancamento =
   | 'SALARIO'
+  /** Pagamento de quem entrou de férias — entra no lugar do salário do mês */
+  | 'FERIAS'
   | 'ADIANTAMENTO'
   | 'BONUS'
   | 'DESCONTO'
@@ -277,7 +279,32 @@ export interface PreviewFuncionario {
   salarioJaGerado: ContaJaGerada | null;
   /** Conta de bônus que já existe nesta competência */
   bonusJaGerado: ContaJaGerada | null;
+  /** O que a folha sabe sobre as férias desta pessoa no mês trabalhado */
+  ferias: FeriasNaFolha;
   lancamentos: LancamentoCalculado[];
+}
+
+/**
+ * Férias da pessoa no mês trabalhado, e o que elas mudam na folha dela.
+ *
+ * Quem entra de férias não recebe salário naquele mês: recebe o valor que a
+ * contabilidade apurou. E não recebe o adiantamento do dia 25 — adiantamento é
+ * sobre o mês que se está trabalhando, e quem está de férias não está.
+ */
+export interface FeriasNaFolha {
+  /** Férias registradas na tela de Férias que alcançam o mês trabalhado */
+  periodo: { inicio: string; fim: string; dias: number } | null;
+  /** As férias pegam o dia 25 — o dia em que o adiantamento é pago */
+  noDia25: boolean;
+  /** Pagamento de férias que já saiu por este mês trabalhado */
+  jaGerado: ContaJaGerada | null;
+  /** Pelo que a folha sabe, esta pessoa está de férias neste mês */
+  deFerias: boolean;
+  /** Ponto de partida do valor; o certo vem da contabilidade */
+  valorSugerido: number;
+  /** Conta contábil e observação com que o lançamento de férias sai no IXC */
+  contaContabil: number;
+  observacao: string;
 }
 
 export interface ConfigFinanceira {
@@ -288,6 +315,8 @@ export interface ConfigFinanceira {
   contaContabilSalario: number;
   contaContabilAdiantamento: number;
   contaContabilBonus: number;
+  /** Férias. Nasce igual à de salário — confirme com a contabilidade */
+  contaContabilFerias: number;
   contaContabilDiaria: number;
   /** Pagamentos avulsos (mão de obra, serviço pontual, patrocínio) */
   contaContabilAvulso: number;
@@ -309,6 +338,7 @@ export interface ConfigFinanceira {
   obsSalarioTemplate: string;
   obsAdiantamentoTemplate: string;
   obsBonusTemplate: string;
+  obsFeriasTemplate: string;
   /** Campo do "Contribuinte ICMS" no fornecedor ("" = detectar automaticamente) */
   fornecedorCampoIcms: string;
   /** Valores desse campo que significam "Isento", separados por vírgula */

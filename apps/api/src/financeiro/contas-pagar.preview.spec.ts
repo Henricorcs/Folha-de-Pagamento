@@ -55,6 +55,8 @@ function montarServico(contas: ContaFake[]) {
           contas.filter((c) => c.tipo === where.tipo),
       ),
     },
+    // Ninguém de férias: quem responde por elas é o spec de férias na folha.
+    feriasMarcada: { findMany: jest.fn().mockResolvedValue([]) },
   } as any;
 
   const config = {
@@ -62,10 +64,12 @@ function montarServico(contas: ContaFake[]) {
       contaContabilSalario: 2420,
       contaContabilAdiantamento: 2662,
       contaContabilBonus: 13916,
+      contaContabilFerias: 2420,
       percentualAdiantamento: 40,
       obsSalarioTemplate: 'saldo salarial referente ao mês {competencia}',
       obsAdiantamentoTemplate: 'adiantamento',
       obsBonusTemplate: 'bônus referente ao mês {competencia}',
+      obsFeriasTemplate: 'férias referentes ao mês {competencia}',
     }),
   } as any;
 

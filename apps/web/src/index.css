@@ -53,6 +53,8 @@
   --serie-3: #0e9e91;
   --serie-4: #e11d48;
   --serie-5: #7c3aed;
+  /* Férias. Passa dos 3:1 nos dois fundos, por isso não troca no escuro. */
+  --serie-6: #16a34a;
 
   /*
    * O semáforo da conta. Também troca por tema: âmbar e verde vivos ficam

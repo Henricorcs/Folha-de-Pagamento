@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import {
   ContaPagar,
+  FeriasMarcada,
   OrigemLancamento,
   Prisma,
   StatusContaPagar,
@@ -36,8 +37,10 @@ import {
   type AcertoValeCompetencia,
 } from '../vales/vales.service';
 import {
+  baseParaFerias,
   calcularAdiantamento,
   competenciaAnterior,
+  competenciaSeguinte,
   detalharSalario,
   montarLancamentosFolha,
   renderObs,
@@ -62,6 +65,39 @@ export interface SituacaoAdiantamento {
   pagoEm: Date | null;
 }
 
+/**
+ * Férias da pessoa no mês trabalhado, e o que elas mudam na folha dela.
+ *
+ * Quem entra de férias não recebe salário naquele mês: recebe o valor que a
+ * contabilidade apurou. E não recebe o adiantamento do dia 25 — adiantamento é
+ * sobre o mês que se está trabalhando, e quem está de férias não está.
+ *
+ * Nada aqui decide sozinho: é o que a folha **sabe** sobre as férias, para a
+ * tela sugerir e explicar. Quem marca é quem gera a folha.
+ */
+export interface FeriasNaFolha {
+  /**
+   * Férias registradas na tela de Férias que alcançam o mês trabalhado.
+   * null = ninguém registrou nada (o que não impede marcar à mão).
+   */
+  periodo: { inicio: Date; fim: Date; dias: number } | null;
+  /** As férias pegam o dia 25 — o dia em que o adiantamento é pago. */
+  noDia25: boolean;
+  /** Pagamento de férias que já saiu por este mês trabalhado. */
+  jaGerado: ContaJaGerada | null;
+  /**
+   * Pelo que a folha sabe, esta pessoa está de férias neste mês: ou as férias
+   * pegam o dia 25, ou o pagamento delas já foi gerado. É o que faz o dia 25
+   * nascer desmarcado.
+   */
+  deFerias: boolean;
+  /** Ponto de partida do valor; o certo vem da contabilidade (ver `baseParaFerias`). */
+  valorSugerido: number;
+  /** Conta contábil e observação com que o lançamento de férias sai no IXC. */
+  contaContabil: number;
+  observacao: string;
+}
+
 export interface PreviewFuncionario {
   funcionarioId: string;
   nome: string;
@@ -79,6 +115,8 @@ export interface PreviewFuncionario {
   salarioJaGerado: ContaJaGerada | null;
   /** Conta de BÔNUS que já existe nesta competência (null = ainda não). */
   bonusJaGerado: ContaJaGerada | null;
+  /** O que a folha sabe sobre as férias desta pessoa no mês trabalhado. */
+  ferias: FeriasNaFolha;
   lancamentos: LancamentoCalculado[];
 }
 
@@ -161,7 +199,13 @@ export class ContasPagarService {
     // Salário e bônus se referem ao mês trabalhado (o anterior); só o
     // adiantamento do dia 25 fala do mês corrente. Vendas e horas extras são
     // do mês trabalhado; a parcela do vale é do mês em que se paga.
-    const mesTrabalhado = competenciaAnterior(dto.competencia);
+    //
+    // A tela manda o mês trabalhado por escrito porque no dia 25 ele **é** a
+    // competência (o adiantamento é pago dentro do próprio mês). Sem isso, os
+    // dois pagamentos do mesmo mês trabalhado não se enxergariam — e é
+    // justamente o que faz o dia 25 saber quem já recebeu férias.
+    const mesTrabalhado =
+      dto.mesTrabalhado ?? competenciaAnterior(dto.competencia);
 
     const funcionarios = await this.prisma.funcionario.findMany({
       where,
@@ -208,6 +252,17 @@ export class ContasPagarService {
       ids,
       TipoLancamento.BONUS,
     );
+    // Pagamento de férias deste mês trabalhado. Ele sai na folha do quinto dia
+    // (o mês trabalhado paga no seguinte), e é por isso que a busca é sempre no
+    // mês de pagamento — inclusive quando quem pergunta é a folha do dia 25.
+    const contasFerias = await this.contasPorTipo(
+      competenciaSeguinte(mesTrabalhado),
+      ids,
+      TipoLancamento.FERIAS,
+    );
+    // Quem a tela de Férias já mandou para férias dentro deste mês.
+    const feriasMarcadas = await this.feriasDoMes(mesTrabalhado, ids);
+
     // Vales e acertos só mexem no salário; no dia 25 não há o que abater.
     const acertosVale: Map<string, AcertoValeCompetencia> =
       (dto.incluirSalario ?? true)
@@ -255,6 +310,7 @@ export class ContasPagarService {
         dados,
         cfg.percentualAdiantamento,
       );
+      const composicao = detalharSalario(dados, cfg.percentualAdiantamento);
 
       return {
         funcionarioId: f.id,
@@ -271,13 +327,60 @@ export class ContasPagarService {
                 contasDia25.get(f.id) ?? null,
               )
             : null,
-        composicao: detalharSalario(dados, cfg.percentualAdiantamento),
+        composicao,
         vales: vale?.parcelas ?? [],
         salarioJaGerado: montarContaJaGerada(contasSalario.get(f.id) ?? null),
         bonusJaGerado: montarContaJaGerada(contasBonus.get(f.id) ?? null),
+        ferias: montarFeriasNaFolha({
+          marcada: feriasMarcadas.get(f.id) ?? null,
+          jaGerado: montarContaJaGerada(contasFerias.get(f.id) ?? null),
+          mesTrabalhado,
+          composicao,
+          contaContabil: cfg.contaContabilFerias,
+          observacao: renderObs(cfg.obsFeriasTemplate, mesTrabalhado),
+        }),
         lancamentos,
       };
     });
+  }
+
+  /**
+   * Quem, entre estes funcionários, está de férias em algum dia do mês
+   * trabalhado, pelo que a tela de Férias registrou.
+   *
+   * Só acha quem tem o cadastro daqui ligado ao registro de férias — o
+   * relatório da contabilidade não traz CPF, e o vínculo é feito pelo nome.
+   * Sem vínculo a folha simplesmente não sabe, e quem gera marca à mão.
+   */
+  private async feriasDoMes(
+    mesTrabalhado: string,
+    funcionarioIds: string[],
+  ): Promise<Map<string, FeriasMarcada>> {
+    if (funcionarioIds.length === 0) return new Map();
+    const { primeiroDia, ultimoDia } = limitesDoMes(mesTrabalhado);
+
+    // Pega tudo que encosta no mês: quem sai dia 28 e volta em setembro está
+    // de férias em agosto do mesmo jeito que quem passou o mês inteiro fora.
+    const marcadas = await this.prisma.feriasMarcada.findMany({
+      where: {
+        funcionarioId: { in: funcionarioIds },
+        inicio: { lte: ultimoDia },
+        fim: { gte: primeiroDia },
+      },
+      orderBy: { inicio: 'asc' },
+    });
+
+    const mapa = new Map<string, FeriasMarcada>();
+    for (const m of marcadas) {
+      if (!m.funcionarioId) continue;
+      const atual = mapa.get(m.funcionarioId);
+      // Havendo mais de um período no mesmo mês, o que pega o dia 25 manda: é
+      // ele que responde pelo adiantamento.
+      if (!atual || (pegaODia25(m, mesTrabalhado) && !pegaODia25(atual, mesTrabalhado))) {
+        mapa.set(m.funcionarioId, m);
+      }
+    }
+    return mapa;
   }
 
   /** Conta a pagar daquele tipo, por funcionário, na competência. */
@@ -459,6 +562,11 @@ export class ContasPagarService {
    * Fecha as parcelas de vale que entraram nos salários recém-gerados,
    * guardando qual conta consumiu cada uma. A partir daí a parcela sai do
    * cálculo — gerar a folha de novo não desconta o mesmo vale duas vezes.
+   *
+   * Só o salário baixa vale. Férias não: o valor delas é o que a contabilidade
+   * apurou, digitado à mão, e não tem o vale dentro — dar baixa ali quitaria
+   * uma parcela que ninguém pagou. Ela fica em aberto para a folha seguinte,
+   * que é quando a pessoa volta a receber salário.
    */
   private async baixarParcelasDeVale(contas: ContaPagar[]): Promise<void> {
     for (const c of contas) {
@@ -1396,6 +1504,63 @@ export function montarSituacaoAdiantamento(
   };
 }
 
+/** Primeiro e último dia de "AAAA-MM", em UTC — data de férias é dia, não instante. */
+export function limitesDoMes(competencia: string): {
+  primeiroDia: Date;
+  ultimoDia: Date;
+} {
+  const [ano, mes] = competencia.split('-').map(Number);
+  return {
+    primeiroDia: new Date(Date.UTC(ano, mes - 1, 1)),
+    // Dia 0 do mês seguinte é o último deste; o fim do dia entra porque as
+    // férias que terminam no dia 1º ainda são férias no dia 1º.
+    ultimoDia: new Date(Date.UTC(ano, mes, 0, 23, 59, 59, 999)),
+  };
+}
+
+/** O período de férias pega o dia 25 daquele mês — o dia do adiantamento. */
+export function pegaODia25(
+  ferias: { inicio: Date; fim: Date },
+  competencia: string,
+): boolean {
+  const [ano, mes] = competencia.split('-').map(Number);
+  const dia25 = new Date(Date.UTC(ano, mes - 1, 25));
+  return ferias.inicio.getTime() <= dia25.getTime() &&
+    ferias.fim.getTime() >= dia25.getTime();
+}
+
+/**
+ * O que a folha sabe das férias de uma pessoa naquele mês trabalhado.
+ *
+ * "Está de férias" aqui é o que dá para provar: ou a tela de Férias registrou
+ * um período que pega o dia 25, ou o pagamento das férias já saiu. Férias que
+ * começam depois do dia 25 aparecem como aviso (o período vem preenchido), mas
+ * não tiram o adiantamento — nesse mês a pessoa trabalhou até o dia 25.
+ */
+export function montarFeriasNaFolha(dados: {
+  marcada: { inicio: Date; fim: Date; dias: number } | null;
+  jaGerado: ContaJaGerada | null;
+  mesTrabalhado: string;
+  composicao: ComposicaoSalario;
+  contaContabil: number;
+  observacao: string;
+}): FeriasNaFolha {
+  const { marcada, jaGerado, mesTrabalhado } = dados;
+  const noDia25 = marcada ? pegaODia25(marcada, mesTrabalhado) : false;
+
+  return {
+    periodo: marcada
+      ? { inicio: marcada.inicio, fim: marcada.fim, dias: marcada.dias }
+      : null,
+    noDia25,
+    jaGerado,
+    deFerias: noDia25 || jaGerado !== null,
+    valorSugerido: baseParaFerias(dados.composicao),
+    contaContabil: dados.contaContabil,
+    observacao: dados.observacao,
+  };
+}
+
 /** Como o IXC vê a conta agora. */
 export interface SituacaoNoIxc {
   pago: boolean;
@@ -1452,11 +1617,14 @@ function contaContabilPorTipo(
     contaContabilSalario: number;
     contaContabilAdiantamento: number;
     contaContabilBonus: number;
+    contaContabilFerias: number;
     contaContabilDiaria: number;
     contaContabilAvulso: number;
   },
 ): number {
   switch (tipo) {
+    case TipoLancamento.FERIAS:
+      return cfg.contaContabilFerias;
     case TipoLancamento.ADIANTAMENTO:
       return cfg.contaContabilAdiantamento;
     case TipoLancamento.BONUS:
@@ -1477,13 +1645,16 @@ function obsPorTipo(
     obsSalarioTemplate: string;
     obsAdiantamentoTemplate: string;
     obsBonusTemplate: string;
+    obsFeriasTemplate: string;
   },
 ): string {
   const comp = competencia ?? '';
-  // Adiantamento é do mês corrente; salário e bônus, do mês trabalhado.
+  // Adiantamento é do mês corrente; salário, bônus e férias, do mês trabalhado.
   switch (tipo) {
     case TipoLancamento.ADIANTAMENTO:
       return renderObs(cfg.obsAdiantamentoTemplate, comp);
+    case TipoLancamento.FERIAS:
+      return renderObs(cfg.obsFeriasTemplate, competenciaAnterior(comp));
     case TipoLancamento.BONUS:
       return renderObs(cfg.obsBonusTemplate, competenciaAnterior(comp));
     default:

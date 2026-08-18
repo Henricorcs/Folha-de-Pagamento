@@ -18,6 +18,7 @@ import type {
   ComposicaoSalario,
   ContaJaGerada,
   ContaPagar,
+  FeriasNaFolha,
   LancamentoCalculado,
   ParcelaValeFolha,
   PreviewFuncionario,
@@ -53,6 +54,48 @@ interface ItemGerar extends LancamentoCalculado {
    * contabilidade já cuida disso; ligar é uma escolha de quem gera a folha.
    */
   descontarAdiantamento: boolean;
+  /**
+   * Este lançamento sai como **férias** no lugar do salário. Só a linha de
+   * salário chega a ligar isto: férias substituem o salário do mês, com conta
+   * contábil e observação próprias, e o valor deixa de ser o saldo salarial —
+   * passa a ser o que a contabilidade apurou, digitado aqui.
+   */
+  ferias: boolean;
+  /** O que a folha sabe das férias desta pessoa no mês trabalhado. */
+  feriasInfo: FeriasNaFolha;
+}
+
+/** O tipo com que a linha vai para o IXC — férias entram no lugar do salário. */
+function tipoGerado(it: ItemGerar): TipoLancamento {
+  return it.ferias ? 'FERIAS' : it.tipo;
+}
+
+/** A conta contábil da linha; férias podem ter a sua própria. */
+function contaContabilGerada(it: ItemGerar): number {
+  return it.ferias ? it.feriasInfo.contaContabil : it.contaContabil;
+}
+
+/**
+ * A observação que a pessoa vê no IXC. A de férias sai limpa: comissão, hora
+ * extra e vale não entram num pagamento de férias, e o texto do salário os
+ * descreveria.
+ */
+function observacaoGerada(it: ItemGerar): string {
+  return it.ferias ? it.feriasInfo.observacao : it.observacao;
+}
+
+/** O pagamento que já existe para esta linha — o de férias quando ela é férias. */
+function jaGeradoDoItem(it: ItemGerar): ContaJaGerada | null {
+  return it.ferias ? it.feriasInfo.jaGerado : it.jaGerado;
+}
+
+/**
+ * O pagamento do **outro** tipo que já saiu no lugar deste. De férias é o
+ * salário: se ele já foi pago neste mês, pagar as férias por cima paga o mesmo
+ * mês duas vezes, e o aviso tem de aparecer mesmo com a linha valendo férias.
+ */
+function tambemJaGerado(it: ItemGerar): ContaJaGerada | null {
+  return it.ferias ? it.jaGerado : null;
 }
 
 function arredondar(n: number): number {
@@ -136,7 +179,37 @@ interface Grupo {
   /** Dá para escolher abater o dia 25 desta pessoa nesta prévia? */
   temOpcaoDia25: boolean;
   descontarAdiantamento: boolean;
+  /** Esta pessoa está sendo paga como férias nesta prévia. */
+  ferias: boolean;
+  /** O que a folha sabe das férias dela no mês trabalhado. */
+  feriasInfo: FeriasNaFolha;
   reparto: RepartoDia25;
+}
+
+/**
+ * Dá para escolher abater o dia 25 desta pessoa? Só quando há adiantamento
+ * apurado e algum pagamento de onde tirá-lo. Estando de férias, não: quem está
+ * de férias não recebeu o dia 25, e não há o que abater.
+ */
+function podeEscolherDia25(
+  g: Pick<Grupo, 'composicao' | 'salarioIdx' | 'bonusIdx' | 'ferias'>,
+): boolean {
+  return (
+    !g.ferias &&
+    g.composicao.adiantamento > 0 &&
+    (g.salarioIdx !== null || g.bonusIdx !== null)
+  );
+}
+
+/**
+ * O valor cheio da linha que ocupa o lugar do salário. De férias é o que a
+ * contabilidade apurou (só um ponto de partida, editável na tela); fora delas,
+ * o saldo salarial sem nenhum abatimento do dia 25.
+ */
+function cheioDoSalario(
+  g: Pick<Grupo, 'composicao' | 'ferias' | 'feriasInfo'>,
+): number {
+  return g.ferias ? g.feriasInfo.valorSugerido : salarioCheio(g.composicao);
 }
 
 /** Quanto do dia 25 está mesmo saindo — sem contar o que ficou a descoberto. */
@@ -154,13 +227,15 @@ function repartoDoGrupo(
     | 'bonusIdx'
     | 'temOpcaoDia25'
     | 'descontarAdiantamento'
+    | 'ferias'
+    | 'feriasInfo'
   >,
 ): RepartoDia25 {
   const total =
     g.temOpcaoDia25 && g.descontarAdiantamento ? g.composicao.adiantamento : 0;
   return repartirDia25(
     total,
-    g.salarioIdx === null ? null : salarioCheio(g.composicao),
+    g.salarioIdx === null ? null : cheioDoSalario(g),
     g.bonusIdx === null ? null : itens[g.bonusIdx].valorOriginal,
   );
 }
@@ -267,6 +342,81 @@ function Regua({ c, reparto }: { c: ComposicaoSalario; reparto: RepartoDia25 }) 
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A escolha de pagar férias no lugar do salário.
+ *
+ * Quem entra de férias não recebe o salário do mês: recebe o que a
+ * contabilidade apurou das férias, que não tem relação com o saldo salarial
+ * daqui — nem comissão, nem hora extra, nem vale entram nele. Por isso ligar
+ * esta opção troca o lançamento inteiro (tipo, conta contábil e observação) e
+ * deixa o valor por conta de quem gera a folha.
+ *
+ * Ela aparece para todo mundo que tem salário na prévia, e não só para quem a
+ * tela de Férias conhece: o registro das férias depende do PDF da
+ * contabilidade, e quem entrou de férias ontem precisa ser pago hoje.
+ */
+function OpcaoFerias({
+  grupo,
+  onChange,
+}: {
+  grupo: Grupo;
+  onChange: (ferias: boolean) => void;
+}) {
+  if (grupo.salarioIdx === null) return null;
+  const { feriasInfo, ferias } = grupo;
+  const periodo = feriasInfo.periodo;
+
+  return (
+    <div className="mb-4 rounded-lg bg-papel px-3 py-2 ring-1 ring-tinta-100">
+      <label className="flex flex-wrap items-center gap-2 text-xs text-tinta-600">
+        <input
+          type="checkbox"
+          className="accent-brand-600"
+          checked={ferias}
+          onChange={(e) => onChange(e.target.checked)}
+        />
+        Esta pessoa está de férias — pagar{' '}
+        <strong className="text-tinta-900">férias</strong> no lugar do salário
+        {ferias && (
+          <Selo tom="info" pequeno>
+            sai como férias
+          </Selo>
+        )}
+        {periodo && (
+          <span className="text-tinta-400">
+            registradas de {formatData(periodo.inicio)} a{' '}
+            {formatData(periodo.fim)} ({periodo.dias} dias)
+          </span>
+        )}
+      </label>
+
+      {ferias ? (
+        <p className="mt-1.5 pl-6 text-[11px] leading-relaxed text-tinta-500">
+          O valor é o que a contabilidade apurou —{' '}
+          <strong className="text-tinta-700">digite-o no campo abaixo</strong>. O
+          que está lá é só um ponto de partida. Comissão, hora extra e vale não
+          entram num pagamento de férias, e o adiantamento do dia 25 sai de cena:
+          quem está de férias não o recebe.
+        </p>
+      ) : (
+        <p className="mt-1.5 pl-6 text-[11px] leading-relaxed text-tinta-400">
+          Marque quando a pessoa saiu de férias neste mês: o lançamento passa a
+          ser de férias no IXC, com a conta contábil e a observação de férias, e
+          ela deixa de receber o adiantamento do dia 25.
+        </p>
+      )}
+
+      {ferias && grupo.composicao.vales > 0 && (
+        <p className="mt-1.5 pl-6 text-[11px] leading-relaxed text-amber-700">
+          O vale deste mês ({formatBRL(grupo.composicao.vales)}) não é abatido
+          das férias e a parcela continua em aberto — ela volta na próxima folha,
+          quando a pessoa voltar a receber salário.
+        </p>
+      )}
     </div>
   );
 }
@@ -417,6 +567,41 @@ function SeloJaGerado({
 }
 
 /**
+ * Diz que a pessoa está de férias — e, no dia 25, por que ela veio desmarcada.
+ *
+ * "De férias" aqui é o que a folha consegue provar: ou a tela de Férias
+ * registrou um período que pega o dia 25, ou o pagamento das férias já saiu.
+ * Nos dois casos o adiantamento não é devido; no quinto dia o selo só lembra
+ * que aquele salário virou pagamento de férias.
+ */
+function SeloFerias({
+  modo,
+  ferias,
+}: {
+  modo: ModoPagamento;
+  ferias: FeriasNaFolha;
+}) {
+  if (!ferias.deFerias) return null;
+  const periodo = ferias.periodo;
+  const quando = periodo
+    ? ` (${formatData(periodo.inicio)} a ${formatData(periodo.fim)})`
+    : '';
+  return (
+    <Selo
+      pequeno
+      tom="info"
+      titulo={
+        modo === 'DIA_25'
+          ? `Está de férias${quando} — adiantamento é sobre o mês que se está trabalhando, e quem está de férias não está. Marque só se a empresa for adiantar mesmo assim.`
+          : `Está de férias${quando} — o salário do mês sai como pagamento de férias, no valor que a contabilidade apurou.`
+      }
+    >
+      de férias{modo === 'DIA_25' ? ' · não recebe o dia 25' : ''}
+    </Selo>
+  );
+}
+
+/**
  * Diz se o adiantamento do dia 25 daquela pessoa já saiu. No quinto dia é o
  * que justifica (ou desmente) o desconto no salário; no dia 25 serve de aviso
  * para não gerar o mesmo pagamento duas vezes.
@@ -489,6 +674,45 @@ function SeloAdiantamento({
 /** Os dois pagamentos do mês. */
 type ModoPagamento = 'DIA_25' | 'QUINTO_DIA';
 
+/**
+ * O aviso que abre a prévia: o que já saiu e quem está de férias. As duas
+ * coisas explicam linhas que nascem desmarcadas, e sem elas a folha parece ter
+ * esquecido gente.
+ */
+function montarAviso(
+  modo: ModoPagamento,
+  pessoas: PreviewFuncionario[],
+  itens: ItemGerar[],
+): string | null {
+  if (itens.length === 0) {
+    return modo === 'DIA_25'
+      ? 'Ninguém está marcado para receber adiantamento no dia 25.'
+      : 'Nenhum salário ou bônus a gerar neste mês trabalhado.';
+  }
+
+  const avisos: string[] = [];
+  const deFerias = pessoas.filter((p) => p.ferias.deFerias).length;
+  if (deFerias > 0) {
+    avisos.push(
+      modo === 'DIA_25'
+        ? `${deFerias} pessoa(s) de férias vieram desmarcadas: quem está de férias não recebe adiantamento.`
+        : `${deFerias} pessoa(s) de férias — o salário delas já veio como pagamento de férias. Confira o valor com a contabilidade antes de gerar.`,
+    );
+  }
+
+  // Fora as de férias, que o aviso acima já explica.
+  const jaGerados = itens.filter(
+    (i) => !i.selecionado && (jaGeradoDoItem(i) || tambemJaGerado(i)),
+  ).length;
+  if (jaGerados > 0) {
+    avisos.push(
+      `${jaGerados} pagamento(s) já existem nesta folha e vieram desmarcados — marque só se quiser mesmo gerar de novo.`,
+    );
+  }
+
+  return avisos.length > 0 ? avisos.join(' ') : null;
+}
+
 /** Perto do dia 25 a folha provável é a do adiantamento. */
 function modoInicial(): ModoPagamento {
   return new Date().getDate() >= 20 ? 'DIA_25' : 'QUINTO_DIA';
@@ -534,6 +758,10 @@ export function Folha() {
       // adiantamento descontado de quem recebeu) mais os bônus.
       const body = {
         competencia,
+        // Sem ele a API deduz o mês trabalhado da competência, o que só vale
+        // no quinto dia; no dia 25 os dois são o mesmo mês, e é por aqui que a
+        // folha do dia 25 reconhece quem já recebeu férias.
+        mesTrabalhado,
         incluirAdiantamento: modo === 'DIA_25',
         incluirSalario: modo === 'QUINTO_DIA',
         incluirBonus: modo === 'QUINTO_DIA',
@@ -551,25 +779,44 @@ export function Folha() {
         // quem tem, não — a contabilidade cuida disso, então aqui a opção
         // nasce desligada.
         const descontarAdiantamento = f.composicao.adiantamentoDescontado > 0;
+        // Quem a folha sabe estar de férias já vem marcado: o salário do mês
+        // nasce como pagamento de férias, e o dia 25 sai de cena.
+        const ferias = temSalario && f.ferias.deFerias;
         const temOpcaoDia25 =
-          f.composicao.adiantamento > 0 && (temSalario || !!bonus);
+          !ferias && f.composicao.adiantamento > 0 && (temSalario || !!bonus);
         const reparto = repartirDia25(
           temOpcaoDia25 && descontarAdiantamento ? f.composicao.adiantamento : 0,
-          temSalario ? salarioCheio(f.composicao) : null,
+          temSalario
+            ? cheioDoSalario({
+                composicao: f.composicao,
+                ferias,
+                feriasInfo: f.ferias,
+              })
+            : null,
           bonus ? bonus.valor : null,
         );
 
         for (const l of f.lancamentos) {
+          const ehFerias = ferias && l.tipo === 'SALARIO';
           // Pagamento que já existe na competência vem desmarcado: o certo é
-          // conferir em Contas a Pagar antes de gerar outro. Vale para os três
-          // — salário, bônus e dia 25 —, cada um olhando a sua própria conta.
+          // conferir em Contas a Pagar antes de gerar outro. Vale para os
+          // quatro — salário, férias, bônus e dia 25 —, cada um olhando a sua
+          // própria conta. `jaGerado` guarda sempre a do tipo original; a de
+          // férias vem de `feriasInfo`, e assim as duas continuam à vista.
           const jaGerado = jaGeradoDoLancamento(l.tipo, f);
+          // Nesta linha, o que já saiu é o pagamento de férias.
+          const feriasJaPagas = ehFerias && f.ferias.jaGerado !== null;
+          // De férias não se adianta salário: o dia 25 nasce desmarcado, do
+          // mesmo jeito que o pagamento que já saiu.
+          const semDia25 = l.tipo === 'ADIANTAMENTO' && f.ferias.deFerias;
           const item: ItemGerar = {
             ...l,
             funcionarioId: f.funcionarioId,
             nome: f.nome,
             apelido: f.apelido,
-            selecionado: !jaGerado,
+            // Salário já pago também desmarca a linha de férias: os dois
+            // pagam o mesmo mês.
+            selecionado: !jaGerado && !feriasJaPagas && !semDia25,
             carteiraAssinada: f.carteiraAssinada,
             adiantamento: f.adiantamento,
             composicao: f.composicao,
@@ -577,21 +824,14 @@ export function Folha() {
             jaGerado,
             valorOriginal: l.valor,
             descontarAdiantamento,
+            ferias: ehFerias,
+            feriasInfo: f.ferias,
           };
           flat.push({ ...item, valor: valorComDia25(item, reparto) });
         }
       }
       setItens(flat);
-      const jaGerados = flat.filter((i) => !i.selecionado).length;
-      setFeedback(
-        flat.length === 0
-          ? modo === 'DIA_25'
-            ? 'Ninguém está marcado para receber adiantamento no dia 25.'
-            : 'Nenhum salário ou bônus a gerar neste mês trabalhado.'
-          : jaGerados > 0
-            ? `${jaGerados} pagamento(s) já existem nesta folha e vieram desmarcados — marque só se quiser mesmo gerar de novo.`
-            : null,
-      );
+      setFeedback(montarAviso(modo, data, flat));
     },
     onError: (err) => setFeedback(mensagemErro(err)),
   });
@@ -602,10 +842,13 @@ export function Folha() {
       const body = {
         itens: selecionados.map((i) => ({
           funcionarioId: i.funcionarioId,
-          tipo: i.tipo,
+          // Férias vão ao IXC como férias: tipo, conta contábil e observação
+          // próprias. Era isso que fazia um pagamento de férias ficar gravado
+          // como salário só porque o valor tinha sido trocado na mão.
+          tipo: tipoGerado(i),
           valor: i.valor,
-          contaContabil: i.contaContabil,
-          observacao: i.observacao,
+          contaContabil: contaContabilGerada(i),
+          observacao: observacaoGerada(i),
           competencia,
         })),
       };
@@ -644,21 +887,23 @@ export function Folha() {
         bonusIdx: null,
         temOpcaoDia25: false,
         descontarAdiantamento: it.descontarAdiantamento,
+        ferias: false,
+        feriasInfo: it.feriasInfo,
         reparto: repartirDia25(0, null, null),
       };
       grupo.indices.push(idx);
       if (it.tipo === 'SALARIO') grupo.salarioIdx = idx;
       if (it.tipo === 'BONUS') grupo.bonusIdx = idx;
+      // Só a linha de salário carrega a marca; ela é que vira férias.
+      if (it.ferias) grupo.ferias = true;
       porFuncionario.set(it.funcionarioId, grupo);
     });
 
     const lista = [...porFuncionario.values()];
     for (const g of lista) {
       // No modo dia 25 a lista só tem adiantamentos: não há de onde abater, e
-      // a opção nem aparece.
-      g.temOpcaoDia25 =
-        g.composicao.adiantamento > 0 &&
-        (g.salarioIdx !== null || g.bonusIdx !== null);
+      // a opção nem aparece. De férias também não — ver `podeEscolherDia25`.
+      g.temOpcaoDia25 = podeEscolherDia25(g);
       g.reparto = repartoDoGrupo(itens, g);
     }
     return lista;
@@ -676,6 +921,14 @@ export function Folha() {
         `${g.nome} ${g.apelido ?? ''}`.toLowerCase().includes(procurado),
       )
     : grupos;
+
+  /**
+   * Quem tem salário nesta prévia — só nessas pessoas faz sentido trocar o
+   * salário por férias. No dia 25 a lista é vazia, e a barra some.
+   */
+  const comSalario = grupos.filter((g) => g.salarioIdx !== null);
+  const comSalarioVisivel = gruposVisiveis.filter((g) => g.salarioIdx !== null);
+  const deFerias = comSalario.filter((g) => g.ferias);
 
   /** Marca (ou desmarca) tudo que está à vista agora. */
   function marcarVisiveis(marcar: boolean) {
@@ -714,6 +967,48 @@ export function Folha() {
         if (!reparto) return it;
         const atualizado = { ...it, descontarAdiantamento: descontar };
         return { ...atualizado, valor: valorComDia25(atualizado, reparto) };
+      });
+    });
+  }
+  /**
+   * Liga/desliga o pagamento de férias das pessoas indicadas: a linha de
+   * salário passa a sair como férias, com a conta contábil e a observação de
+   * férias, e o valor vira o que a contabilidade apurou — para ser conferido e
+   * corrigido no campo. O dia 25 deixa de ser abatido junto: quem está de
+   * férias não o recebeu.
+   */
+  function marcarFerias(alvos: Grupo[], ferias: boolean) {
+    const comSalario = alvos.filter((g) => g.salarioIdx !== null);
+    if (comSalario.length === 0) return;
+    const alvo = new Set(comSalario.map((g) => g.funcionarioId));
+    setItens((prev) => {
+      const repartos = new Map(
+        comSalario.map((g) => {
+          const depois = { ...g, ferias };
+          return [
+            g.funcionarioId,
+            repartoDoGrupo(prev, {
+              ...depois,
+              temOpcaoDia25: podeEscolherDia25(depois),
+            }),
+          ];
+        }),
+      );
+      return prev.map((it) => {
+        const reparto = repartos.get(it.funcionarioId);
+        if (!reparto || !alvo.has(it.funcionarioId)) return it;
+        const atualizado = { ...it, ferias: ferias && it.tipo === 'SALARIO' };
+        return {
+          ...atualizado,
+          valor: valorComDia25(atualizado, reparto),
+          // Se o pagamento de férias já saiu, a linha se desmarca sozinha —
+          // como qualquer outro que já existe. Marcar de volta é escolha de
+          // quem gera; por isso ela nunca se remarca sozinha.
+          selecionado:
+            atualizado.selecionado &&
+            !jaGeradoDoItem(atualizado) &&
+            !tambemJaGerado(atualizado),
+        };
       });
     });
   }
@@ -886,6 +1181,49 @@ export function Folha() {
         </div>
       )}
 
+      {comSalarioVisivel.length > 0 && (
+        <div className="surgir card mb-6 flex flex-wrap items-center gap-3 p-4 text-sm text-tinta-600">
+          <span>
+            Férias{' '}
+            {procurado ? (
+              <>
+                nos{' '}
+                <strong className="num text-tinta-900">
+                  {comSalarioVisivel.length}
+                </strong>{' '}
+                encontrado(s)
+              </>
+            ) : (
+              <>
+                em{' '}
+                <strong className="num text-tinta-900">{deFerias.length}</strong>{' '}
+                de {comSalario.length} pessoa(s)
+              </>
+            )}
+            :
+          </span>
+          <button
+            onClick={() => marcarFerias(comSalarioVisivel, true)}
+            className="btn btn-neutro btn-p"
+          >
+            {procurado
+              ? `Marcar os ${comSalarioVisivel.length} como férias`
+              : 'Marcar todos como férias'}
+          </button>
+          <button
+            onClick={() => marcarFerias(comSalarioVisivel, false)}
+            className="btn btn-neutro btn-p"
+          >
+            {procurado ? 'Tirar de férias' : 'Ninguém de férias'}
+          </button>
+          <span className="text-xs text-tinta-400">
+            {procurado
+              ? 'Os botões valem só para quem a busca está mostrando — é assim que se marca uma pessoa só.'
+              : 'Busque a pessoa acima para marcar só ela, ou abra a linha dela e marque ali. Férias saem no lugar do salário, com o valor que a contabilidade apurou.'}
+          </span>
+        </div>
+      )}
+
       {itens.length > 0 && (
         <div className="surgir surgir-2 card overflow-hidden">
           <div className="overflow-x-auto rolagem-fina">
@@ -955,27 +1293,39 @@ export function Folha() {
                           )}
                           <span className="text-[11px] uppercase tracking-wider text-tinta-400">
                             {g.indices
-                              .map((i) => TIPO_LABEL[itens[i].tipo])
+                              .map((i) => TIPO_LABEL[tipoGerado(itens[i])])
                               .join(' · ')}
                           </span>
+                          <SeloFerias modo={modo} ferias={g.feriasInfo} />
                           <SeloAdiantamento
                             modo={modo}
                             adiantamento={g.adiantamento}
                             abatido={abatidoDia25(g.reparto)}
                           />
-                          {/* O dia 25 já tem o selo acima; aqui ficam salário
-                              e bônus que já saíram nesta competência. */}
+                          {/* O dia 25 já tem o selo acima; aqui ficam salário,
+                              férias e bônus que já saíram nesta competência. */}
                           {g.indices
                             .filter(
                               (i) =>
                                 itens[i].tipo !== 'ADIANTAMENTO' &&
-                                itens[i].jaGerado,
+                                jaGeradoDoItem(itens[i]),
                             )
                             .map((i) => (
                               <SeloJaGerado
                                 key={i}
+                                tipo={tipoGerado(itens[i])}
+                                conta={jaGeradoDoItem(itens[i])}
+                              />
+                            ))}
+                          {/* De férias, o salário já pago continua aparecendo:
+                              os dois pagam o mesmo mês. */}
+                          {g.indices
+                            .filter((i) => tambemJaGerado(itens[i]))
+                            .map((i) => (
+                              <SeloJaGerado
+                                key={`tambem-${i}`}
                                 tipo={itens[i].tipo}
-                                conta={itens[i].jaGerado}
+                                conta={tambemJaGerado(itens[i])}
                               />
                             ))}
                         </div>
@@ -990,7 +1340,10 @@ export function Folha() {
                     {aberto && (
                       <tr>
                         <td colSpan={3} className="bg-tinta-50/80 px-5 pb-5 pt-4">
-                          {temSalario && (
+                          {/* De férias a régua não explica mais nada: o valor
+                              não é o saldo salarial, é o que a contabilidade
+                              apurou. */}
+                          {temSalario && !g.ferias && (
                             <>
                               <Regua c={g.composicao} reparto={g.reparto} />
                               <ValesJaBaixados
@@ -998,6 +1351,10 @@ export function Folha() {
                               />
                             </>
                           )}
+                          <OpcaoFerias
+                            grupo={g}
+                            onChange={(ferias) => marcarFerias([g], ferias)}
+                          />
                           <OpcaoDia25
                             grupo={g}
                             onChange={(descontar) =>
@@ -1044,14 +1401,27 @@ export function Folha() {
                                     <td className="td !py-2.5">
                                       <div className="flex flex-wrap items-center gap-1.5">
                                         <span className="font-medium text-tinta-800">
-                                          {TIPO_LABEL[it.tipo]}
+                                          {TIPO_LABEL[tipoGerado(it)]}
                                         </span>
                                         {/* Junto da caixa de seleção, para a
                                             linha desmarcada se explicar. */}
                                         <SeloJaGerado
-                                          tipo={it.tipo}
-                                          conta={it.jaGerado}
+                                          tipo={tipoGerado(it)}
+                                          conta={jaGeradoDoItem(it)}
                                         />
+                                        <SeloJaGerado
+                                          tipo={it.tipo}
+                                          conta={tambemJaGerado(it)}
+                                        />
+                                        {it.ferias && (
+                                          <Selo
+                                            pequeno
+                                            tom="info"
+                                            titulo="Entra no lugar do salário: o valor é o que a contabilidade apurou das férias, e não o saldo salarial do mês."
+                                          >
+                                            no lugar do salário
+                                          </Selo>
+                                        )}
                                         {it.tipo === 'SALARIO' &&
                                           g.carteiraAssinada &&
                                           g.temOpcaoDia25 && (
@@ -1099,10 +1469,10 @@ export function Folha() {
                                       </div>
                                     </td>
                                     <td className="td !py-2.5 num text-tinta-400">
-                                      {it.contaContabil}
+                                      {contaContabilGerada(it)}
                                     </td>
                                     <td className="td !py-2.5 max-w-md text-xs text-tinta-500">
-                                      {it.observacao}
+                                      {observacaoGerada(it)}
                                     </td>
                                     <td className="td !py-2.5 text-right">
                                       <CampoDinheiro

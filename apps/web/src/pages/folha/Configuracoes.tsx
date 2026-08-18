@@ -217,14 +217,20 @@ export function Configuracoes() {
               onChange={(v) => num('contaContabilBonus', v)}
             />
             <CampoNum
+              label="Férias"
+              valor={form.contaContabilFerias}
+              onChange={(v) => num('contaContabilFerias', v)}
+            />
+            <CampoNum
               label="Diária"
               valor={form.contaContabilDiaria}
               onChange={(v) => num('contaContabilDiaria', v)}
             />
           </div>
           <p className="mt-3 text-xs leading-relaxed text-tinta-400">
-            A conta da diária nasce igual à do salário. Confirme com quem cuida
-            da contabilidade se as diárias devem entrar em outra conta.
+            As contas da diária e das férias nascem iguais à do salário.
+            Confirme com quem cuida da contabilidade se elas devem entrar em
+            conta própria.
           </p>
         </Bloco>
 
@@ -322,6 +328,11 @@ export function Configuracoes() {
               label="Bônus"
               valor={form.obsBonusTemplate}
               onChange={(v) => txt('obsBonusTemplate', v)}
+            />
+            <CampoTxt
+              label="Férias"
+              valor={form.obsFeriasTemplate}
+              onChange={(v) => txt('obsFeriasTemplate', v)}
             />
           </div>
         </Bloco>

@@ -32,6 +32,7 @@ export const STATUS_TOM: Record<StatusContaPagar, Tom> = {
 
 export const TIPO_LABEL: Record<TipoLancamento, string> = {
   SALARIO: 'Salário',
+  FERIAS: 'Férias',
   ADIANTAMENTO: 'Adiantamento',
   BONUS: 'Bônus',
   DESCONTO: 'Desconto',

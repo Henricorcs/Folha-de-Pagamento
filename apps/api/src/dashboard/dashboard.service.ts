@@ -616,6 +616,7 @@ function depoisDoUltimoDia(competencia: string): Date {
 
 export interface PorTipo {
   salario: number;
+  ferias: number;
   adiantamento: number;
   bonus: number;
   avulso: number;
@@ -631,6 +632,7 @@ export interface PorTipo {
  */
 const CHAVE_DO_TIPO: Partial<Record<TipoLancamento, keyof PorTipo>> = {
   SALARIO: 'salario',
+  FERIAS: 'ferias',
   ADIANTAMENTO: 'adiantamento',
   BONUS: 'bonus',
   AVULSO: 'avulso',
@@ -641,6 +643,7 @@ const CHAVE_DO_TIPO: Partial<Record<TipoLancamento, keyof PorTipo>> = {
 function zeroPorTipo(): PorTipo {
   return {
     salario: 0,
+    ferias: 0,
     adiantamento: 0,
     bonus: 0,
     avulso: 0,
@@ -652,6 +655,7 @@ function zeroPorTipo(): PorTipo {
 function arredondarTipos(p: PorTipo): PorTipo {
   return {
     salario: arredondar(p.salario),
+    ferias: arredondar(p.ferias),
     adiantamento: arredondar(p.adiantamento),
     bonus: arredondar(p.bonus),
     avulso: arredondar(p.avulso),
@@ -660,9 +664,10 @@ function arredondarTipos(p: PorTipo): PorTipo {
   };
 }
 
-/** Ordem de leitura da folha: salário, adiantamento, bônus, o resto. */
+/** Ordem de leitura da folha: salário, férias, adiantamento, bônus, o resto. */
 const ORDEM_TIPO: TipoLancamento[] = [
   TipoLancamento.SALARIO,
+  TipoLancamento.FERIAS,
   TipoLancamento.ADIANTAMENTO,
   TipoLancamento.BONUS,
   TipoLancamento.DIARIA,

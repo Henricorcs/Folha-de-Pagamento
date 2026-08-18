@@ -204,6 +204,9 @@ model ConfiguracaoFinanceira {
   contaContabilSalario      Int @default(2420) @map("conta_contabil_salario")
   contaContabilAdiantamento Int @default(2662) @map("conta_contabil_adiantamento")
   contaContabilBonus        Int @default(13916) @map("conta_contabil_bonus")
+  /// Férias. Nasce igual à de salário — confirme com a contabilidade se elas
+  /// devem sair em conta própria no relatório do IXC.
+  contaContabilFerias       Int @default(2420) @map("conta_contabil_ferias")
   /// Diárias. Nasce igual à de salário — confirme com a contabilidade.
   contaContabilDiaria       Int @default(2420) @map("conta_contabil_diaria")
   /// Pagamentos avulsos (mão de obra, serviço pontual, patrocínio).
@@ -277,6 +280,7 @@ model ConfiguracaoFinanceira {
   obsSalarioTemplate      String @default("saldo salarial referente ao mês {competencia}") @map("obs_salario_template")
   obsAdiantamentoTemplate String @default("adiantamento") @map("obs_adiantamento_template")
   obsBonusTemplate        String @default("bônus referente ao mês {competencia}") @map("obs_bonus_template")
+  obsFeriasTemplate       String @default("férias referentes ao mês {competencia}") @map("obs_ferias_template")
 
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -290,6 +294,10 @@ model ConfiguracaoFinanceira {
 // ---------------------------------------------------------------------------
 enum TipoLancamento {
   SALARIO
+  /// Pagamento de quem entrou de férias. Entra no lugar do salário no mês em
+  /// que a pessoa sai: o valor é o que a contabilidade apurou, não o saldo
+  /// salarial, e quem está de férias não recebe o adiantamento do dia 25.
+  FERIAS
   ADIANTAMENTO
   BONUS
   DESCONTO

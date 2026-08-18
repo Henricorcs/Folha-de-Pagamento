@@ -222,6 +222,24 @@ export function detalharSalario(
 }
 
 /**
+ * O que a folha sugere no lugar do salário quando a pessoa entra de férias.
+ *
+ * Férias não é saldo salarial: o valor certo é o que a contabilidade apurou, e
+ * é ele que quem gera a folha digita. O que sai daqui é só o ponto de partida —
+ * o que a pessoa ganha no mês (base, comissão, hora extra) menos os descontos
+ * fixos, **sem** o vale e **sem** o adiantamento do dia 25.
+ *
+ * Os dois ficam de fora porque nenhum deles é abatido de um pagamento de
+ * férias: quem está de férias não recebeu o dia 25, e a parcela do vale
+ * continua em aberto para a folha seguinte — este pagamento não a baixa.
+ */
+export function baseParaFerias(c: ComposicaoSalario): number {
+  return arredondar(
+    c.saldo + c.adiantamentoDescontado + c.vales - c.valesCredito,
+  );
+}
+
+/**
  * Saldo salarial (valor da conta a pagar de SALÁRIO).
  * Para funcionário SEM carteira assinada, o adiantamento é subtraído aqui.
  * Para CLT (carteira assinada), NÃO — a contabilidade já descontou.

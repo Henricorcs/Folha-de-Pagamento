@@ -20,6 +20,7 @@ export const PALETA = [
   'var(--serie-3)', // turquesa
   'var(--serie-4)', // vermelho
   'var(--serie-5)', // violeta
+  'var(--serie-6)', // verde
 ] as const;
 
 /**
