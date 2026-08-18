@@ -91,6 +91,13 @@ const contasPagar: Modulo = {
     { to: 'avulsos', label: 'Pagamentos Avulsos', icone: IconeRecibo },
     { to: 'recorrentes', label: 'Recorrentes', icone: IconeCalendarioVolta },
     { to: 'categorias', label: 'Categorias', icone: IconeEtiqueta },
+    // Conserto de uma vez so: some da lista quando nao houver mais nada torto.
+    {
+      to: 'conciliacao',
+      label: 'Conciliação',
+      icone: IconeMoeda,
+      somenteAdmin: true,
+    },
   ],
 };
 

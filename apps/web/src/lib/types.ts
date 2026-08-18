@@ -1282,3 +1282,35 @@ export interface HistoricoPagamentos {
   comoFoiLido: string;
   avisos: string[];
 }
+
+// --- Conserto dos pagamentos que ficaram fora da conciliação bancária ---
+/**
+ * Um pagamento cuja baixa foi lançada na conta da despesa em vez da conta de
+ * onde o dinheiro saiu. A conciliação lê a segunda, e por isso não o via.
+ */
+export interface PagamentoTorto {
+  idFnApagar: number;
+  beneficiario: string;
+  valor: number;
+  /** Dia em que o dinheiro saiu, como está na linha da baixa */
+  data: string;
+  contaPagamento: number;
+  contaPagamentoNome: string | null;
+  /** Onde a baixa está hoje */
+  contaAtual: number;
+  /** Onde ela deveria estar: o razão da conta de pagamento */
+  contaCerta: number;
+  idMovimFinan: number;
+  historico: string;
+  documento: string | null;
+}
+
+export interface ResultadoDaCorrecao {
+  corrigidos: number[];
+  /** Ficou como estava; nada foi tocado */
+  pulados: Array<{ idFnApagar: number; motivo: string }>;
+  /** O estorno saiu e a nova baixa não: o título está em aberto no IXC */
+  emAberto: Array<{ idFnApagar: number; erro: string }>;
+  /** A fila parou por causa de um `emAberto` */
+  naoTentados: number[];
+}
