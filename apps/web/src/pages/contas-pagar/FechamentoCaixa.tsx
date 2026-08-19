@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
+import { SeletorDeCategoria } from '../../components/SeletorDeCategoria';
 import {
   Aviso,
   Bloco,
@@ -16,6 +17,7 @@ import { reduzirFoto } from '../../lib/foto';
 import { formatBRL, formatData } from '../../lib/format';
 import type {
   CaixasDoFechamento,
+  CategoriaDespesa,
   ContaDaRua,
   ExtratoDoCaixa,
   LancamentoDoCaixa,
@@ -1047,6 +1049,7 @@ function AcertarConta({
   const [fornecedor, setFornecedor] = useState<FornecedorIxc | null>(null);
   /* O motivo da entrega já é a descrição da despesa nove vezes em dez. */
   const [descricao, setDescricao] = useState(conta.motivo ?? '');
+  const [categoriaId, setCategoriaId] = useState('');
 
   const ehNota = tipo === 'NOTA';
   const comDespesa = ehNota && lancarDespesa;
@@ -1091,6 +1094,13 @@ function AcertarConta({
     retry: 0,
   });
 
+  const categorias = useQuery({
+    queryKey: ['categorias-despesa'],
+    queryFn: async () =>
+      (await api.get<CategoriaDespesa[]>('/categorias-despesa')).data,
+    enabled: comDespesa,
+  });
+
   const lancar = useMutation({
     mutationFn: async () =>
       (
@@ -1107,6 +1117,7 @@ function AcertarConta({
                   fornecedorNome: fornecedor!.nome,
                   descricao: descricao.trim(),
                   pagoEm: data,
+                  categoriaId: categoriaId || undefined,
                 }
               : undefined,
           },
@@ -1432,7 +1443,7 @@ function AcertarConta({
                 )}
               </div>
 
-              <div className="sm:col-span-2">
+              <div>
                 <label className="rotulo" htmlFor="descricao-acerto">
                   Em que foi gasto
                 </label>
@@ -1441,9 +1452,26 @@ function AcertarConta({
                   value={descricao}
                   onChange={(e) => setDescricao(e.target.value)}
                   className="campo"
-                  placeholder="correia do gerador, combustível da caminhonete…"
+                  placeholder="correia do gerador, combustível…"
                 />
                 <p className="ajuda">É o que aparece na conta a pagar do IXC.</p>
+              </div>
+
+              {/* A classificação é daqui, não do IXC: é por ela que o dashboard
+                  separa os gastos, e a nota da rua conta como qualquer outra
+                  despesa nessa separação. */}
+              <div>
+                <label className="rotulo" htmlFor="categoria-acerto">
+                  Classificação
+                </label>
+                <SeletorDeCategoria
+                  id="categoria-acerto"
+                  categorias={categorias.data}
+                  value={categoriaId}
+                  vazio="Sem classificação"
+                  carregando={categorias.isLoading}
+                  onChange={setCategoriaId}
+                />
               </div>
 
             </div>

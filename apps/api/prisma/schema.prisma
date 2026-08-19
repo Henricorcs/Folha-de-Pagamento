@@ -1228,6 +1228,44 @@ model DinheiroNaRua {
   @@map("dinheiro_na_rua")
 }
 
+/// Uma transferência entre contas, como ela foi mandada daqui.
+///
+/// Sai 1.500 do caixa do Werick e entra no do Aurélio: o dinheiro não some nem
+/// aparece, muda de lugar. No IXC isso são duas linhas da movimentação
+/// financeira — crédito no razão da origem (que é como ele escreve saída) e
+/// débito no do destino —, e são elas que o fechamento de caixa já lê. Por isso
+/// a transferência aparece sozinha nos dois extratos.
+///
+/// Esta tabela não é a verdade do dinheiro; a verdade é o IXC. É o registro de
+/// quem mandou, quando, e para onde olhar se algo não bater.
+model TransferenciaEntreContas {
+  id String @id @default(uuid())
+
+  origemId    Int    @map("origem_id")
+  origemNome  String @map("origem_nome")
+  destinoId   Int    @map("destino_id")
+  destinoNome String @map("destino_nome")
+
+  valor     Decimal  @db.Decimal(14, 2)
+  data      DateTime
+  historico String
+  /// Dinheiro, Pix, Depósito… é descrição: vai dentro do histórico no IXC,
+  /// porque a coluna de tipo da movimentação não está documentada.
+  forma     String?
+
+  /// As duas linhas criadas no IXC. Nulas quando a escrita lá falhou pela
+  /// metade — o único estado que pede olho humano, então ele fica visível.
+  idMovimOrigem  Int? @map("id_movim_origem")
+  idMovimDestino Int? @map("id_movim_destino")
+
+  criadoPor String?  @map("criado_por")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([data])
+  @@index([origemId])
+  @@map("transferencias_entre_contas")
+}
+
 /// O que se faz com o dinheiro que está na rua.
 enum TipoMovimentoDaRua {
   /// Comprovou um gasto. É este que vira conta a pagar no IXC.

@@ -9,6 +9,7 @@ import { Inicio as ContasPagarInicio } from './pages/contas-pagar/Inicio';
 import { Categorias as ContasPagarCategorias } from './pages/contas-pagar/Categorias';
 import { Dashboard as ContasPagarDashboard } from './pages/contas-pagar/Dashboard';
 import { FechamentoCaixa } from './pages/contas-pagar/FechamentoCaixa';
+import { Transferencias } from './pages/contas-pagar/Transferencias';
 import { HistoricoDePagamentos } from './pages/contas-pagar/HistoricoDePagamentos';
 import { Recorrentes } from './pages/contas-pagar/Recorrentes';
 import { Avulsos } from './pages/folha/Avulsos';
@@ -130,6 +131,10 @@ export default function App() {
         <Route path="recorrentes" element={<Recorrentes />} />
         <Route path="categorias" element={<ContasPagarCategorias />} />
         <Route path="fechamento-caixa" element={<FechamentoCaixa />} />
+        {/* Só ADMIN, e ainda pede a senha ao abrir: a tela move saldo entre
+            contas sem haver nota nenhuma para conferir depois. O servidor é
+            quem recusa de verdade — aqui a rota só some do menu. */}
+        <Route path="transferencias" element={<Transferencias />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/modulos" replace />} />

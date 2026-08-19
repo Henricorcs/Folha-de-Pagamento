@@ -15,6 +15,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { AssinaturasModule } from './assinaturas/assinaturas.module';
 import { ContasAbertasModule } from './contas-abertas/contas-abertas.module';
 import { CaixaModule } from './caixa/caixa.module';
+import { TransferenciasModule } from './transferencias/transferencias.module';
 import { AuthModule } from './auth/auth.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
@@ -43,6 +44,7 @@ import { HealthController } from './health/health.controller';
     AssinaturasModule,
     ContasAbertasModule,
     CaixaModule,
+    TransferenciasModule,
   ],
   controllers: [HealthController],
   providers: [

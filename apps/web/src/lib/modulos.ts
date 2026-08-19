@@ -13,6 +13,7 @@ import {
   IconeRecibo,
   IconeSaida,
   IconeSol,
+  IconeTransferencia,
   type Icone,
 } from '../components/icones';
 
@@ -95,6 +96,15 @@ const contasPagar: Modulo = {
     // Bater o caixa do dinheiro em mãos: conferir as saídas do período,
     // fotografar a nota e declarar o que ainda está na rua com alguém.
     { to: 'fechamento-caixa', label: 'Fechamento de Caixa', icone: IconeCaixa },
+    // Dinheiro que muda de conta, no IXC junto. Só ADMIN, e ainda pede a senha
+    // ao abrir: é a única tela daqui que move saldo entre contas sem haver
+    // nota nenhuma para conferir depois.
+    {
+      to: 'transferencias',
+      label: 'Transferência entre Contas',
+      icone: IconeTransferencia,
+      somenteAdmin: true,
+    },
   ],
 };
 

@@ -178,6 +178,29 @@ export function IconeEtiqueta({ className }: IconeProps) {
   );
 }
 
+/** Duas setas em sentidos opostos: o dinheiro que troca de conta. */
+export function IconeTransferencia({ className }: IconeProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M4 8.5h13" />
+      <path d="m13.5 5 3.5 3.5-3.5 3.5" />
+      <path d="M20 15.5H7" />
+      <path d="M10.5 12 7 15.5l3.5 3.5" />
+    </svg>
+  );
+}
+
+/** Cadeado fechado: a tela que só abre com senha. */
+export function IconeCadeado({ className }: IconeProps) {
+  return (
+    <svg {...base} className={className}>
+      <rect x="4.5" y="10.5" width="15" height="10" rx="2" />
+      <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+      <path d="M12 14.5v2.5" />
+    </svg>
+  );
+}
+
 /** Gaveta de dinheiro, com a fresta e o puxador: o caixa que se bate. */
 export function IconeCaixa({ className }: IconeProps) {
   return (

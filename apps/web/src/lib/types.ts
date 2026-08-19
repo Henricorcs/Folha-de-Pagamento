@@ -1421,6 +1421,24 @@ export interface ExtratoDoCaixa {
   fechamentos: FechamentoCaixa[];
 }
 
+/** Dinheiro que mudou de conta, como o registro daqui o guarda. */
+export interface TransferenciaEntreContas {
+  id: string;
+  origemId: number;
+  origemNome: string;
+  destinoId: number;
+  destinoNome: string;
+  valor: string;
+  data: string;
+  historico: string;
+  forma: string | null;
+  /** As duas linhas criadas no IXC. Uma sem a outra = escrita pela metade. */
+  idMovimOrigem: number | null;
+  idMovimDestino: number | null;
+  criadoPor: string | null;
+  createdAt: string;
+}
+
 export interface CaixasDoFechamento {
   tabela: string | null;
   caixas: CaixaIxc[];
