@@ -25,8 +25,6 @@ function montarServico(
       tipo: 'ENTRADA' | 'SAIDA';
     }>;
     conferencias?: Array<{ idLancamentoIxc: number; conferido: boolean; notaFoto?: string }>;
-    /** Linhas que a Conciliação bancária já conferiu (`fn_movim_finan.id`). */
-    naConciliacao?: number[];
     naRua?: Array<Record<string, unknown>>;
     entrega?: Record<string, unknown> | null;
     /** O fechamento anterior deste caixa, de onde o saldo parte. */
@@ -47,15 +45,6 @@ function montarServico(
         ...create,
       })),
       findUnique: jest.fn().mockResolvedValue(null),
-    },
-    // A outra tela que olha as mesmas linhas do IXC. Daqui ela é só leitura:
-    // o que ela já conferiu aparece como aviso, e não como conferência.
-    conciliacaoLinha: {
-      findMany: jest
-        .fn()
-        .mockResolvedValue(
-          (opts.naConciliacao ?? []).map((id) => ({ idMovimFinan: id })),
-        ),
     },
     dinheiroNaRua: {
       // Primeira chamada: o que está aberto. Segunda: o que se mexeu no
@@ -135,39 +124,6 @@ describe('extrato do caixa', () => {
     expect(e.resumo.saidas).toBe(350);
     expect(e.lancamentos[0].conferido).toBe(true);
     expect(e.lancamentos[1].conferido).toBe(false);
-  });
-
-  /*
-   * A Conciliação bancária olha as mesmas linhas do IXC desta conta. Saber que
-   * uma saída já passou por lá evita olhar duas vezes -- mas conferir aqui é
-   * ver a nota, e isso a outra tela não faz. Então a marca de lá aparece, e
-   * não confere nada sozinha.
-   */
-  it('avisa que a linha já passou pela conciliação, sem dar por conferida', async () => {
-    const { service } = montarServico({
-      lancamentos: [saida(1, 100), saida(2, 250)],
-      naConciliacao: [1],
-    });
-
-    const e = await service.extrato(7, '2026-08-01', '2026-08-31');
-
-    expect(e.lancamentos[0].conferidoNaConciliacao).toBe(true);
-    expect(e.lancamentos[1].conferidoNaConciliacao).toBe(false);
-    // O que vale para fechar o caixa continua sendo a conferência daqui.
-    expect(e.lancamentos[0].conferido).toBe(false);
-    expect(e.resumo.conferidos).toBe(0);
-    expect(e.resumo.saidasConferidas).toBe(0);
-  });
-
-  it('marca da conciliação não destrava o fechamento — a nota ainda falta', async () => {
-    const { service } = montarServico({
-      lancamentos: [saida(1, 100), saida(2, 250)],
-      naConciliacao: [1, 2],
-    });
-
-    await expect(
-      service.fechar({ caixaId: 7, de: '2026-08-01', ate: '2026-08-31' }),
-    ).rejects.toThrow(/faltam 2 saídas/i);
   });
 
   it('a foto não vem na listagem, só o aviso de que existe', async () => {

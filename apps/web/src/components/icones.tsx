@@ -190,18 +190,3 @@ export function IconeCaixa({ className }: IconeProps) {
   );
 }
 
-/**
- * Prédio de banco com as colunas: a conciliação bancária.
- *
- * Não é a moeda de "Já pagos" de propósito — as duas telas são de dinheiro, e
- * repetir o ícone faria escolher entre elas depender de ler o rótulo.
- */
-export function IconeBanco({ className }: IconeProps) {
-  return (
-    <svg {...base} className={className}>
-      <path d="M3 9.5 12 4l9 5.5" />
-      <path d="M4.5 9.5v8M9.5 9.5v8M14.5 9.5v8M19.5 9.5v8" />
-      <path d="M2.5 20.5h19" />
-    </svg>
-  );
-}

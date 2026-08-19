@@ -4,10 +4,6 @@ import { IxcModule } from '../ixc/ixc.module';
 import { BaixasDoIxcService } from './baixas-do-ixc.service';
 import { CategoriasController } from './categorias.controller';
 import { CategoriasService } from './categorias.service';
-import { ConciliacaoController } from './conciliacao.controller';
-import { ConciliacaoService } from './conciliacao.service';
-import { ConciliacoesController } from './conciliacoes.controller';
-import { ConciliacoesService } from './conciliacoes.service';
 import { ContasAbertasController } from './contas-abertas.controller';
 import { ContasAbertasService } from './contas-abertas.service';
 import { DespesasController } from './despesas.controller';
@@ -32,10 +28,6 @@ import { RecorrentesService } from './recorrentes.service';
     // As duas metades da mesma tabela do IXC: o que a empresa deve, e o
     // histórico do que ela já pagou.
     HistoricoPagamentosController,
-    // A conciliacao bancaria: o extrato do banco contra a movimentacao do IXC.
-    ConciliacaoController,
-    // A conciliacao com comeco e fim: uma conta, um periodo, um status.
-    ConciliacoesController,
   ],
   providers: [
     ContasAbertasService,
@@ -51,8 +43,6 @@ import { RecorrentesService } from './recorrentes.service';
     BaixasDoIxcService,
     RecorrentesService,
     RecorrentesPollerService,
-    ConciliacaoService,
-    ConciliacoesService,
   ],
 })
 export class ContasAbertasModule {}

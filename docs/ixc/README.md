@@ -31,8 +31,8 @@ Troque `BUSCA` pelo que procura (`baixa`, `fornecedor`, `auditoria`…).
 | Adiantamento de salário | `fl_adto_salario` | documentado |
 | Contas de pagamento (banco/caixa) | `contas` | documentado |
 | Dados bancários e PIX do fornecedor | `dados_bancarios` | **não documentado**, confirmado na base |
-| Movimento de uma conta (a conciliação bancária) | `fn_movim_finan` (GET) | documentado como "Contabilidade"; é daqui que a tela de conciliação lê |
-| Marcar uma linha como conciliada | — | **não dá** (ver abaixo) |
+| Movimento de uma conta (banco e caixa) | `fn_movim_finan` (GET) | documentado como "Contabilidade"; é daqui que o Fechamento de Caixa lê |
+| Marcar uma linha como conciliada | — | **não dá**: o campo é ignorado em toda escrita (ver abaixo) |
 | Lançamento na movimentação financeira | — | **não existe** (ver abaixo) |
 
 ### `data_pagamento` não é o dia em que o dinheiro saiu
@@ -57,47 +57,64 @@ guarda o que responder com linhas reconhecíveis — linha que não aponte um t�
 não serve, mesmo vindo sem erro. Não achando caminho, o histórico mostra a data
 do registro e diz na tela que é ela.
 
-### A conciliação bancária: dá para ler, não dá para marcar
+### A conciliação bancária não passa pelo webservice
 
-O IXC guarda a marca de conciliado em **`fn_movim_finan.conciliado`**, com `S`
-ou `N` — 154 mil linhas conciliadas nesta base. Duas coisas sobre ela:
+Fica registrado porque custou uma investigação inteira, e porque a resposta é
+"não dá" — que é exatamente o tipo de coisa que alguém tenta de novo daqui a um
+ano. O app **não tem** tela de conciliação por causa disto.
 
-**Ela não vem na listagem, mas dá para filtrar por ela.** O `GET` de
-`fn_movim_finan` devolve 25 colunas e `conciliado` não é uma delas; `id_pagar` e
-`id_receber` também não. Mesmo assim os três existem e funcionam como filtro
-(`qtype` ou `grid_param`) — é assim que a tela de conciliação sabe o que já foi
-conciliado: uma consulta traz as linhas do período, outra traz as mesmas com
-`conciliado = 'S'`, e o cruzamento é feito por `id`. Coluna que não existe faz o
-webservice devolver uma página de erro em HTML, o que também serve de sonda.
+**A marca por linha existe e é legível.** `fn_movim_finan.conciliado` vale `S`
+ou `N` — 154 mil linhas conciliadas nesta base. Ela não vem na listagem (o `GET`
+devolve 25 colunas e ela não é uma delas, assim como `id_pagar` e `id_receber`),
+mas **funciona como filtro**: uma consulta traz as linhas do período, outra as
+mesmas com `conciliado = 'S'`, e o cruzamento é por `id`. Coluna que não existe
+faz o webservice devolver uma página de erro em HTML — o que serve de sonda para
+descobrir se uma coluna existe.
 
-**Escrever nela pelo webservice não funciona — e estraga a linha.** Testado numa
-linha de teste, criada e apagada em seguida:
+**Escrever nela não funciona, em nenhum verbo.** Testado numa linha criada e
+apagada em seguida, numa conta inativa:
 
 ```
-PUT /fn_movim_finan/{id}  { conciliado: 'S', id_conta, data, historico }
-  → "Registro atualizado com sucesso!"
-  → conciliado:  N → N          (o campo é ignorado)
-  → documento:   "TESTEAPI" → ""
-  → debito:      0.01 → 0.00
-  → tipo_lanc:   "M" → ""
+POST fn_movim_finan  { conciliado: 'S', … }        → linha nasce com conciliado = N
+PUT  /{id}  registro inteiro + conciliado          → continua N
+PUT  /{id}  ixcsoft: alterar | editar | atualizar  → continua N
+POST /{id}  registro inteiro + conciliado          → continua N  (e CRIA outra linha)
 ```
 
-Ou seja: o PUT ignora justamente o campo que interessa **e** apaga toda coluna
-que não for no corpo. Como a listagem não devolve `id_pagar`, `id_receber` nem
-`data2`, não há como devolvê-las no corpo — a linha do dinheiro perderia a
-ligação com o título. É a mesma família de estrago do commit `b3d9780`.
+O campo é ignorado pelo mapa de campos do endpoint. E cuidado com o `PUT`: ele
+apaga toda coluna que não for no corpo — mandando o registro inteiro que a
+listagem devolve, o que sobrevive é só isso, e `id_pagar`, `id_receber` e
+`data2` não vêm na listagem para poderem ser devolvidos. É a família de estrago
+do commit `b3d9780`.
 
-Não existe endpoint próprio de conciliação: `fn_conciliacao`,
-`fn_conciliacao_bancaria`, `fn_arquivo_importado`, `fn_extrato`,
-`fn_layout_conciliacao` e mais uma dúzia de nomes prováveis respondem "não está
-disponível". O `id_arquivo_importado` da tabela existe e vale `0` em **todas** as
-1,6 milhão de linhas, e nenhuma das 17 contas tem `layout_conciliacao`
-preenchido: a importação de extrato do IXC nunca foi usada aqui.
+**A tela de lá tem tabela própria, e ela não é servida.** Descoberta no tráfego
+da interface do IXC:
 
-Por isso a conciliação deste app **lê** o que o IXC conciliou e **grava aqui** o
-que for conferido por ela (tabela `conciliacao_linhas`). Uma linha conferida
-neste app continua aparecendo como não conciliada na tela do IXC, e a tela diz
-isso com todas as letras.
+| O que | Nome |
+| --- | --- |
+| A grade das conciliações | `fn_conciliacao_lote` |
+| O assistente de 4 passos | `fn_conciliacao_lote_wizard` |
+| O botão da tela | `botaoAjax_31544` (id da tela: 31544) |
+
+O padrão do botão é o mesmo do `botao_pagar_26409`, que o webservice **serve** e
+este app usa para dar baixa. Ainda assim, `fn_conciliacao_lote`,
+`fn_conciliacao_lote_wizard` e todas as variações de `botao_*_31544` respondem
+"não está disponível" — junto com outros 427 nomes prováveis testados antes de a
+interface entregar o nome certo.
+
+**"Não está disponível" não quer dizer que não existe.** `vd_produtos`, que está
+na coleção oficial, responde a mesma coisa nesta instalação. A resposta é do
+registro de recursos do webservice, não do banco — ou seja, é liberação.
+
+**O que pedir ao suporte do IXC**, se um dia isto voltar à mesa: liberar no
+webservice os recursos `fn_conciliacao_lote` (listar/inserir/alterar) e
+`fn_conciliacao_lote_wizard` com o botão da tela 31544, e a escrita do campo
+`fn_movim_finan.conciliado`.
+
+Enquanto isso, o que o app faz do lado da conciliação é o que importa e já é
+escrito lá: **a baixa do título** (`botao_pagar_26409`) e **a despesa lançada**
+(`fn_apagar`). Achado o pagamento que faltava, ele é resolvido no IXC — e a
+conciliação de lá fecha sozinha, porque não falta mais lançamento.
 
 ### Duas armadilhas que já morderam
 

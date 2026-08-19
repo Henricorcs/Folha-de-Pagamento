@@ -7,11 +7,10 @@ server {
 
     # Encaminha /api/* para o serviço da API (mantém o prefixo /api).
     location /api/ {
-        # O padrão do nginx é 1 MB, e a API aceita corpo de até 8 MB — a guia em
-        # PDF e o extrato .ofx da conciliação passam disso com folga. O número
-        # tem de ser o mesmo do `LIMITE_CORPO` do `main.ts`: sendo menor aqui, o
-        # arquivo morre com um 413 cru do nginx, sem nunca chegar em quem sabe
-        # dizer o que houve.
+        # O padrão do nginx é 1 MB, e a API aceita corpo de até 8 MB — a guia
+        # em PDF passa disso. O número tem de ser o mesmo do `LIMITE_CORPO` do
+        # `main.ts`: sendo menor aqui, o arquivo morre com um 413 cru do nginx,
+        # sem nunca chegar em quem sabe dizer o que houve.
         client_max_body_size 8m;
         proxy_pass http://${API_UPSTREAM};
         proxy_http_version 1.1;

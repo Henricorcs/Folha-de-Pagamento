@@ -558,18 +558,6 @@ function LinhaDoLancamento({
               entrada
             </Selo>
           )}
-          {/* A Conciliação bancária lê as mesmas linhas desta conta. Saber que
-              alguém já passou por esta aqui poupa olhar duas vezes -- mas não
-              confere nada: conferir aqui é ver a nota. */}
-          {l.conferidoNaConciliacao && !l.conferido && (
-            <Selo
-              pequeno
-              tom="info"
-              titulo="Esta linha já foi conferida na Conciliação bancária. Aqui ainda falta a nota."
-            >
-              visto na conciliação
-            </Selo>
-          )}
         </td>
         <td className="td whitespace-nowrap text-right">
           <span className="valor">{formatBRL(l.valor)}</span>
