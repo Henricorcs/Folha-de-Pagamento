@@ -50,7 +50,7 @@ function montarServico(
 describe('o calendário de faltas', () => {
   it('desconta do salário base, e não do "a receber na folha"', async () => {
     const { service } = montarServico({
-      faltas: [{ funcionarioId: 'f1', data: new Date(2026, 7, 4) }],
+      faltas: [{ funcionarioId: 'f1', data: new Date(Date.UTC(2026, 7, 4)) }],
     });
 
     const r = await service.doMes('f1', '2026-08');
@@ -65,8 +65,8 @@ describe('o calendário de faltas', () => {
   it('a folha desconta pelo mesmo salário base', async () => {
     const { service } = montarServico({
       faltas: [
-        { funcionarioId: 'f1', data: new Date(2026, 7, 4) },
-        { funcionarioId: 'f1', data: new Date(2026, 7, 5) },
+        { funcionarioId: 'f1', data: new Date(Date.UTC(2026, 7, 4)) },
+        { funcionarioId: 'f1', data: new Date(Date.UTC(2026, 7, 5)) },
       ],
     });
 
@@ -128,6 +128,48 @@ describe('o calendário de faltas', () => {
       marcado: false,
     });
     expect(prisma.faltaFuncionario.delete).toHaveBeenCalled();
+  });
+
+  /*
+   * O dia clicado tem de voltar como o dia clicado.
+   *
+   * Um `Date` serializado vira "2026-08-03T00:00:00.000Z", e o navegador em
+   * Brasília relia isso como 2 de agosto às 21h: clicava-se no 3 e acendia o
+   * quadrado do 2. Por isso o dia sai daqui como texto, sem hora e sem fuso.
+   */
+  it('o dia volta como texto, e é o mesmo que foi marcado', async () => {
+    const { service } = montarServico({
+      faltas: [{ funcionarioId: 'f1', data: new Date(Date.UTC(2026, 7, 3)) }],
+    });
+
+    const r = await service.doMes('f1', '2026-08');
+
+    expect(r.dias[0].dia).toBe('2026-08-03');
+  });
+
+  /*
+   * Linhas gravadas antes disto nasceram à meia-noite do fuso do servidor. Com
+   * o container em UTC dá no mesmo; num servidor a oeste de Greenwich a hora
+   * fica em 03:00Z, e o dia continua sendo o 3 — lido em UTC.
+   */
+  it('linha antiga, gravada com hora, ainda diz o dia certo', async () => {
+    const { service } = montarServico({
+      faltas: [{ funcionarioId: 'f1', data: new Date('2026-08-03T03:00:00Z') }],
+    });
+
+    expect((await service.doMes('f1', '2026-08')).dias[0].dia).toBe(
+      '2026-08-03',
+    );
+  });
+
+  it('marca o dia em UTC, para o fuso do servidor não deslocá-lo', async () => {
+    const { service, prisma } = montarServico();
+
+    await service.alternar('f1', '2026-08-03');
+
+    const [{ data }] = prisma.faltaFuncionario.create.mock.calls[0];
+    expect((data.data as Date).toISOString()).toBe('2026-08-03T00:00:00.000Z');
+    expect(data.competencia).toBe('2026-08');
   });
 
   it('recusa dia fora do formato', async () => {

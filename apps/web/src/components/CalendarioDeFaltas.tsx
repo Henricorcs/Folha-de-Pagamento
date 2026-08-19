@@ -18,7 +18,8 @@ interface FaltasDoMes {
   competencia: string;
   aplicavel: boolean;
   salarioBase: number;
-  dias: Array<{ id: string; data: string; observacao: string | null }>;
+  /** "AAAA-MM-DD" — dia, e não instante: a hora só teria fuso para errar. */
+  dias: Array<{ id: string; dia: string; observacao: string | null }>;
   desconto: DescontoDeFaltas;
 }
 
@@ -79,15 +80,22 @@ export function CalendarioDeFaltas({
   });
 
   const [ano, mes] = competencia.split('-').map(Number);
-  const primeiro = new Date(ano, mes - 1, 1);
-  const diasNoMes = new Date(ano, mes, 0).getDate();
+  /* A grade também em UTC, pelo mesmo motivo: o dia da semana do dia 1 decide
+     em que coluna o mês começa, e lido no fuso errado ele desloca tudo. */
+  const diasNoMes = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
   /* Os quadrados vazios antes do dia 1, para a coluna bater com o dia da
      semana — sem eles a grade mente sobre em que dia a pessoa faltou. */
-  const vazios = primeiro.getDay();
+  const vazios = new Date(Date.UTC(ano, mes - 1, 1)).getUTCDay();
 
-  const marcados = new Set(
-    (faltas.data?.dias ?? []).map((d) => new Date(d.data).getDate()),
-  );
+  /*
+   * Texto com texto, sem `Date` no meio.
+   *
+   * Relendo "2026-08-03T00:00:00.000Z" no fuso de Brasília, o navegador dava 2
+   * de agosto às 21h — clicava-se no dia 3 e acendia o quadrado do dia 2. Um
+   * dia de calendário não tem hora; comparar como texto é o que impede o fuso
+   * de opinar.
+   */
+  const marcados = new Set((faltas.data?.dias ?? []).map((d) => d.dia));
 
   const d = faltas.data?.desconto;
 
@@ -127,9 +135,9 @@ export function CalendarioDeFaltas({
             ))}
             {Array.from({ length: diasNoMes }, (_, i) => {
               const dia = i + 1;
-              const marcado = marcados.has(dia);
               const iso = `${competencia}-${String(dia).padStart(2, '0')}`;
-              const domingo = new Date(ano, mes - 1, dia).getDay() === 0;
+              const marcado = marcados.has(iso);
+              const domingo = new Date(Date.UTC(ano, mes - 1, dia)).getUTCDay() === 0;
               return (
                 <button
                   key={dia}

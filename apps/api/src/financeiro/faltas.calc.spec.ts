@@ -7,8 +7,14 @@ import { calcularDescontoDeFaltas, domingoDaSemana } from './faltas.calc';
  * que quem calcula à mão já comete sozinho.
  */
 
-/** Agosto de 2026: 2, 9, 16, 23 e 30 são domingos. */
-const dia = (d: number) => new Date(2026, 7, d);
+/**
+ * Agosto de 2026: 2, 9, 16, 23 e 30 são domingos.
+ *
+ * Em UTC, como as faltas nascem: construídas no fuso de quem roda o teste, elas
+ * passariam aqui e falhariam num servidor a leste de Greenwich — que é
+ * exatamente o tipo de erro que este módulo existe para não ter.
+ */
+const dia = (d: number) => new Date(Date.UTC(2026, 7, d));
 
 describe('o desconto das faltas', () => {
   it('sem falta, não desconta nada', () => {
@@ -70,7 +76,7 @@ describe('o desconto das faltas', () => {
   it('o próprio domingo faltado conta a semana dele', () => {
     const r = calcularDescontoDeFaltas(3000, [dia(9)]);
 
-    expect(domingoDaSemana(dia(9)).getDate()).toBe(9);
+    expect(domingoDaSemana(dia(9)).getUTCDate()).toBe(9);
     expect(r.semanasComFalta).toBe(1);
   });
 

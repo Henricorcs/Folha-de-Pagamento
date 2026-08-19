@@ -37,9 +37,17 @@ export class FaltasService {
        */
       aplicavel: !f.carteiraAssinada,
       salarioBase: Number(f.salarioBase),
+      /*
+       * O dia vai como texto, e não como instante.
+       *
+       * Um `Date` serializado vira "2026-08-03T00:00:00.000Z", e o navegador em
+       * Brasília relê isso como 2 de agosto às 21h — o dia 3 aparecia marcado
+       * no quadrado do dia 2. Data de calendário não tem hora nem fuso; quem
+       * manda os dois convida quem recebe a errar.
+       */
       dias: faltas.map((x) => ({
         id: x.id,
-        data: x.data,
+        dia: diaISO(x.data),
         observacao: x.observacao,
       })),
       desconto: calcularDescontoDeFaltas(
@@ -135,17 +143,29 @@ export class FaltasService {
   }
 }
 
-/** "AAAA-MM-DD" para Date à meia-noite local, recusando o que não é data. */
+/**
+ * "AAAA-MM-DD" para a meia-noite **em UTC** daquele dia.
+ *
+ * Em UTC, e não no fuso do servidor: o container roda em UTC e o navegador em
+ * Brasília, e a meia-noite local do servidor relida do outro lado cai no dia
+ * anterior. Uma falta é um dia; ela não pode depender de onde o processo está.
+ */
 function dataDoDia(valor: string): Date {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(valor).trim());
   if (!m) {
     throw new BadRequestException('O dia precisa estar no formato AAAA-MM-DD.');
   }
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
   if (Number.isNaN(d.getTime())) {
     throw new BadRequestException('Este dia não existe no calendário.');
   }
   return d;
+}
+
+/** O dia de uma data, em "AAAA-MM-DD", lido em UTC. */
+function diaISO(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
 }
 
 function mesValido(competencia: string): string {

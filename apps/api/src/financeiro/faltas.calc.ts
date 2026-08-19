@@ -8,6 +8,10 @@
  *
  * A conta do DSR é **por semana**, e não por falta: quem faltou três dias na
  * mesma semana perde um domingo, não três. O descanso é um só.
+ *
+ * As datas são dias, e não instantes: elas nascem, andam e são lidas em UTC à
+ * meia-noite, de ponta a ponta. Misturar fusos aqui faz o dia mudar de casa —
+ * e num calendário isso não é arredondamento, é o dia errado marcado.
  */
 
 /** Quanto vale um dia de trabalho. */
@@ -65,10 +69,19 @@ export function calcularDescontoDeFaltas(
   };
 }
 
-/** O domingo que abre a semana de uma data, à meia-noite. */
+/**
+ * O domingo que abre a semana de uma data.
+ *
+ * Tudo em UTC, como o resto das faltas: uma falta é um **dia**, não um
+ * instante, e ler o dia no fuso de quem calcula faz a mesma data cair em
+ * semanas diferentes conforme o servidor. Com o fuso do container em UTC e o
+ * navegador em Brasília, era assim que o dia 3 virava o dia 2.
+ */
 export function domingoDaSemana(d: Date): Date {
-  const domingo = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  domingo.setDate(domingo.getDate() - domingo.getDay());
+  const domingo = new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()),
+  );
+  domingo.setUTCDate(domingo.getUTCDate() - domingo.getUTCDay());
   return domingo;
 }
 
