@@ -10,6 +10,9 @@ import { FechamentoCaixaService } from './fechamento-caixa.service';
  *    o único sentido que tem;
  *  - dinheiro na rua **não** impede fechar: ele é a explicação de por que a
  *    gaveta tem menos, e o fechamento guarda quanto era;
+ *  - a contagem da gaveta vence o cálculo, e é dela que o período seguinte
+ *    parte — senão a diferença anda de fechamento em fechamento;
+ *  - a despesa lançada pela prestação não desconta o dinheiro duas vezes;
  *  - a foto nunca sai numa listagem.
  */
 
@@ -31,6 +34,12 @@ function montarServico(
     anterior?: Record<string, unknown> | null;
     /** Entregas e prestações com data dentro do período. */
     movimentoDaRua?: Array<Record<string, unknown>>;
+    /** O fechamento que `corrigirContagem` vai buscar pelo id. */
+    fechamento?: Record<string, unknown> | null;
+    /** O último fechamento do caixa, para a correção saber se pode. */
+    ultimo?: Record<string, unknown> | null;
+    /** O que o lançamento da despesa devolve. */
+    despesaLancada?: Record<string, unknown>;
   } = {},
 ) {
   const lancamentos = opts.lancamentos ?? [];
@@ -69,12 +78,35 @@ function montarServico(
     },
     fechamentoCaixa: {
       findMany: jest.fn().mockResolvedValue([]),
-      findFirst: jest.fn().mockResolvedValue(opts.anterior ?? null),
+      // O `extrato` procura o anterior; `corrigirContagem` procura o último.
+      // Nenhum teste faz os dois, então uma resposta por cenário basta.
+      findFirst: jest
+        .fn()
+        .mockResolvedValue(
+          opts.ultimo !== undefined ? opts.ultimo : (opts.anterior ?? null),
+        ),
+      findUnique: jest.fn().mockResolvedValue(opts.fechamento ?? null),
       create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
         criados.push(data);
         return { id: 'f1', ...data };
       }),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        id: 'f1',
+        saldoFinal: opts.fechamento?.saldoFinal ?? 0,
+        ...data,
+      })),
     },
+  };
+
+  const despesas = {
+    lancar: jest.fn().mockResolvedValue(
+      opts.despesaLancada ?? {
+        conta: { id: 'cp1', idFnApagarIxc: 4242 },
+        contas: [{ id: 'cp1', idFnApagarIxc: 4242 }],
+        avisoCategoria: null,
+        baixa: { pagas: 1, tentadas: 1, valor: 0, data: '2026-08-10', avisos: [] },
+      },
+    ),
   };
 
   const caixa = {
@@ -98,8 +130,9 @@ function montarServico(
     prisma as never,
     caixa as never,
     config as never,
+    despesas as never,
   );
-  return { service, prisma, caixa, criados };
+  return { service, prisma, caixa, criados, despesas };
 }
 
 const saida = (id: number, valor: number) => ({
@@ -206,6 +239,164 @@ describe('prestação de contas de quem levou dinheiro', () => {
     );
   });
 
+  /*
+   * O motivo de a prestação existir: sem a conta a pagar, a nota que a pessoa
+   * trouxe fica sabida só aqui, e o caixa do IXC nunca vê aquele dinheiro sair.
+   */
+  it('a despesa é lançada no caixa da entrega, quitada na data em que saiu', async () => {
+    const { service, despesas } = montarServico({
+      entrega: {
+        ...entrega,
+        caixaId: 7,
+        entregueEm: new Date(2026, 7, 10),
+      },
+    });
+
+    await service.baixar(
+      'r1',
+      {
+        valorGasto: 100,
+        despesa: {
+          idFornecedorIxc: 55,
+          fornecedorNome: 'Auto Peças Silva',
+          descricao: 'Correia do gerador',
+          pagoEm: '2026-08-10',
+        },
+      },
+      'u1',
+      'Henrico',
+    );
+
+    const [dto] = despesas.lancar.mock.calls[0];
+    expect(dto.valor).toBe(100);
+    // O dinheiro saiu daquela gaveta: é dela que a saída sai no IXC.
+    expect(dto.contaPagamento).toBe(7);
+    expect(dto.jaPaga).toBe(true);
+    // As três datas são o dia do gasto, e não o dia da prestação.
+    expect(dto.dataPagamento).toBe('2026-08-10');
+    expect(dto.dataEmissao).toBe('2026-08-10');
+    expect(dto.dataVencimento).toBe('2026-08-10');
+  });
+
+  it('sem data informada, a despesa cai no dia da entrega', async () => {
+    const { service, despesas } = montarServico({
+      entrega: { ...entrega, caixaId: 7, entregueEm: new Date(2026, 7, 3) },
+    });
+
+    await service.baixar('r1', {
+      valorGasto: 100,
+      despesa: {
+        idFornecedorIxc: 55,
+        fornecedorNome: 'Auto Peças Silva',
+        descricao: 'Correia do gerador',
+      },
+    });
+
+    expect(despesas.lancar.mock.calls[0][0].dataPagamento).toBe('2026-08-03');
+  });
+
+  it('guarda o título e o dia da saída, que é o que evita o desconto em dobro', async () => {
+    const { service, prisma } = montarServico({
+      entrega: { ...entrega, caixaId: 7, entregueEm: new Date(2026, 7, 10) },
+    });
+
+    await service.baixar('r1', {
+      valorGasto: 100,
+      despesa: {
+        idFornecedorIxc: 55,
+        fornecedorNome: 'Auto Peças Silva',
+        descricao: 'Correia do gerador',
+        pagoEm: '2026-08-10',
+      },
+    });
+
+    const [{ data }] = prisma.dinheiroNaRua.update.mock.calls[0];
+    expect(data.idFnApagarIxc).toBe(4242);
+    expect(data.gastoPagoEm).toEqual(new Date(2026, 7, 10));
+    expect(data.fornecedorNome).toBe('Auto Peças Silva');
+  });
+
+  /*
+   * Título criado que não chegou a ser baixado não gera saída no IXC. Marcar o
+   * dia mesmo assim faria o saldo somar de volta um dinheiro que ninguém
+   * descontou — a gaveta apareceria com mais do que tem.
+   */
+  it('despesa que não ficou paga no IXC não marca o dia da saída', async () => {
+    const { service, prisma } = montarServico({
+      entrega: { ...entrega, caixaId: 7, entregueEm: new Date(2026, 7, 10) },
+      despesaLancada: {
+        conta: { id: 'cp1', idFnApagarIxc: 4242 },
+        contas: [{ id: 'cp1', idFnApagarIxc: 4242 }],
+        avisoCategoria: null,
+        baixa: {
+          pagas: 0,
+          tentadas: 1,
+          valor: 0,
+          data: '2026-08-10',
+          avisos: ['A conta foi lançada no IXC, mas não ficou paga.'],
+        },
+      },
+    });
+
+    const r = await service.baixar('r1', {
+      valorGasto: 100,
+      despesa: {
+        idFornecedorIxc: 55,
+        fornecedorNome: 'Auto Peças Silva',
+        descricao: 'Correia do gerador',
+        pagoEm: '2026-08-10',
+      },
+    });
+
+    const [{ data }] = prisma.dinheiroNaRua.update.mock.calls[0];
+    expect(data.gastoPagoEm).toBeNull();
+    expect(r.despesa?.paga).toBe(false);
+    expect(r.despesa?.avisos.length).toBeGreaterThan(0);
+  });
+
+  /*
+   * A entrega fechada não presta contas de novo. Se a baixa viesse antes da
+   * despesa, uma falha do IXC deixaria a entrega quitada aqui e a despesa em
+   * lugar nenhum, sem caminho de volta pela tela.
+   */
+  it('despesa que nem chegou a ser lançada deixa a entrega aberta', async () => {
+    const { service, prisma, despesas } = montarServico({
+      entrega: { ...entrega, caixaId: 7, entregueEm: new Date(2026, 7, 10) },
+    });
+    despesas.lancar.mockRejectedValueOnce(new Error('IXC fora do ar'));
+
+    await expect(
+      service.baixar('r1', {
+        valorGasto: 100,
+        despesa: {
+          idFornecedorIxc: 55,
+          fornecedorNome: 'Auto Peças Silva',
+          descricao: 'Correia do gerador',
+        },
+      }),
+    ).rejects.toThrow(/IXC fora do ar/);
+
+    expect(prisma.dinheiroNaRua.update).not.toHaveBeenCalled();
+  });
+
+  it('não lança despesa quando o dinheiro voltou inteiro como troco', async () => {
+    const { service } = montarServico({
+      entrega: { ...entrega, caixaId: 7, entregueEm: new Date(2026, 7, 10) },
+    });
+
+    await expect(
+      service.baixar('r1', {
+        valorGasto: 0,
+        troco: 100,
+        despesa: {
+          idFornecedorIxc: 55,
+          fornecedorNome: 'Auto Peças Silva',
+          descricao: 'Correia do gerador',
+        },
+      }),
+    ).rejects.toThrow(/voltou inteiro como troco/i);
+  });
+
   it('não apaga entrega já prestada — seria reescrever caixa conferido', async () => {
     const { service } = montarServico({
       entrega: { ...entrega, baixadoEm: new Date('2026-08-15') },
@@ -292,6 +483,87 @@ describe('o saldo que deve estar na gaveta', () => {
     expect(e.resumo.entregueNoPeriodo).toBe(0);
     expect(e.resumo.trocoNoPeriodo).toBe(50);
     expect(e.resumo.saldoEsperado).toBe(1050);
+  });
+
+  /*
+   * Contagem vence cálculo. O primeiro caixa batido aqui fechou com R$ 0,00
+   * calculados e a gaveta cheia — o saldo inicial informado foi zero, e o zero
+   * atravessou o período inteiro. Se o encadeamento seguisse o calculado, todo
+   * fechamento seguinte nasceria com o mesmo buraco.
+   */
+  it('parte da contagem do fechamento anterior, e não do que ele calculou', async () => {
+    const { service } = montarServico({
+      anterior: { saldoFinal: 0, saldoContado: 3368 },
+      lancamentos: [saida(1, 68)],
+    });
+
+    const e = await service.extrato(7, '2026-08-01', '2026-08-31');
+
+    expect(e.resumo.saldoInicial).toBe(3368);
+    expect(e.resumo.saldoEsperado).toBe(3300);
+  });
+
+  it('fechamento anterior sem contagem continua valendo pelo calculado', async () => {
+    const { service } = montarServico({
+      anterior: { saldoFinal: 1000, saldoContado: null },
+    });
+
+    const e = await service.extrato(7, '2026-08-01', '2026-08-31');
+
+    expect(e.resumo.saldoInicial).toBe(1000);
+  });
+
+  /*
+   * O dinheiro sai da gaveta uma vez só.
+   *
+   * Ele já saiu na entrega; a conta a pagar que a prestação lançou o faz sair
+   * de novo, agora pelas saídas do IXC. Descontar os dois deixaria a gaveta
+   * R$ 200,00 mais pobre na tela do que na mão de quem está contando.
+   */
+  it('o gasto que virou conta a pagar não desconta duas vezes', async () => {
+    const { service } = montarServico({
+      anterior: { saldoFinal: 1000 },
+      // A saída de 200 no IXC é a baixa da despesa que a prestação lançou.
+      lancamentos: [saida(1, 200)],
+      movimentoDaRua: [
+        {
+          valor: 204,
+          entregueEm: DENTRO,
+          baixadoEm: DENTRO,
+          troco: 4,
+          valorGasto: 200,
+          gastoPagoEm: DENTRO,
+        },
+      ],
+    });
+
+    const e = await service.extrato(7, '2026-08-01', '2026-08-31');
+
+    expect(e.resumo.gastoLancadoNoPeriodo).toBe(200);
+    // 1000 - 204 que saiu + 4 de troco = 800, e a saída de 200 do IXC é a
+    // mesma saída, não outra.
+    expect(e.resumo.saldoEsperado).toBe(800);
+  });
+
+  it('gasto sem conta a pagar não compensa nada', async () => {
+    const { service } = montarServico({
+      anterior: { saldoFinal: 1000 },
+      movimentoDaRua: [
+        {
+          valor: 204,
+          entregueEm: DENTRO,
+          baixadoEm: DENTRO,
+          troco: 4,
+          valorGasto: 200,
+          gastoPagoEm: null,
+        },
+      ],
+    });
+
+    const e = await service.extrato(7, '2026-08-01', '2026-08-31');
+
+    expect(e.resumo.gastoLancadoNoPeriodo).toBe(0);
+    expect(e.resumo.saldoEsperado).toBe(800);
   });
 
   it('entregue e prestado no mesmo período: sobra o que virou nota', async () => {
@@ -419,6 +691,38 @@ describe('fechar o período', () => {
     expect(Number(criados[0].saldoFinal)).toBe(700);
   });
 
+  it('guarda a contagem da gaveta ao lado do que calculou', async () => {
+    const { service, criados } = montarServico({
+      anterior: { saldoFinal: 1000 },
+      lancamentos: [saida(1, 300)],
+      conferencias: [{ idLancamentoIxc: 1, conferido: true }],
+    });
+
+    await service.fechar({
+      caixaId: 7,
+      de: '2026-08-01',
+      ate: '2026-08-31',
+      saldoContado: 690,
+    });
+
+    // Os dois convivem: o calculado é o que a soma diz, o contado é o que
+    // existe. A diferença entre eles é o que se foi procurar.
+    expect(Number(criados[0].saldoFinal)).toBe(700);
+    expect(Number(criados[0].saldoContado)).toBe(690);
+  });
+
+  it('sem contar, o fechamento sai só com o calculado', async () => {
+    const { service, criados } = montarServico({
+      anterior: { saldoFinal: 1000 },
+      lancamentos: [saida(1, 300)],
+      conferencias: [{ idLancamentoIxc: 1, conferido: true }],
+    });
+
+    await service.fechar({ caixaId: 7, de: '2026-08-01', ate: '2026-08-31' });
+
+    expect(criados[0].saldoContado).toBeNull();
+  });
+
   it('guarda os totais do momento, e não uma referência ao período', async () => {
     const { service, criados } = montarServico({
       lancamentos: [saida(1, 40), { ...saida(2, 60), tipo: 'ENTRADA' as const }],
@@ -434,5 +738,58 @@ describe('fechar o período', () => {
 
     expect(Number(criados[0].totalSaidas)).toBe(40);
     expect(Number(criados[0].totalEntradas)).toBe(60);
+  });
+});
+
+/*
+ * A correção existe por causa do primeiro caixa batido: ele fechou com o
+ * calculado, a gaveta tinha outro valor, e sem poder corrigir a contagem o
+ * único caminho seria começar de novo — apagando um fechamento assinado.
+ */
+describe('corrigir a contagem de um fechamento', () => {
+  const fechamento = { id: 'f1', caixaId: 7, saldoFinal: 0, saldoContado: null };
+
+  it('grava a contagem do último fechamento do caixa', async () => {
+    const { service, prisma } = montarServico({
+      fechamento,
+      ultimo: fechamento,
+    });
+
+    await service.corrigirContagem('f1', 3368, 'u1');
+
+    const [{ data }] = prisma.fechamentoCaixa.update.mock.calls[0];
+    expect(Number(data.saldoContado)).toBe(3368);
+  });
+
+  /*
+   * Os totais de um fechamento são cópia do que se viu no dia. Mexer num do
+   * meio deixaria os seguintes apoiados num saldo que não existe mais, e nada
+   * na tela diria isso.
+   */
+  it('recusa corrigir um fechamento que já tem outro depois dele', async () => {
+    const { service } = montarServico({
+      fechamento,
+      ultimo: { id: 'f2', caixaId: 7, saldoFinal: 500, saldoContado: null },
+    });
+
+    await expect(service.corrigirContagem('f1', 3368)).rejects.toThrow(
+      /já foi fechado de novo/i,
+    );
+  });
+
+  it('recusa contagem negativa', async () => {
+    const { service } = montarServico({ fechamento, ultimo: fechamento });
+
+    await expect(service.corrigirContagem('f1', -1)).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('fechamento que não existe não se corrige', async () => {
+    const { service } = montarServico({ fechamento: null, ultimo: null });
+
+    await expect(service.corrigirContagem('f9', 100)).rejects.toThrow(
+      /não existe/i,
+    );
   });
 });

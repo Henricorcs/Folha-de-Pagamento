@@ -1310,7 +1310,29 @@ export interface DinheiroNaRua {
   troco: string | null;
   observacao: string | null;
   temNota: boolean;
+  /** Título gerado no IXC pela despesa que a prestação lançou. */
+  idFnApagarIxc: number | null;
+  fornecedorNome: string | null;
+  /** Dia em que o IXC deu a saída do gasto no caixa. */
+  gastoPagoEm: string | null;
   createdAt: string;
+}
+
+/** O que aconteceu com a conta a pagar que a prestação lançou. */
+export interface DespesaDaPrestacao {
+  contaPagarId: string;
+  idFnApagarIxc: number | null;
+  fornecedorNome: string;
+  /** Null quando a baixa no IXC não saiu. */
+  pagoEm: string | null;
+  paga: boolean;
+  valor: number;
+  avisos: string[];
+}
+
+/** A prestação de contas como o servidor a devolve. */
+export interface PrestacaoFeita extends DinheiroNaRua {
+  despesa: DespesaDaPrestacao | null;
 }
 
 export interface FechamentoCaixa {
@@ -1326,6 +1348,8 @@ export interface FechamentoCaixa {
   totalNaRua: string;
   saldoInicial: string;
   saldoFinal: string;
+  /** O que se contou na gaveta. Null = fechado sem contar. */
+  saldoContado: string | null;
   observacao: string | null;
   fechadoPor: string | null;
   createdAt: string;
@@ -1351,6 +1375,11 @@ export interface ExtratoDoCaixa {
     saldoInicial: number | null;
     entregueNoPeriodo: number;
     trocoNoPeriodo: number;
+    /**
+     * O que as saídas do IXC já descontam por conta da prestação: gasto que
+     * saiu na entrega e voltou a sair como conta a pagar baixada no caixa.
+     */
+    gastoLancadoNoPeriodo: number;
     /** O que deve estar na gaveta agora. Null enquanto falta o inicial. */
     saldoEsperado: number | null;
   };

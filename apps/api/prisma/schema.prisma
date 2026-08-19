@@ -1223,11 +1223,28 @@ model DinheiroNaRua {
   notaFoto   String?   @map("nota_foto")
   observacao String?
 
+  // --- A despesa que a prestação lançou ---
+  /// Título gerado no IXC para o que foi gasto, quando a prestação lançou um.
+  idFnApagarIxc Int?    @map("id_fn_apagar_ixc")
+  /// A conta a pagar daqui que virou aquele título
+  contaPagarId  String? @map("conta_pagar_id")
+  /// Quem recebeu, como o cadastro do IXC o chama
+  fornecedorNome String? @map("fornecedor_nome")
+
+  /// Dia em que o IXC deu a saída do gasto no caixa.
+  ///
+  /// Preenchido só quando a baixa lá deu certo, e é a chave da compensação: o
+  /// período que contém esta data soma o gasto de volta, porque as saídas do
+  /// IXC já o descontam. Sem isso o mesmo dinheiro sairia duas vezes da conta
+  /// do saldo — uma pela entrega, outra pela saída lançada.
+  gastoPagoEm DateTime? @map("gasto_pago_em")
+
   criadoPor String?  @map("criado_por")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([caixaId, baixadoEm])
+  @@index([caixaId, gastoPagoEm])
   @@map("dinheiro_na_rua")
 }
 
@@ -1260,8 +1277,15 @@ model FechamentoCaixa {
 
   /// O que deveria haver na gaveta ao fechar. Não é saldo contábil: o dinheiro
   /// entregue na rua já saiu da gaveta sem virar saída no IXC, e o troco volta
-  /// do mesmo jeito. É este número que o próximo período usa como inicial.
+  /// do mesmo jeito.
   saldoFinal Decimal @map("saldo_final") @db.Decimal(14, 2)
+
+  /// Quanto se contou de verdade na gaveta ao fechar. Cálculo não é contagem: a
+  /// diferença entre os dois é a sobra ou a falta do período, e é deste número
+  /// — quando há — que o período seguinte parte, para a diferença ser absorvida
+  /// uma vez em vez de andar de fechamento em fechamento. Nulo = fechado sem
+  /// contar, e aí o calculado é que segue.
+  saldoContado Decimal? @map("saldo_contado") @db.Decimal(14, 2)
 
   observacao String?
 

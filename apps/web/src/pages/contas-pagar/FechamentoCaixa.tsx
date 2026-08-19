@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
+import { SeletorDeCategoria } from '../../components/SeletorDeCategoria';
 import {
   Aviso,
   Bloco,
@@ -16,10 +17,30 @@ import { reduzirFoto } from '../../lib/foto';
 import { formatBRL, formatData } from '../../lib/format';
 import type {
   CaixasDoFechamento,
+  CategoriaDespesa,
   DinheiroNaRua,
   ExtratoDoCaixa,
   LancamentoDoCaixa,
+  PrestacaoFeita,
 } from '../../lib/types';
+
+/** Um fornecedor do IXC, como a busca desta tela o devolve. */
+interface FornecedorIxc {
+  idFornecedor: number;
+  nome: string;
+  nomeFantasia: string | null;
+  cpfCnpj: string | null;
+}
+
+/** Um fechamento já assinado, do jeito que o extrato o entrega. */
+type FechamentoDoPeriodo = ExtratoDoCaixa['fechamentos'][number];
+
+/** "AAAA-MM-DD" do dia local de um instante vindo do servidor. */
+function diaDoISO(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
 
 /** Primeiro e último dia do mês corrente, que é o recorte mais pedido. */
 function mesCorrente(): { de: string; ate: string } {
@@ -227,7 +248,11 @@ function Conferencia({
   }
 
   const fechar = useMutation({
-    mutationFn: async (dados: { observacao: string; saldoInicial?: number }) =>
+    mutationFn: async (dados: {
+      observacao: string;
+      saldoInicial?: number;
+      saldoContado?: number;
+    }) =>
       (
         await api.post('/caixa/fechar', {
           caixaId,
@@ -235,6 +260,7 @@ function Conferencia({
           ate,
           observacao: dados.observacao,
           saldoInicial: dados.saldoInicial,
+          saldoContado: dados.saldoContado,
         })
       ).data,
     onSuccess: recarregar,
@@ -425,6 +451,7 @@ function Conferencia({
             naRua={resumo.naRua}
             semSaidas={qtdSaidas === 0}
             precisaSaldoInicial={resumo.saldoInicial === null}
+            saldoEsperado={resumo.saldoEsperado}
             pendente={fechar.isPending}
             onFechar={(dados) => fechar.mutate(dados)}
           />
@@ -434,28 +461,15 @@ function Conferencia({
       {fechamentos.length > 0 && (
         <Bloco titulo="Fechamentos deste período" className="surgir mt-5">
           <ul className="lista-dividida">
-            {fechamentos.map((f) => (
-              <li key={f.id} className="py-2 text-sm">
-                <span className="font-medium text-tinta-800">
-                  {formatData(f.de)} a {formatData(f.ate)}
-                </span>{' '}
-                — fechou com{' '}
-                <span className="valor">{formatBRL(Number(f.saldoFinal))}</span>
-                {' '}na gaveta, {f.conferidos} saída(s) conferida(s) somando{' '}
-                <span className="valor">{formatBRL(Number(f.totalSaidas))}</span>
-                {Number(f.totalNaRua) > 0 && (
-                  <>
-                    , com{' '}
-                    <span className="valor">
-                      {formatBRL(Number(f.totalNaRua))}
-                    </span>{' '}
-                    ainda na rua
-                  </>
-                )}
-                {f.observacao && (
-                  <div className="text-xs text-tinta-400">{f.observacao}</div>
-                )}
-              </li>
+            {fechamentos.map((f, i) => (
+              <LinhaDoFechamento
+                key={f.id}
+                fechamento={f}
+                /* Só o mais recente aceita correção — os de trás já têm gente
+                   apoiada neles, e o servidor recusa de todo jeito. */
+                podeCorrigir={i === 0}
+                onCorrigido={recarregar}
+              />
             ))}
           </ul>
         </Bloco>
@@ -728,6 +742,14 @@ function DinheiroNaRuaBloco({
   const [motivo, setMotivo] = useState('');
   const [erro, setErro] = useState<string | null>(null);
   const [prestando, setPrestando] = useState<DinheiroNaRua | null>(null);
+  /**
+   * O que a despesa lançada deixou pendente no IXC.
+   *
+   * A prestação já foi registrada quando isto aparece — são recados sobre o
+   * título lá (não ficou pago, a etiqueta não colou). Enterrá-los no console
+   * deixaria uma conta em aberto no IXC que ninguém sabe que existe.
+   */
+  const [avisos, setAvisos] = useState<string[]>([]);
 
   const entregar = useMutation({
     mutationFn: async () =>
@@ -861,11 +883,27 @@ function DinheiroNaRuaBloco({
 
       {erro && <p className="mt-3 text-sm text-rose-600">{erro}</p>}
 
+      {avisos.length > 0 && (
+        <div className="mt-3">
+          <Aviso tom="atencao">
+            <p className="font-medium">
+              A prestação foi registrada, mas o IXC deixou pendências:
+            </p>
+            <ul className="mt-1 list-disc pl-5">
+              {avisos.map((a) => (
+                <li key={a}>{a}</li>
+              ))}
+            </ul>
+          </Aviso>
+        </div>
+      )}
+
       {prestando && (
         <PrestarContas
           entrega={prestando}
-          onPronto={() => {
+          onPronto={(recados) => {
             setPrestando(null);
+            setAvisos(recados);
             onMudou();
           }}
           onFechar={() => setPrestando(null)}
@@ -888,7 +926,7 @@ function PrestarContas({
   onFechar,
 }: {
   entrega: DinheiroNaRua;
-  onPronto: () => void;
+  onPronto: (avisos: string[]) => void;
   onFechar: () => void;
 }) {
   const [gasto, setGasto] = useState('');
@@ -897,20 +935,86 @@ function PrestarContas({
   const [observacao, setObservacao] = useState('');
   const [erro, setErro] = useState<string | null>(null);
 
+  // A despesa que este gasto vira no IXC.
+  const [lancarDespesa, setLancarDespesa] = useState(true);
+  const [termo, setTermo] = useState('');
+  const [fornecedor, setFornecedor] = useState<FornecedorIxc | null>(null);
+  /* O motivo da entrega já é a descrição da despesa nove vezes em dez — quem
+     anotou "peça do gerador" ao entregar não deveria digitá-lo de novo. */
+  const [descricao, setDescricao] = useState(entrega.motivo ?? '');
+  /* O dia do gasto, não o de hoje: quem levou dinheiro na segunda só presta
+     contas na sexta, e a saída no IXC tem de cair na segunda. */
+  const [pagoEm, setPagoEm] = useState(() => diaDoISO(entrega.entregueEm));
+  const [categoriaId, setCategoriaId] = useState('');
+
   const saiu = Number(entrega.valor);
   const soma = (Number(gasto) || 0) + (Number(troco) || 0);
   const diferenca = Math.round((soma - saiu) * 100) / 100;
   const fecha = Math.abs(diferenca) < 0.005 && Number(gasto) >= 0;
 
+  /** Voltando tudo como troco não há despesa nenhuma a lançar. */
+  const temGasto = Number(gasto) > 0;
+  const comDespesa = lancarDespesa && temGasto;
+  const faltaDaDespesa = !comDespesa
+    ? null
+    : !fornecedor
+      ? 'Escolha quem recebeu o dinheiro.'
+      : descricao.trim().length < 3
+        ? 'Diga em que o dinheiro foi gasto.'
+        : !pagoEm
+          ? 'Informe o dia em que o dinheiro saiu.'
+          : null;
+
+  // A busca só sai depois que quem digita para: cada tecla aqui é uma consulta
+  // ao IXC, que é lento e não é nosso.
+  const [buscaEfetiva, setBuscaEfetiva] = useState('');
+  useEffect(() => {
+    const id = setTimeout(() => setBuscaEfetiva(termo.trim()), 400);
+    return () => clearTimeout(id);
+  }, [termo]);
+
+  const fornecedores = useQuery({
+    queryKey: ['fornecedores-ixc', buscaEfetiva],
+    queryFn: async () =>
+      (
+        await api.get<FornecedorIxc[]>('/fornecedores-ixc', {
+          params: { busca: buscaEfetiva },
+        })
+      ).data,
+    enabled: comDespesa && buscaEfetiva.length >= 2 && !fornecedor,
+    retry: 0,
+  });
+
+  const categorias = useQuery({
+    queryKey: ['categorias-despesa'],
+    queryFn: async () =>
+      (await api.get<CategoriaDespesa[]>('/categorias-despesa')).data,
+    enabled: comDespesa,
+  });
+
   const baixar = useMutation({
     mutationFn: async () =>
-      api.post(`/caixa/dinheiro-na-rua/${entrega.id}/baixar`, {
-        valorGasto: Number(gasto) || 0,
-        troco: Number(troco) || 0,
-        notaFoto: foto ?? undefined,
-        observacao: observacao || undefined,
-      }),
-    onSuccess: onPronto,
+      (
+        await api.post<PrestacaoFeita>(
+          `/caixa/dinheiro-na-rua/${entrega.id}/baixar`,
+          {
+            valorGasto: Number(gasto) || 0,
+            troco: Number(troco) || 0,
+            notaFoto: foto ?? undefined,
+            observacao: observacao || undefined,
+            despesa: comDespesa
+              ? {
+                  idFornecedorIxc: fornecedor!.idFornecedor,
+                  fornecedorNome: fornecedor!.nome,
+                  descricao: descricao.trim(),
+                  pagoEm,
+                  categoriaId: categoriaId || undefined,
+                }
+              : undefined,
+          },
+        )
+      ).data,
+    onSuccess: (feita) => onPronto(feita.despesa?.avisos ?? []),
     onError: (e) => setErro(mensagemErro(e)),
   });
 
@@ -977,6 +1081,165 @@ function PrestarContas({
         </div>
       </div>
 
+      {/*
+        Onde o dinheiro foi gasto.
+
+        Sem esta parte, a nota que a pessoa trouxe fica sabida só aqui: o
+        dinheiro sai da gaveta e o financeiro da empresa nunca vê despesa
+        nenhuma. Com ela, o gasto vira conta a pagar criada, aprovada e baixada
+        no caixa de onde o dinheiro saiu — a saída que faltava no IXC.
+      */}
+      <div className="mt-4 rounded-xl border border-tinta-200 p-3">
+        <label className="flex items-center gap-2 text-sm font-medium text-tinta-800">
+          <input
+            type="checkbox"
+            checked={lancarDespesa}
+            onChange={(e) => setLancarDespesa(e.target.checked)}
+            disabled={!temGasto}
+          />
+          Lançar a conta a pagar deste gasto
+        </label>
+
+        {!temGasto ? (
+          <p className="ajuda mt-1">
+            Sem valor de nota não há despesa a lançar — o dinheiro voltou
+            inteiro como troco.
+          </p>
+        ) : !lancarDespesa ? (
+          <p className="ajuda mt-1">
+            Desmarcado, a prestação fica registrada só aqui. Use assim quando a
+            despesa já tiver sido lançada no IXC por outro caminho; senão o
+            caixa de lá continua sem a saída.
+          </p>
+        ) : (
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label className="rotulo" htmlFor="fornecedor-prestacao">
+                Quem recebeu
+              </label>
+              {fornecedor ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium text-tinta-800">
+                    {fornecedor.nome}
+                  </span>
+                  {fornecedor.cpfCnpj && (
+                    <span className="text-xs text-tinta-400">
+                      {fornecedor.cpfCnpj}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFornecedor(null);
+                      setTermo('');
+                    }}
+                    className="btn btn-p btn-sutil"
+                  >
+                    Trocar
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    id="fornecedor-prestacao"
+                    value={termo}
+                    onChange={(e) => setTermo(e.target.value)}
+                    className="campo"
+                    placeholder="nome, nome fantasia ou CPF/CNPJ"
+                  />
+                  {fornecedores.isFetching && (
+                    <p className="ajuda">Procurando no IXC…</p>
+                  )}
+                  {fornecedores.data && fornecedores.data.length > 0 && (
+                    <ul className="mt-1 max-h-44 overflow-auto rounded-xl border border-tinta-200">
+                      {fornecedores.data.map((f) => (
+                        <li key={f.idFornecedor}>
+                          <button
+                            type="button"
+                            onClick={() => setFornecedor(f)}
+                            className="w-full px-3 py-2 text-left text-sm hover:bg-brand-500/10"
+                          >
+                            <span className="text-tinta-800">{f.nome}</span>
+                            {f.nomeFantasia && (
+                              <span className="text-tinta-400">
+                                {' '}
+                                — {f.nomeFantasia}
+                              </span>
+                            )}
+                            {f.cpfCnpj && (
+                              <span className="ml-2 text-xs text-tinta-400">
+                                {f.cpfCnpj}
+                              </span>
+                            )}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {/* O cadastro é do IXC e continua sendo: criar fornecedor
+                      daqui só para lançar uma nota encheria a base de lá de
+                      duplicados. */}
+                  {buscaEfetiva.length >= 2 &&
+                    !fornecedores.isFetching &&
+                    fornecedores.data?.length === 0 && (
+                      <p className="ajuda">
+                        Nenhum fornecedor com esse nome no IXC. Cadastre-o por
+                        lá e volte aqui.
+                      </p>
+                    )}
+                </>
+              )}
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="rotulo" htmlFor="descricao-prestacao">
+                Em que foi gasto
+              </label>
+              <input
+                id="descricao-prestacao"
+                value={descricao}
+                onChange={(e) => setDescricao(e.target.value)}
+                className="campo"
+                placeholder="correia do gerador, combustível da caminhonete…"
+              />
+              <p className="ajuda">É o que aparece na conta a pagar do IXC.</p>
+            </div>
+
+            <div>
+              <label className="rotulo" htmlFor="pago-em-prestacao">
+                Dia em que o dinheiro saiu
+              </label>
+              <input
+                id="pago-em-prestacao"
+                type="date"
+                value={pagoEm}
+                onChange={(e) => setPagoEm(e.target.value)}
+                className="campo"
+              />
+              <p className="ajuda">
+                Pode ser uma data já passada — é o dia da baixa no IXC, e é ele
+                que decide em que caixa o gasto cai.
+              </p>
+            </div>
+
+            <div>
+              <label className="rotulo" htmlFor="categoria-prestacao">
+                Classificação
+              </label>
+              <SeletorDeCategoria
+                id="categoria-prestacao"
+                categorias={categorias.data}
+                value={categoriaId}
+                vazio="Sem classificação"
+                carregando={categorias.isLoading}
+                onChange={setCategoriaId}
+                ajuda="É por ela que o dashboard separa os gastos."
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="mt-3">
         <label className="rotulo" htmlFor="obs-prestacao">
           Observação
@@ -994,13 +1257,27 @@ function PrestarContas({
         <button
           type="button"
           onClick={() => baixar.mutate()}
-          disabled={!fecha || baixar.isPending}
+          disabled={!fecha || !!faltaDaDespesa || baixar.isPending}
           className="btn btn-primario"
+          title={
+            faltaDaDespesa ??
+            (comDespesa
+              ? 'Cria a conta a pagar, aprova e dá a baixa no caixa'
+              : 'Registra a prestação sem lançar despesa')
+          }
         >
-          {baixar.isPending ? 'Registrando…' : 'Dar baixa'}
+          {baixar.isPending
+            ? comDespesa
+              ? 'Lançando no IXC…'
+              : 'Registrando…'
+            : 'Finalizar'}
         </button>
-        {fecha ? (
-          <Selo tom="pago">A conta fecha</Selo>
+        {fecha && faltaDaDespesa ? (
+          <span className="text-sm text-amber-600">{faltaDaDespesa}</span>
+        ) : fecha ? (
+          <Selo tom="pago">
+            {comDespesa ? 'Pronto para lançar' : 'A conta fecha'}
+          </Selo>
         ) : (
           <span className="text-sm text-tinta-500">
             Nota + troco somam{' '}
@@ -1029,6 +1306,7 @@ function Fechar({
   naRua,
   semSaidas,
   precisaSaldoInicial,
+  saldoEsperado,
   pendente,
   onFechar,
 }: {
@@ -1038,12 +1316,26 @@ function Fechar({
   semSaidas: boolean;
   /** Primeiro fechamento deste caixa: alguém tem de dizer de onde parte. */
   precisaSaldoInicial: boolean;
+  /** O que a soma diz que deve haver na gaveta, para comparar com a contagem. */
+  saldoEsperado: number | null;
   pendente: boolean;
-  onFechar: (dados: { observacao: string; saldoInicial?: number }) => void;
+  onFechar: (dados: {
+    observacao: string;
+    saldoInicial?: number;
+    saldoContado?: number;
+  }) => void;
 }) {
   const [observacao, setObservacao] = useState('');
   const [saldoInicial, setSaldoInicial] = useState('');
+  const [saldoContado, setSaldoContado] = useState('');
   const faltaOSaldo = precisaSaldoInicial && saldoInicial.trim() === '';
+
+  const contou = saldoContado.trim() !== '';
+  /** Sobra (positiva) ou falta (negativa) entre o que existe e o que a soma diz. */
+  const diferenca =
+    contou && saldoEsperado !== null
+      ? Math.round((Number(saldoContado) - saldoEsperado) * 100) / 100
+      : null;
 
   return (
     /* Sem cartão próprio: ele já vive dentro do cartão dos revisados, e um
@@ -1070,6 +1362,35 @@ function Fechar({
         </div>
       )}
 
+      {/* A contagem da gaveta. É ela que faz o fechamento valer alguma coisa:
+          sem contar, o período fecha pelo cálculo, e cálculo não encontra
+          dinheiro que sumiu nem dinheiro que apareceu. */}
+      <div className="mb-3">
+        <label className="rotulo" htmlFor="saldo-contado">
+          Quanto há na gaveta agora, <span className="text-tinta-800">contado</span>
+        </label>
+        <div className="max-w-xs">
+          <CampoDinheiro valor={saldoContado} onChange={setSaldoContado} />
+        </div>
+        {diferenca === null ? (
+          <p className="ajuda">
+            Opcional, mas é o número que o próximo período usa como ponto de
+            partida. Em branco, o fechamento parte do que a soma calculou.
+          </p>
+        ) : Math.abs(diferenca) < 0.005 ? (
+          <p className="mt-1 text-sm text-emerald-600">
+            Bate com o esperado, {formatBRL(saldoEsperado ?? 0)}.
+          </p>
+        ) : (
+          <p className="mt-1 text-sm text-amber-600">
+            {diferenca > 0 ? 'Sobra' : 'Falta'}{' '}
+            <span className="valor">{formatBRL(Math.abs(diferenca))}</span> em
+            relação aos {formatBRL(saldoEsperado ?? 0)} que a soma esperava. O
+            fechamento guarda os dois, e o próximo período parte do contado.
+          </p>
+        )}
+      </div>
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="flex-1">
           <label className="rotulo" htmlFor="obs-fechamento">
@@ -1091,6 +1412,7 @@ function Fechar({
               saldoInicial: precisaSaldoInicial
                 ? Number(saldoInicial) || 0
                 : undefined,
+              saldoContado: contou ? Number(saldoContado) || 0 : undefined,
             })
           }
           disabled={faltam > 0 || faltaOSaldo || pendente}
@@ -1127,5 +1449,131 @@ function Fechar({
         )}
       </p>
     </div>
+  );
+}
+
+/**
+ * Um fechamento já assinado, e o conserto da contagem.
+ *
+ * O primeiro caixa batido aqui fechou pelo cálculo e a gaveta tinha outro
+ * valor — sem poder corrigir a contagem, o único caminho seria apagar um
+ * fechamento assinado e refazê-lo. Só o mais recente aceita conserto: os de
+ * trás já têm o período seguinte apoiado neles.
+ */
+function LinhaDoFechamento({
+  fechamento: f,
+  podeCorrigir,
+  onCorrigido,
+}: {
+  fechamento: FechamentoDoPeriodo;
+  podeCorrigir: boolean;
+  onCorrigido: () => void;
+}) {
+  const [corrigindo, setCorrigindo] = useState(false);
+  const [valor, setValor] = useState(f.saldoContado ?? '');
+  const [erro, setErro] = useState<string | null>(null);
+
+  const corrigir = useMutation({
+    mutationFn: async () =>
+      api.put(`/caixa/fechamentos/${f.id}/contagem`, {
+        saldoContado: Number(valor) || 0,
+      }),
+    onSuccess: () => {
+      setCorrigindo(false);
+      setErro(null);
+      onCorrigido();
+    },
+    onError: (e) => setErro(mensagemErro(e)),
+  });
+
+  const calculado = Number(f.saldoFinal);
+  const contado = f.saldoContado === null ? null : Number(f.saldoContado);
+  const diferenca =
+    contado === null ? null : Math.round((contado - calculado) * 100) / 100;
+
+  return (
+    <li className="py-2 text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <span className="font-medium text-tinta-800">
+            {formatData(f.de)} a {formatData(f.ate)}
+          </span>{' '}
+          — fechou com{' '}
+          <span className="valor">{formatBRL(contado ?? calculado)}</span>{' '}
+          {contado === null ? 'calculados' : 'contados'} na gaveta,{' '}
+          {f.conferidos} saída(s) conferida(s) somando{' '}
+          <span className="valor">{formatBRL(Number(f.totalSaidas))}</span>
+          {Number(f.totalNaRua) > 0 && (
+            <>
+              , com{' '}
+              <span className="valor">{formatBRL(Number(f.totalNaRua))}</span>{' '}
+              ainda na rua
+            </>
+          )}
+          {/* A diferença é o motivo de se bater caixa: dizer só o total
+              contado esconderia justamente o que se foi procurar. */}
+          {diferenca !== null && Math.abs(diferenca) >= 0.005 && (
+            <div className="text-xs text-amber-600">
+              {diferenca > 0 ? 'Sobra' : 'Falta'} de{' '}
+              {formatBRL(Math.abs(diferenca))} sobre os{' '}
+              {formatBRL(calculado)} calculados.
+            </div>
+          )}
+          {contado === null && (
+            <div className="text-xs text-tinta-400">
+              Fechado sem contar a gaveta.
+            </div>
+          )}
+          {f.observacao && (
+            <div className="text-xs text-tinta-400">{f.observacao}</div>
+          )}
+        </div>
+
+        {podeCorrigir && !corrigindo && (
+          <button
+            type="button"
+            onClick={() => setCorrigindo(true)}
+            className="btn btn-p btn-sutil shrink-0"
+            title="Informa quanto havia de verdade na gaveta neste fechamento"
+          >
+            {contado === null ? 'Informar a contagem' : 'Corrigir a contagem'}
+          </button>
+        )}
+      </div>
+
+      {corrigindo && (
+        <div className="mt-2 flex flex-wrap items-end gap-2">
+          <div className="w-40">
+            <label className="rotulo">Contado na gaveta</label>
+            <CampoDinheiro valor={valor} onChange={setValor} />
+          </div>
+          <button
+            type="button"
+            onClick={() => corrigir.mutate()}
+            disabled={valor.trim() === '' || corrigir.isPending}
+            className="btn btn-p btn-primario"
+          >
+            {corrigir.isPending ? 'Gravando…' : 'Gravar'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setCorrigindo(false);
+              setErro(null);
+            }}
+            className="btn btn-p btn-sutil"
+          >
+            Cancelar
+          </button>
+          <p className="ajuda w-full">
+            É deste número que o próximo período parte. A diferença contra o
+            calculado fica registrada aqui, e morre neste fechamento em vez de
+            andar para os seguintes.
+          </p>
+        </div>
+      )}
+
+      {erro && <p className="mt-1 text-sm text-rose-600">{erro}</p>}
+    </li>
   );
 }

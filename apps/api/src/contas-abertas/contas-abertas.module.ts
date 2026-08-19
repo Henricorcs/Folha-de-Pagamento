@@ -44,5 +44,10 @@ import { RecorrentesService } from './recorrentes.service';
     RecorrentesService,
     RecorrentesPollerService,
   ],
+  // O fechamento de caixa lanca a despesa do dinheiro que voltou da rua pelo
+  // mesmo caminho desta tela: mesma auditoria, mesma baixa, mesmo titulo no
+  // IXC. Um segundo caminho para criar conta a pagar seria um segundo lugar
+  // para ele quebrar.
+  exports: [DespesasService],
 })
 export class ContasAbertasModule {}

@@ -1,8 +1,35 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { DespesasService } from '../contas-abertas/despesas.service';
 import { ConfigFinanceiraService } from '../financeiro/config-financeira.service';
 import { CaixaService, type LancamentoDoCaixa } from '../ixc/caixa.service';
 import { PrismaService } from '../prisma/prisma.service';
+
+/**
+ * A despesa que a prestação de contas lança: o que a pessoa foi comprar com o
+ * dinheiro que levou.
+ *
+ * Sem ela o gasto fica sabido só aqui — a nota existe na gaveta e o financeiro
+ * da empresa nunca soube que aquele dinheiro virou despesa.
+ */
+export interface DespesaDaPrestacao {
+  /** Quem recebeu, entre os fornecedores que já existem no IXC. */
+  idFornecedorIxc: number;
+  fornecedorNome: string;
+  /** O que foi comprado — vira a observação do título no IXC. */
+  descricao: string;
+  /**
+   * Dia em que o dinheiro saiu (AAAA-MM-DD). Vazio = o dia da entrega.
+   *
+   * Quase sempre está no passado: quem levou dinheiro na segunda só senta para
+   * prestar contas na sexta, e a saída no IXC tem de cair na segunda, ou o
+   * caixa daquela semana não bate.
+   */
+  pagoEm?: string;
+  categoriaId?: string | null;
+  tipoPagamento?: string;
+  contaContabil?: number;
+}
 
 /** Um lançamento do IXC junto do que a conferência guardou sobre ele. */
 export interface LancamentoConferido extends LancamentoDoCaixa {
@@ -33,6 +60,7 @@ export class FechamentoCaixaService {
     private readonly prisma: PrismaService,
     private readonly caixa: CaixaService,
     private readonly config: ConfigFinanceiraService,
+    private readonly despesas: DespesasService,
   ) {}
 
   /** Os caixas do IXC, para escolher qual bater. */
@@ -119,12 +147,17 @@ export class FechamentoCaixaService {
      * página com 502. Então o saldo se encadeia: cada fechamento guarda com
      * quanto o período fechou, e o seguinte começa dali. O primeiro de cada
      * caixa pergunta a quem está contando a gaveta.
+     *
+     * Quando o fechamento anterior foi contado, é a contagem que vale, e não a
+     * conta. Dinheiro que existe na gaveta e não aparece na soma continuaria a
+     * faltar em todos os períodos seguintes se o encadeamento seguisse o
+     * calculado — a diferença tem de morrer no fechamento em que apareceu.
      */
     const anterior = await this.prisma.fechamentoCaixa.findFirst({
       where: { caixaId, ate: { lt: inicio } },
       orderBy: { ate: 'desc' },
     });
-    const saldoInicial = anterior ? Number(anterior.saldoFinal) : null;
+    const saldoInicial = anterior ? Number(saldoQueSegue(anterior)) : null;
 
     /*
      * O dinheiro na rua mexe na gaveta sem passar pelo IXC.
@@ -140,6 +173,7 @@ export class FechamentoCaixaService {
         OR: [
           { entregueEm: { gte: inicio, lte: fim } },
           { baixadoEm: { gte: inicio, lte: fim } },
+          { gastoPagoEm: { gte: inicio, lte: fim } },
         ],
       },
     });
@@ -152,6 +186,26 @@ export class FechamentoCaixaService {
       doPeriodo
         .filter((d) => d.baixadoEm && d.baixadoEm >= inicio && d.baixadoEm <= fim)
         .reduce((s, d) => s + Number(d.troco ?? 0), 0),
+    );
+
+    /*
+     * O gasto que a prestação lançou como conta a pagar volta para a conta.
+     *
+     * Não porque o dinheiro voltou — ele foi gasto —, mas porque ele já saiu
+     * uma vez aqui, na entrega, e a conta a pagar baixada no caixa o faz sair
+     * de novo pelas saídas do IXC. Descontar os dois tiraria da gaveta o dobro
+     * do que a pessoa levou.
+     *
+     * A data que manda é a da baixa no IXC, e não a da prestação: é ela que
+     * decide em que período a saída aparece lá, e quem presta contas costuma
+     * fazê-lo dias depois de o dinheiro ter saído.
+     */
+    const gastoLancadoNoPeriodo = arredondar(
+      doPeriodo
+        .filter(
+          (d) => d.gastoPagoEm && d.gastoPagoEm >= inicio && d.gastoPagoEm <= fim,
+        )
+        .reduce((s, d) => s + Number(d.valorGasto ?? 0), 0),
     );
 
     const soma = (t: 'ENTRADA' | 'SAIDA') =>
@@ -192,6 +246,8 @@ export class FechamentoCaixaService {
         saldoInicial,
         entregueNoPeriodo,
         trocoNoPeriodo,
+        /** O que as saídas do IXC já descontam por conta da prestação. */
+        gastoLancadoNoPeriodo,
         /** O que deve estar na gaveta agora. Null enquanto falta o inicial. */
         saldoEsperado:
           saldoInicial === null
@@ -201,7 +257,8 @@ export class FechamentoCaixaService {
                   soma('ENTRADA') -
                   soma('SAIDA') -
                   entregueNoPeriodo +
-                  trocoNoPeriodo,
+                  trocoNoPeriodo +
+                  gastoLancadoNoPeriodo,
               ),
       },
       fechamentos,
@@ -295,6 +352,11 @@ export class FechamentoCaixaService {
    * Os dois têm de somar o que saiu. Aceitar uma baixa que não fecha seria
    * transformar o registro em enfeite — ele existe justamente para não deixar
    * a diferença passar sem alguém olhar.
+   *
+   * Vindo a despesa junto, o gasto vira conta a pagar no IXC: criada, aprovada
+   * e baixada no caixa de onde o dinheiro saiu, na data em que saiu. É o que
+   * transforma a nota que a pessoa trouxe numa saída de verdade — antes disto
+   * o dinheiro sumia da gaveta sem virar despesa em lugar nenhum.
    */
   async baixar(
     id: string,
@@ -303,8 +365,11 @@ export class FechamentoCaixaService {
       troco?: number;
       notaFoto?: string | null;
       observacao?: string;
+      /** A conta a pagar a lançar pelo que foi gasto. */
+      despesa?: DespesaDaPrestacao;
     },
     usuarioId?: string,
+    usuarioNome?: string,
   ) {
     const atual = await this.prisma.dinheiroNaRua.findUnique({ where: { id } });
     if (!atual) throw new BadRequestException('Esta entrega não existe.');
@@ -324,6 +389,26 @@ export class FechamentoCaixaService {
           `de nota + ${formatar(troco)} de troco).`,
       );
     }
+    if (dados.despesa && dados.valorGasto <= 0) {
+      throw new BadRequestException(
+        'Não há despesa a lançar: o dinheiro voltou inteiro como troco.',
+      );
+    }
+
+    /*
+     * A despesa vai antes da baixa, de propósito.
+     *
+     * Não dando para lançá-la, a entrega continua aberta e quem está prestando
+     * contas tenta de novo com tudo ainda na tela. Na ordem inversa, uma falha
+     * do IXC deixaria a entrega fechada aqui e a despesa em lugar nenhum — e
+     * entrega fechada não presta contas de novo.
+     */
+    const lancada = dados.despesa
+      ? await this.lancarADespesa(atual, dados.valorGasto, dados.despesa, {
+          usuarioId,
+          usuarioNome,
+        })
+      : null;
 
     const salvo = await this.prisma.dinheiroNaRua.update({
       where: { id },
@@ -334,13 +419,89 @@ export class FechamentoCaixaService {
         troco: new Prisma.Decimal(troco),
         ...(dados.notaFoto === undefined ? {} : { notaFoto: dados.notaFoto }),
         observacao: dados.observacao?.trim() || null,
+        ...(lancada
+          ? {
+              idFnApagarIxc: lancada.idFnApagarIxc,
+              contaPagarId: lancada.contaPagarId,
+              fornecedorNome: lancada.fornecedorNome,
+              gastoPagoEm: lancada.pagoEm,
+            }
+          : {}),
       },
     });
     this.logger.log(
       `Prestação de contas de ${salvo.pessoa}: ${dados.valorGasto} em nota, ` +
-        `${troco} de troco`,
+        `${troco} de troco` +
+        (lancada ? `, título #${lancada.idFnApagarIxc ?? '?'} no IXC` : ''),
     );
-    return semFoto(salvo);
+    return { ...semFoto(salvo), despesa: lancada };
+  }
+
+  /**
+   * Lança o gasto como conta a pagar, quitada no caixa de onde o dinheiro saiu.
+   *
+   * O caixa é o da entrega, e não o padrão da configuração: o dinheiro saiu
+   * daquela gaveta, e é dela que a saída tem de sair no IXC.
+   *
+   * `pagoEm` só volta preenchido quando o IXC deu a conta por paga. É esta data
+   * que faz o saldo somar o gasto de volta, para o mesmo dinheiro não ser
+   * descontado duas vezes — uma pela entrega, outra pela saída lá. Título
+   * criado que não chegou a ser baixado não gera saída nenhuma, e portanto não
+   * pode gerar compensação: o aviso volta para a tela e a conta se paga pela
+   * lista de contas em aberto.
+   */
+  private async lancarADespesa(
+    entrega: { caixaId: number; entregueEm: Date; pessoa: string },
+    valorGasto: number,
+    despesa: DespesaDaPrestacao,
+    quem: { usuarioId?: string; usuarioNome?: string },
+  ) {
+    const dia = despesa.pagoEm?.trim() || diaISO(entrega.entregueEm);
+    const fornecedorNome = despesa.fornecedorNome.trim();
+
+    const lancamento = await this.despesas.lancar(
+      {
+        idFornecedorIxc: despesa.idFornecedorIxc,
+        fornecedorNome,
+        valor: valorGasto,
+        // As três datas são o mesmo dia: a conta não tem vencimento futuro a
+        // esperar, ela nasce quitada com a data em que o dinheiro saiu.
+        dataEmissao: dia,
+        dataVencimento: dia,
+        dataPagamento: dia,
+        observacao: despesa.descricao.trim(),
+        categoriaId: despesa.categoriaId ?? null,
+        tipoPagamento: despesa.tipoPagamento,
+        contaContabil: despesa.contaContabil,
+        contaPagamento: entrega.caixaId,
+        jaPaga: true,
+      },
+      quem.usuarioId,
+      quem.usuarioNome,
+    );
+
+    const paga = (lancamento.baixa?.pagas ?? 0) > 0;
+    const avisos = [
+      ...(lancamento.baixa?.avisos ?? []),
+      ...(lancamento.avisoCategoria ? [lancamento.avisoCategoria] : []),
+    ];
+    if (!paga) {
+      this.logger.warn(
+        `Despesa de ${entrega.pessoa} lançada, mas não ficou paga no IXC: ` +
+          (avisos.join(' ') || 'sem detalhe'),
+      );
+    }
+
+    return {
+      contaPagarId: lancamento.conta.id,
+      idFnApagarIxc: lancamento.conta.idFnApagarIxc,
+      fornecedorNome,
+      /** Null quando a baixa não saiu — sem saída no IXC, sem compensação. */
+      pagoEm: paga ? dataDoDia(dia, 'do pagamento') : null,
+      paga,
+      valor: valorGasto,
+      avisos,
+    };
   }
 
   /** A foto da nota que a pessoa trouxe. */
@@ -394,6 +555,8 @@ export class FechamentoCaixaService {
       observacao?: string;
       /** Só no primeiro fechamento do caixa: de onde a contagem começa. */
       saldoInicial?: number;
+      /** Quanto se contou na gaveta ao fechar, quando se contou. */
+      saldoContado?: number;
     },
     usuarioId?: string,
   ) {
@@ -426,8 +589,17 @@ export class FechamentoCaixaService {
         Number(extrato.resumo.entradas) -
         Number(extrato.resumo.saidas) -
         extrato.resumo.entregueNoPeriodo +
-        extrato.resumo.trocoNoPeriodo,
+        extrato.resumo.trocoNoPeriodo +
+        extrato.resumo.gastoLancadoNoPeriodo,
     );
+
+    if (dados.saldoContado !== undefined && dados.saldoContado < 0) {
+      throw new BadRequestException('A gaveta não conta valor negativo.');
+    }
+    const saldoContado =
+      dados.saldoContado === undefined
+        ? null
+        : arredondar(dados.saldoContado);
 
     const fechamento = await this.prisma.fechamentoCaixa.create({
       data: {
@@ -442,6 +614,8 @@ export class FechamentoCaixaService {
         totalNaRua: new Prisma.Decimal(extrato.resumo.naRua),
         saldoInicial: new Prisma.Decimal(saldoInicial),
         saldoFinal: new Prisma.Decimal(saldoFinal),
+        saldoContado:
+          saldoContado === null ? null : new Prisma.Decimal(saldoContado),
         observacao: dados.observacao?.trim() || null,
         fechadoPor: usuarioId ?? null,
       },
@@ -449,9 +623,59 @@ export class FechamentoCaixaService {
     this.logger.log(
       `Caixa "${extrato.caixa.nome}" fechado de ${dados.de} a ${dados.ate}: ` +
         `${extrato.resumo.saidasConferidas} saída(s) conferida(s), ` +
-        `saldo de ${saldoFinal}, ${extrato.resumo.naRua} ainda na rua`,
+        `saldo de ${saldoFinal}` +
+        (saldoContado === null ? '' : ` (contados ${saldoContado})`) +
+        `, ${extrato.resumo.naRua} ainda na rua`,
     );
     return fechamento;
+  }
+
+  /**
+   * Corrige o que se contou na gaveta num fechamento já assinado.
+   *
+   * Só o último de cada caixa aceita correção. Os totais de um fechamento são
+   * uma cópia do que se viu no dia, de propósito — mexer num do meio deixaria
+   * os seguintes apoiados num saldo que não existe mais, sem nada na tela
+   * denunciando. O último não tem ninguém apoiado nele: é o próximo período,
+   * que ainda não fechou, que vai ler este número.
+   */
+  async corrigirContagem(id: string, saldoContado: number, usuarioId?: string) {
+    if (saldoContado < 0) {
+      throw new BadRequestException('A gaveta não conta valor negativo.');
+    }
+
+    const fechamento = await this.prisma.fechamentoCaixa.findUnique({
+      where: { id },
+    });
+    if (!fechamento) {
+      throw new BadRequestException('Este fechamento não existe.');
+    }
+
+    const ultimo = await this.prisma.fechamentoCaixa.findFirst({
+      where: { caixaId: fechamento.caixaId },
+      orderBy: [{ ate: 'desc' }, { createdAt: 'desc' }],
+    });
+    if (ultimo && ultimo.id !== id) {
+      throw new BadRequestException(
+        'Este caixa já foi fechado de novo depois deste período. Corrigir a ' +
+          'contagem aqui mudaria o ponto de partida de fechamentos que já ' +
+          'foram assinados — a correção se faz no último.',
+      );
+    }
+
+    const salvo = await this.prisma.fechamentoCaixa.update({
+      where: { id },
+      data: { saldoContado: new Prisma.Decimal(arredondar(saldoContado)) },
+    });
+    const diferenca = arredondar(
+      Number(salvo.saldoContado) - Number(salvo.saldoFinal),
+    );
+    this.logger.log(
+      `Contagem do fechamento ${id} corrigida para ${saldoContado} ` +
+        `(calculado: ${Number(salvo.saldoFinal)}, diferença de ${diferenca})` +
+        (usuarioId ? ` por ${usuarioId}` : ''),
+    );
+    return salvo;
   }
 
   async listarFechamentos(caixaId: number) {
@@ -461,6 +685,19 @@ export class FechamentoCaixaService {
       take: 50,
     });
   }
+}
+
+/**
+ * De quanto o período seguinte parte: a contagem, quando houve, senão a conta.
+ *
+ * Contar a gaveta é o único jeito de a soma encontrar a realidade. Onde os dois
+ * discordam, quem tem razão é o dinheiro que dá para pegar na mão.
+ */
+function saldoQueSegue(f: {
+  saldoFinal: Prisma.Decimal;
+  saldoContado: Prisma.Decimal | null;
+}): Prisma.Decimal {
+  return f.saldoContado ?? f.saldoFinal;
 }
 
 /**
@@ -485,6 +722,12 @@ function dataDoDia(valor: string, qual: string): Date {
     throw new BadRequestException(`A data ${qual} não existe no calendário.`);
   }
   return d;
+}
+
+/** Date para "AAAA-MM-DD", no fuso de quem está batendo o caixa. */
+function diaISO(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 function arredondar(n: number): number {

@@ -15,6 +15,7 @@ import type { Request } from 'express';
 import {
   BaixarDinheiroDto,
   ConferirLancamentoDto,
+  ContagemDaGavetaDto,
   EntregarDinheiroDto,
   FecharCaixaDto,
   NotaDto,
@@ -24,6 +25,11 @@ import { FechamentoCaixaService } from './fechamento-caixa.service';
 
 function usuarioId(req: Request): string | undefined {
   return (req.user as { id?: string } | undefined)?.id;
+}
+
+/** A baixa no IXC é assinada: quem conferir o extrato de lá precisa saber quem. */
+function usuarioNome(req: Request): string | undefined {
+  return (req.user as { nome?: string } | undefined)?.nome;
 }
 
 /** Bater o caixa do dinheiro em mãos: conferir, fotografar a nota, fechar. */
@@ -105,7 +111,7 @@ export class FechamentoCaixaController {
     @Body() dto: BaixarDinheiroDto,
     @Req() req: Request,
   ) {
-    return this.service.baixar(id, dto, usuarioId(req));
+    return this.service.baixar(id, dto, usuarioId(req), usuarioNome(req));
   }
 
   @Get('dinheiro-na-rua/:id/nota')
@@ -131,5 +137,19 @@ export class FechamentoCaixaController {
   @Get(':caixaId/fechamentos')
   fechamentos(@Param('caixaId', ParseIntPipe) caixaId: number) {
     return this.service.listarFechamentos(caixaId);
+  }
+
+  /**
+   * Corrige o que se contou na gaveta num fechamento já assinado — só no
+   * último de cada caixa, que é o único de quem ninguém ainda dependeu.
+   */
+  @Put('fechamentos/:id/contagem')
+  @HttpCode(200)
+  corrigirContagem(
+    @Param('id') id: string,
+    @Body() dto: ContagemDaGavetaDto,
+    @Req() req: Request,
+  ) {
+    return this.service.corrigirContagem(id, dto.saldoContado, usuarioId(req));
   }
 }

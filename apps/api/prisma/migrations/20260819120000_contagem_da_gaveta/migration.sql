@@ -1,0 +1,22 @@
+-- A contagem da gaveta.
+--
+-- Ate aqui o fechamento guardava so o saldo calculado: o inicial, mais as
+-- entradas, menos as saidas, menos o que saiu na rua. Calculo nao e contagem.
+--
+-- No primeiro caixa batido a conta deu R$ 0,00 e a gaveta tinha dinheiro --
+-- porque ninguem sabia de onde a gaveta partia, e o zero informado no inicio
+-- atravessou o periodo inteiro sem nada para desmenti-lo. E exatamente o erro
+-- que a coluna `saldo_inicial` foi criada para nao deixar acontecer, so que
+-- pela outra ponta: adianta pouco recusar chutar o comeco se ninguem confere o
+-- fim.
+--
+-- Agora quem conta a gaveta escreve o que contou. A diferenca contra o
+-- calculado fica registrada -- ela e a sobra ou a falta do periodo, que e o
+-- motivo de existir um fechamento de caixa -- e o periodo seguinte parte do
+-- que foi contado, e nao do que foi calculado. Assim a diferenca e absorvida
+-- uma vez, no fechamento em que apareceu, em vez de andar de periodo em
+-- periodo sem ninguem conseguir dizer de onde veio.
+--
+-- Nulo = fechamento assinado sem contagem. Nesse caso o calculado continua
+-- valendo como ponto de partida do proximo, que e o comportamento de antes.
+ALTER TABLE "fechamentos_caixa" ADD COLUMN "saldo_contado" DECIMAL(14,2);
