@@ -1491,3 +1491,83 @@ export interface CaixasDoFechamento {
   /** O caixa configurado para o pagamento em mãos, quando há um. */
   emUso: number | null;
 }
+
+// --- A conciliação como trabalho: uma conta, um período, um status ---
+
+export type StatusConciliacao = 'ABERTA' | 'FECHADA';
+
+/** Uma conciliação na grade. */
+export interface ConciliacaoNaLista {
+  id: string;
+  numero: number;
+  contaIxc: number;
+  contaNome: string;
+  de: string;
+  ate: string;
+  status: StatusConciliacao;
+  /** Quantas transações do extrato ela tem, e quantas já estão ligadas */
+  transacoes: number;
+  ligadas: number;
+  extratoArquivo: string | null;
+  fechadaEm: string | null;
+  fechadaPor: string | null;
+  criadaPor: string | null;
+  criadaEm: string;
+}
+
+/** Uma transação do extrato dentro de uma conciliação. */
+export interface TransacaoDaConciliacao {
+  id: string;
+  fitId: string;
+  data: string;
+  /** Positivo = entrou; negativo = saiu */
+  valor: number;
+  descricao: string;
+  documento: string | null;
+  /** A linha do IXC ligada a ela, quando há */
+  idMovimFinan: number | null;
+  casadaAuto: boolean;
+  ignorada: boolean;
+  motivo: string | null;
+}
+
+/** Tudo o que o assistente precisa para trabalhar uma conciliação. */
+export interface ConciliacaoAberta {
+  conciliacao: {
+    id: string;
+    numero: number;
+    conta: ContaConciliavel;
+    de: string;
+    ate: string;
+    status: StatusConciliacao;
+    datasDiferentes: boolean;
+    extrato: {
+      arquivo: string | null;
+      banco: string | null;
+      conta: string | null;
+      saldo: number | null;
+      saldoEm: string | null;
+    } | null;
+    fechadaEm: string | null;
+    fechadaPor: string | null;
+  };
+  /** A movimentação do IXC, lida agora */
+  linhas: LinhaDaConciliacao[];
+  /** O extrato do banco, como foi importado */
+  transacoes: TransacaoDaConciliacao[];
+  resumo: {
+    linhas: number;
+    linhasLigadas: number;
+    linhasPendentes: number;
+    entradas: number;
+    saidas: number;
+    transacoes: number;
+    transacoesLigadas: number;
+    transacoesPendentes: number;
+    entradasBanco: number;
+    saidasBanco: number;
+    /** Nada pendente dos dois lados: dá para encerrar */
+    podeFechar: boolean;
+  };
+  avisos: string[];
+}

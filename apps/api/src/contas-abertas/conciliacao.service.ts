@@ -258,15 +258,63 @@ export class ConciliacaoService {
    * foi conferido; com `ofx` ela cruza os dois lados e diz o que sobrou de
    * cada um.
    */
+  /**
+   * A conciliação de uma conta num período — com ou sem extrato importado.
+   *
+   * Leitura solta, sem conciliação aberta: serve para olhar uma conta e para
+   * alimentar o assistente, que é quem tem começo e fim.
+   */
   async ver(input: {
     conta: number;
     de: string;
     ate: string;
     ofx?: string | null;
   }): Promise<ConciliacaoDaConta> {
+    const { conta, de, ate, linhas, cruas, avisos } = await this.linhasDaConta(
+      input.conta,
+      input.de,
+      input.ate,
+    );
+
+    const extrato = input.ofx?.trim()
+      ? this.cruzarComExtrato(linhas, cruas, input.ofx, { de, ate }, avisos)
+      : null;
+
+    return {
+      conta,
+      periodo: { de, ate },
+      linhas,
+      resumo: resumirLinhas(linhas),
+      extrato,
+      lidoEm: new Date(),
+      avisos,
+    };
+  }
+
+  /**
+   * As linhas da movimentação de uma conta num período, já com tudo o que se
+   * sabe sobre cada uma: o que o IXC conciliou, o que foi conferido aqui e o
+   * que o Fechamento de Caixa conferiu.
+   *
+   * É o motor das duas telas — a leitura solta e o assistente de conciliação —,
+   * e por isso devolve também as linhas cruas: o casamento com o extrato
+   * precisa delas.
+   */
+  async linhasDaConta(
+    contaId: number,
+    dataDe: string,
+    dataAte: string,
+  ): Promise<{
+    conta: ContaConciliavel;
+    de: string;
+    ate: string;
+    linhas: LinhaDaConciliacao[];
+    cruas: LinhaCrua[];
+    avisos: string[];
+  }> {
     const avisos: string[] = [];
-    const conta = await this.acharConta(input.conta);
-    const { de, ate } = periodoValido(input.de, input.ate);
+    const conta = await this.acharConta(contaId);
+    const { de, ate } = periodoValido(dataDe, dataAte);
 
     const brutas = await this.ixc.listAll<Record<string, unknown>>(
       'fn_movim_finan',
@@ -288,7 +336,7 @@ export class ConciliacaoService {
       );
     }
 
-    const linhas = brutas
+    const cruas = brutas
       .map((r) => mapLinha(r))
       .filter((l): l is LinhaCrua => l !== null);
 
@@ -296,11 +344,11 @@ export class ConciliacaoService {
       await Promise.all([
         this.idsConciliadosNoIxc(conta.razao, de, ate, avisos),
         this.conferidasNoPeriodo(conta.id, de, ate),
-        this.conferidasNoFechamentoDeCaixa(conta.id, linhas),
-        this.titulosDasLinhas(linhas),
+        this.conferidasNoFechamentoDeCaixa(conta.id, cruas),
+        this.titulosDasLinhas(cruas),
       ]);
 
-    const montadas: LinhaDaConciliacao[] = linhas.map((l) => {
+    const linhas: LinhaDaConciliacao[] = cruas.map((l) => {
       const conferida = conferidas.get(l.id);
       const doCaixa = noFechamento.get(l.id);
       return {
@@ -333,31 +381,7 @@ export class ConciliacaoService {
       };
     });
 
-    const extrato = input.ofx?.trim()
-      ? this.cruzarComExtrato(montadas, linhas, input.ofx, { de, ate }, avisos)
-      : null;
-
-    const entradas = soma(montadas.filter((l) => l.valor > 0).map((l) => l.valor));
-    const saidas = soma(montadas.filter((l) => l.valor < 0).map((l) => -l.valor));
-    const fechadas = montadas.filter(
-      (l) => l.conciliadoNoIxc || l.conferida !== null,
-    ).length;
-
-    return {
-      conta,
-      periodo: { de, ate },
-      linhas: montadas,
-      resumo: {
-        linhas: montadas.length,
-        fechadas,
-        pendentes: montadas.length - fechadas,
-        entradas,
-        saidas,
-      },
-      extrato,
-      lidoEm: new Date(),
-      avisos,
-    };
+    return { conta, de, ate, linhas, cruas, avisos };
   }
 
   /**
@@ -729,7 +753,7 @@ interface MarcaDoCaixa {
 }
 
 /** Uma linha do IXC já traduzida, antes de ganhar os estados da tela. */
-interface LinhaCrua {
+export interface LinhaCrua {
   id: number;
   data: string;
   historico: string;
@@ -821,6 +845,22 @@ function periodoValido(de: string, ate: string): { de: string; ate: string } {
 function formatarDia(iso: string): string {
   const [ano, mes, dia] = iso.split('-');
   return `${dia}/${mes}/${ano}`;
+}
+
+/** O apanhado de um conjunto de linhas: quanto andou e quanto falta olhar. */
+export function resumirLinhas(
+  linhas: LinhaDaConciliacao[],
+): ConciliacaoDaConta['resumo'] {
+  const fechadas = linhas.filter(
+    (l) => l.conciliadoNoIxc || l.conferida !== null,
+  ).length;
+  return {
+    linhas: linhas.length,
+    fechadas,
+    pendentes: linhas.length - fechadas,
+    entradas: soma(linhas.filter((l) => l.valor > 0).map((l) => l.valor)),
+    saidas: soma(linhas.filter((l) => l.valor < 0).map((l) => -l.valor)),
+  };
 }
 
 function soma(valores: number[]): number {

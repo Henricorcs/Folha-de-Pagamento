@@ -8,6 +8,7 @@ import { Modulos } from './pages/Modulos';
 import { Inicio as ContasPagarInicio } from './pages/contas-pagar/Inicio';
 import { Categorias as ContasPagarCategorias } from './pages/contas-pagar/Categorias';
 import { Conciliacao } from './pages/contas-pagar/Conciliacao';
+import { ConciliacaoAssistente } from './pages/contas-pagar/ConciliacaoAssistente';
 import { Dashboard as ContasPagarDashboard } from './pages/contas-pagar/Dashboard';
 import { FechamentoCaixa } from './pages/contas-pagar/FechamentoCaixa';
 import { HistoricoDePagamentos } from './pages/contas-pagar/HistoricoDePagamentos';
@@ -115,6 +116,8 @@ export default function App() {
         <Route path="dashboard" element={<ContasPagarDashboard />} />
         {/* O extrato do banco contra a movimentacao do IXC, conta por conta. */}
         <Route path="conciliacao" element={<Conciliacao />} />
+        {/* O assistente: "nova" cria; o id abre a que existe. */}
+        <Route path="conciliacao/:id" element={<ConciliacaoAssistente />} />
         {/* O caminho antigo continua valendo: quem tem a tela no favorito ou
             aberta numa aba não pode cair num "não encontrado" por causa de uma
             troca de nome nossa. */}
