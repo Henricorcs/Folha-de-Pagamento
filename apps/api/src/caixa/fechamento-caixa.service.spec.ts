@@ -39,7 +39,11 @@ function montarServico(
       historico: string;
       tipo: 'ENTRADA' | 'SAIDA';
     }>;
-    conferencias?: Array<{ idLancamentoIxc: number; conferido: boolean; notaFoto?: string }>;
+    conferencias?: Array<{
+      idLancamentoIxc: number;
+      conferido: boolean;
+      qtdNotas?: number;
+    }>;
     /** Contas abertas agora, com os acertos que já tiveram. */
     naRua?: Array<Record<string, unknown>>;
     /** A conta que `lancarMovimento` vai buscar pelo id. */
@@ -67,7 +71,12 @@ function montarServico(
 
   const prisma = {
     conferenciaCaixa: {
-      findMany: jest.fn().mockResolvedValue(opts.conferencias ?? []),
+      findMany: jest.fn().mockResolvedValue(
+        (opts.conferencias ?? []).map((c) => ({
+          _count: { fotos: c.qtdNotas ?? 0 },
+          ...c,
+        })),
+      ),
       upsert: jest.fn(async ({ create }: { create: Record<string, unknown> }) => ({
         id: 'cf1',
         notaFoto: 'data:image/png;base64,AAAA',
@@ -98,6 +107,16 @@ function montarServico(
         pessoa: 'Jeferson',
         ...data,
       })),
+      delete: jest.fn(),
+    },
+    fotoDaNota: {
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        id: 'f1',
+        ...data,
+      })),
+      createMany: jest.fn().mockResolvedValue({ count: 1 }),
+      count: jest.fn().mockResolvedValue(0),
+      findUnique: jest.fn().mockResolvedValue(null),
       delete: jest.fn(),
     },
     movimentoDaRua: {
@@ -203,17 +222,15 @@ describe('extrato do caixa', () => {
     expect(e.lancamentos[1].conferido).toBe(false);
   });
 
-  it('a foto não vem na listagem, só o aviso de que existe', async () => {
+  it('a foto não vem na listagem, só quantas existem', async () => {
     const { service } = montarServico({
       lancamentos: [saida(1, 100)],
-      conferencias: [
-        { idLancamentoIxc: 1, conferido: true, notaFoto: 'data:image/png;base64,AAA' },
-      ],
+      conferencias: [{ idLancamentoIxc: 1, conferido: true, qtdNotas: 2 }],
     });
 
     const e = await service.extrato(7, '2026-08-01', '2026-08-31');
 
-    expect(e.lancamentos[0].temNota).toBe(true);
+    expect(e.lancamentos[0].qtdNotas).toBe(2);
     expect(JSON.stringify(e)).not.toContain('base64');
   });
 
@@ -525,7 +542,12 @@ describe('a conta de quem levou dinheiro', () => {
    * e fotografe de novo a mesma nota, é trabalho repetido por um detalhe de
    * arquitetura — a foto do acerto mora num lugar e a da conferência noutro.
    */
-  it('a saída criada no IXC já nasce conferida, com a foto do acerto', async () => {
+  /*
+   * A foto viaja; o "olhei" não. Quem presta contas e quem confere o caixa não
+   * são o mesmo gesto, e dar por conferido o que a própria pessoa acabou de
+   * lançar tira da conferência o sentido que ela tem.
+   */
+  it('a saída criada no IXC recebe as fotos, e continua por conferir', async () => {
     const { service, prisma } = montarServico({
       entrega: conta,
       lancamentos: [saida(77, 100)],
@@ -536,7 +558,7 @@ describe('a conta de quem levou dinheiro', () => {
       {
         tipo: 'NOTA',
         valor: 100,
-        notaFoto: 'data:image/png;base64,AAAA',
+        notasFoto: ['data:image/png;base64,AAAA', 'data:image/png;base64,BBBB'],
         despesa: { ...despesa, pagoEm: '2026-08-19' },
       },
       'u1',
@@ -546,8 +568,12 @@ describe('a conta de quem levou dinheiro', () => {
       create: Record<string, unknown>;
     }>;
     expect(chamada.create.idLancamentoIxc).toBe(77);
-    expect(chamada.create.conferido).toBe(true);
-    expect(chamada.create.notaFoto).toBe('data:image/png;base64,AAAA');
+    expect(chamada.create.conferido).toBeUndefined();
+
+    const [criadas] = prisma.fotoDaNota.createMany.mock.calls[0] as Array<{
+      data: Array<Record<string, unknown>>;
+    }>;
+    expect(criadas.data).toHaveLength(2);
   });
 
   /*
@@ -555,16 +581,17 @@ describe('a conta de quem levou dinheiro', () => {
    * isto, o segundo acerto marcaria de novo o lançamento do primeiro e deixaria
    * um por conferir para sempre.
    */
-  it('não toma uma saída que já foi conferida', async () => {
+  it('não toma uma saída que já tem foto', async () => {
     const { service, prisma } = montarServico({
       entrega: conta,
       lancamentos: [saida(77, 100), saida(78, 100)],
-      conferencias: [{ idLancamentoIxc: 77, conferido: true }],
+      conferencias: [{ idLancamentoIxc: 77, conferido: true, qtdNotas: 1 }],
     });
 
     await service.lancarMovimento('r1', {
       tipo: 'NOTA',
       valor: 100,
+      notasFoto: ['data:image/png;base64,AAAA'],
       despesa: { ...despesa, pagoEm: '2026-08-19' },
     });
 
@@ -599,6 +626,7 @@ describe('a conta de quem levou dinheiro', () => {
     const r = await service.lancarMovimento('r1', {
       tipo: 'NOTA',
       valor: 100,
+      notasFoto: ['data:image/png;base64,AAAA'],
       despesa: { ...despesa, pagoEm: '2026-08-19' },
     });
 

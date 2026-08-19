@@ -1,5 +1,7 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
@@ -43,7 +45,32 @@ export class PeriodoDoCaixaDto {
   ate!: string;
 }
 
-export class ConferirLancamentoDto {
+/**
+ * O retrato do lançamento, que a tela manda junto ao conferir ou fotografar.
+ *
+ * É o que faz existir um histórico pesquisável meses depois: sem ele, achar um
+ * pagamento antigo exigiria varrer o IXC mês a mês, que é a leitura que já
+ * derrubou esta página.
+ */
+class RetratoDoLancamentoDto {
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'A data do lançamento precisa estar no formato AAAA-MM-DD.',
+  })
+  dataLancamento?: string;
+
+  @IsOptional()
+  @Transform(numeroOuIndefinido)
+  @IsNumber()
+  valor?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  historico?: string;
+}
+
+export class ConferirLancamentoDto extends RetratoDoLancamentoDto {
   @IsOptional()
   @IsBoolean()
   conferido?: boolean;
@@ -52,6 +79,16 @@ export class ConferirLancamentoDto {
   @IsString()
   @MaxLength(500)
   observacao?: string;
+}
+
+/** Mais uma foto para a nota de um lançamento. */
+export class AnexarNotaDto extends RetratoDoLancamentoDto {
+  @IsString()
+  @MaxLength(TETO_DA_FOTO, { message: RECADO_DA_FOTO })
+  @Matches(/^data:image\/(png|jpe?g|webp);base64,/, {
+    message: 'A nota precisa ser uma imagem (PNG, JPEG ou WebP).',
+  })
+  notaFoto!: string;
 }
 
 export class NotaDto {
@@ -179,13 +216,17 @@ export class MovimentoDaRuaDto {
   })
   data?: string;
 
+  /** As fotos da nota: uma nota nem sempre cabe numa só. */
   @IsOptional()
-  @IsString()
-  @MaxLength(TETO_DA_FOTO, { message: RECADO_DA_FOTO })
+  @IsArray()
+  @ArrayMaxSize(10, { message: 'No máximo dez fotos por nota.' })
+  @IsString({ each: true })
+  @MaxLength(TETO_DA_FOTO, { each: true, message: RECADO_DA_FOTO })
   @Matches(/^data:image\/(png|jpe?g|webp);base64,/, {
+    each: true,
     message: 'A nota precisa ser uma imagem (PNG, JPEG ou WebP).',
   })
-  notaFoto?: string;
+  notasFoto?: string[];
 
   @IsOptional()
   @IsString()

@@ -1181,16 +1181,51 @@ model ConferenciaCaixa {
   conferidoEm  DateTime? @map("conferido_em")
   conferidoPor String?   @map("conferido_por")
 
-  /// Foto da nota, em data URL. É ela que substitui o papel grampeado.
-  notaFoto   String? @map("nota_foto")
+  /// As fotos da nota. Mais de uma porque uma nota nem sempre cabe numa só:
+  /// cupom comprido, verso escrito, a foto tremida que pede a segunda.
+  fotos      FotoDaNota[]
   observacao String?
+
+  /// O retrato do lançamento quando foi conferido — data, valor e histórico
+  /// como o IXC os mostrava. É o que faz existir um histórico pesquisável sem
+  /// ter de varrer o IXC mês a mês para achar um pagamento antigo. Copiado, e
+  /// não lido de novo: o que se viu naquele dia não muda depois.
+  dataLancamento DateTime? @map("data_lancamento")
+  valor          Decimal?  @db.Decimal(14, 2)
+  historico      String?
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@unique([caixaId, idLancamentoIxc])
   @@index([caixaId])
+  @@index([dataLancamento])
   @@map("conferencias_caixa")
+}
+
+/// Uma foto de nota fiscal, em data URL.
+///
+/// Tabela própria, e não uma lista na linha, para a listagem poder perguntar
+/// "quantas há?" sem carregar nenhuma: são centenas de KB cada, e uma semana de
+/// caixa viraria megabytes de resposta para desenhar uma tabela.
+model FotoDaNota {
+  id String @id @default(uuid())
+
+  /// Uma das duas, nunca as duas: a foto é da conferência de um lançamento do
+  /// caixa, ou do acerto de quem levou dinheiro para a rua.
+  conferencia   ConferenciaCaixa? @relation(fields: [conferenciaId], references: [id], onDelete: Cascade)
+  conferenciaId String?           @map("conferencia_id")
+  movimento     MovimentoDaRua?   @relation(fields: [movimentoId], references: [id], onDelete: Cascade)
+  movimentoId   String?           @map("movimento_id")
+
+  foto String
+
+  criadoPor String?  @map("criado_por")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([conferenciaId])
+  @@index([movimentoId])
+  @@map("fotos_da_nota")
 }
 
 /// Dinheiro que saiu do caixa com uma pessoa e ainda não prestou contas.
@@ -1295,8 +1330,8 @@ model MovimentoDaRua {
   /// que período do caixa este movimento pesa.
   data       DateTime
   observacao String?
-  /// Foto da nota que a pessoa trouxe, quando é NOTA
-  notaFoto   String? @map("nota_foto")
+  /// As fotos da nota que a pessoa trouxe, quando é NOTA
+  fotos      FotoDaNota[]
 
   // --- A despesa que a nota lançou no IXC ---
   /// Título gerado lá, quando a nota virou conta a pagar

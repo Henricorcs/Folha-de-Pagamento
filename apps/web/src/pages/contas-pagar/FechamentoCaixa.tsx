@@ -13,6 +13,7 @@ import {
   Vazio,
 } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
+import { useAuth } from '../../lib/auth';
 import { reduzirFoto } from '../../lib/foto';
 import { formatBRL, formatData } from '../../lib/format';
 import type {
@@ -20,10 +21,14 @@ import type {
   CategoriaDespesa,
   ContaDaRua,
   ExtratoDoCaixa,
+  ItemDoHistorico,
   LancamentoDoCaixa,
   MovimentoLancado,
   TipoMovimentoDaRua,
 } from '../../lib/types';
+
+/** As abas da tela, no modelo da do IXC. */
+type AbaDoCaixa = 'caixa' | 'conferir' | 'revisados' | 'historico';
 
 /** Um fornecedor do IXC, como a busca desta tela o devolve. */
 interface FornecedorIxc {
@@ -35,6 +40,13 @@ interface FornecedorIxc {
 
 /** Um fechamento já assinado, do jeito que o extrato o entrega. */
 type FechamentoDoPeriodo = ExtratoDoCaixa['fechamentos'][number];
+
+/** "AAAA-MM-DD" do dia local de um instante vindo do servidor. */
+function diaDoISO(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
 
 /** Hoje, em "AAAA-MM-DD". */
 function diaDeHoje(): string {
@@ -195,7 +207,17 @@ function Conferencia({
   ate: string;
 }) {
   const qc = useQueryClient();
+  const { usuario } = useAuth();
   const [erro, setErro] = useState<string | null>(null);
+  const [aba, setAba] = useState<AbaDoCaixa>('caixa');
+  /*
+   * Dar por conferido é de ADMIN.
+   *
+   * A conferência é a assinatura de quem responde pelo caixa — quem opera o
+   * dia a dia lança, fotografa e presta contas. O servidor recusa de todo
+   * jeito; aqui o botão some, em vez de existir para dar erro.
+   */
+  const podeConferir = usuario?.role === 'ADMIN';
   /*
    * A lista abre nas saídas.
    *
@@ -251,14 +273,14 @@ function Conferencia({
   }
 
   /** A foto entrou ou saiu: mesma ideia, sem reler o IXC. */
-  function marcarNotaNoCache(idLancamento: number, temNota: boolean) {
+  function marcarNotaNoCache(idLancamento: number, qtdNotas: number) {
     setErro(null);
     qc.setQueryData<ExtratoDoCaixa>(chaveDoExtrato, (atual) =>
       atual
         ? {
             ...atual,
             lancamentos: atual.lancamentos.map((l) =>
-              l.id === idLancamento ? { ...l, temNota } : l,
+              l.id === idLancamento ? { ...l, qtdNotas } : l,
             ),
           }
         : atual,
@@ -335,203 +357,448 @@ function Conferencia({
 
   return (
     <>
-      <div className="surgir surgir-1 mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Indicador
-          rotulo="Saídas do período"
-          valor={formatBRL(resumo.saidas)}
-          detalhe={qtdSaidas === 1 ? '1 saída' : `${qtdSaidas} saídas`}
-          acento
-        />
-        <Indicador
-          rotulo="Entradas"
-          valor={formatBRL(resumo.entradas)}
-          detalhe={
-            qtdEntradas === 0
-              ? 'nenhuma no período'
-              : qtdEntradas === 1
-                ? '1 entrada — reforço, devolução ou troco'
-                : `${qtdEntradas} entradas — reforço, devolução ou troco`
-          }
-        />
-        {/* O que a gaveta deve ter agora. A contagem das saídas não some: ela
-            virou a etiqueta da fila lá embaixo, onde o trabalho acontece. */}
-        <Indicador
-          rotulo="Saldo esperado na gaveta"
-          valor={
-            resumo.saldoEsperado === null
-              ? '—'
-              : formatBRL(resumo.saldoEsperado)
-          }
-          detalhe={
-            resumo.saldoEsperado !== null
-              ? `de ${formatBRL(resumo.saldoInicial ?? 0)} no início do período`
-              : invadeFechado
-                ? `comece o período em ${formatData(diaSeguinte(invadeFechado))}`
-                : 'informe o saldo inicial ao fechar'
-          }
-          alerta={
-            resumo.saldoEsperado !== null
-              ? undefined
-              : invadeFechado
-                ? `Já conferido até ${formatData(invadeFechado)}`
-                : 'Este caixa nunca foi fechado aqui'
-          }
-        />
-        <Indicador
-          rotulo="Na rua"
-          valor={formatBRL(resumo.naRua)}
-          detalhe={
-            resumo.pessoasNaRua === 1
-              ? 'com 1 pessoa'
-              : `com ${resumo.pessoasNaRua} pessoas`
-          }
-          alerta={resumo.naRua > 0 ? 'Não está na gaveta' : undefined}
-        />
-      </div>
+      {/*
+        As abas, no modelo da tela do IXC.
 
-      <DinheiroNaRuaBloco
-        caixaId={caixaId}
-        itens={naRua}
-        onMudou={recarregar}
+        Antes tudo vivia numa página só: os indicadores, o dinheiro na rua, a
+        fila de conferir, os revisados e os fechamentos, um embaixo do outro.
+        Conferir cinquenta saídas com o resto empurrando a lista para baixo é
+        rolagem que não termina — e o que se faz numa aba não é o que se faz na
+        outra: quem confere não está fechando o caixa, e quem procura um
+        pagamento antigo não está conferindo nada.
+      */}
+      <Abas
+        atual={aba}
+        onTrocar={setAba}
+        abas={[
+          { id: 'caixa', rotulo: 'Caixa' },
+          {
+            id: 'conferir',
+            rotulo: 'A conferir',
+            selo: aConferir.length || undefined,
+          },
+          { id: 'revisados', rotulo: 'Revisados', selo: revisados.length || undefined },
+          { id: 'historico', rotulo: 'Histórico' },
+        ]}
       />
 
-      <Bloco
-        titulo={soSaidas ? 'Saídas a conferir' : 'Lançamentos a conferir'}
-        semPadding
-        className="surgir surgir-3"
-        acao={
-          <div className="flex items-center gap-3">
-            {aConferir.length > 0 && (
-              <span className="text-xs text-tinta-500">
-                {aConferir.length === 1
-                  ? 'falta 1'
-                  : `faltam ${aConferir.length}`}
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={() => setSoSaidas((v) => !v)}
-              className="btn btn-p btn-neutro"
-              title="Os recebimentos entram no saldo, mas não é deles que se pede nota"
-            >
-              {soSaidas
-                ? `Mostrar as ${qtdEntradas} entradas também`
-                : 'Mostrar só as saídas'}
-            </button>
-          </div>
-        }
-      >
-        {aConferir.length === 0 ? (
-          <Vazio
-            titulo={
-              visiveis.length === 0
-                ? soSaidas
-                  ? 'Nenhuma saída neste período'
-                  : 'Nenhum lançamento neste período'
-                : 'Tudo conferido'
-            }
-          >
-            {visiveis.length === 0
-              ? soSaidas && qtdEntradas > 0
-                ? `Houve ${qtdEntradas} entrada(s) — o botão acima mostra.`
-                : 'Confira as datas, ou se este é mesmo o caixa do dinheiro em mãos.'
-              : 'O fechamento fica logo abaixo, na lista dos revisados.'}
-          </Vazio>
-        ) : (
-          <TabelaDeLancamentos
-            caixaId={caixaId}
-            itens={aConferir}
-            revisados={false}
-            onConferiu={marcarNoCache}
-            onMudouNota={marcarNotaNoCache}
-            onErro={setErro}
-          />
-        )}
-      </Bloco>
-
       {erro && (
-        <div className="mt-4">
+        <div className="mb-4">
           <Aviso tom="erro">{erro}</Aviso>
         </div>
       )}
 
-      {/* O que já passou, e onde o período se fecha. */}
-      <Bloco
-        titulo="Revisados"
-        semPadding
-        className="surgir mt-5"
-        acao={
-          revisados.length > 0 ? (
-            <Selo tom="pago">
-              {revisados.length === 1
-                ? '1 revisado'
-                : `${revisados.length} revisados`}
-            </Selo>
-          ) : undefined
-        }
-      >
-        {revisados.length > 0 && (
-          <TabelaDeLancamentos
+      {aba === 'caixa' && (
+        <>
+          <div className="surgir surgir-1 mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <Indicador
+              rotulo="Saídas do período"
+              valor={formatBRL(resumo.saidas)}
+              detalhe={qtdSaidas === 1 ? '1 saída' : `${qtdSaidas} saídas`}
+              acento
+            />
+            <Indicador
+              rotulo="Entradas"
+              valor={formatBRL(resumo.entradas)}
+              detalhe={
+                qtdEntradas === 0
+                  ? 'nenhuma no período'
+                  : qtdEntradas === 1
+                    ? '1 entrada — reforço, devolução ou troco'
+                    : `${qtdEntradas} entradas — reforço, devolução ou troco`
+              }
+            />
+            {/* O que a gaveta deve ter agora. */}
+            <Indicador
+              rotulo="Saldo esperado na gaveta"
+              valor={
+                resumo.saldoEsperado === null
+                  ? '—'
+                  : formatBRL(resumo.saldoEsperado)
+              }
+              detalhe={
+                resumo.saldoEsperado !== null
+                  ? `de ${formatBRL(resumo.saldoInicial ?? 0)} no início do período`
+                  : invadeFechado
+                    ? `comece o período em ${formatData(diaSeguinte(invadeFechado))}`
+                    : 'informe o saldo inicial ao fechar'
+              }
+              alerta={
+                resumo.saldoEsperado !== null
+                  ? undefined
+                  : invadeFechado
+                    ? `Já conferido até ${formatData(invadeFechado)}`
+                    : 'Este caixa nunca foi fechado aqui'
+              }
+            />
+            <Indicador
+              rotulo="Na rua"
+              valor={formatBRL(resumo.naRua)}
+              detalhe={
+                resumo.pessoasNaRua === 1
+                  ? 'com 1 pessoa'
+                  : `com ${resumo.pessoasNaRua} pessoas`
+              }
+              alerta={resumo.naRua > 0 ? 'Não está na gaveta' : undefined}
+            />
+          </div>
+
+          <DinheiroNaRuaBloco
             caixaId={caixaId}
-            itens={revisados}
-            revisados
-            onConferiu={marcarNoCache}
-            onMudouNota={marcarNotaNoCache}
-            onErro={setErro}
+            itens={naRua}
+            onMudou={recarregar}
           />
-        )}
 
-        {revisados.length === 0 && qtdSaidas > 0 && (
-          <Vazio titulo="Nada revisado ainda">
-            Dê OK nas saídas acima; elas passam para cá, e é daqui que o período
-            se fecha.
-          </Vazio>
-        )}
+          {/* Fechar o período mora aqui, com os números que ele congela — e
+              não no fim da lista de revisados, onde ficava longe deles. */}
+          <Bloco titulo="Fechar o período" className="surgir mt-5" semPadding>
+            <Fechar
+              faltam={faltam}
+              naRua={resumo.naRua}
+              semSaidas={qtdSaidas === 0}
+              precisaSaldoInicial={resumo.saldoInicial === null}
+              invadeFechado={invadeFechado}
+              buracoDesde={buracoDesde}
+              deDoPeriodo={de}
+              saldoEsperado={resumo.saldoEsperado}
+              pendente={fechar.isPending}
+              onFechar={(dados) => fechar.mutate(dados)}
+            />
+          </Bloco>
 
-        {/* Semana sem saída nenhuma também se fecha: "olhei, não saiu nada" é
-            uma conferência como outra qualquer, e sem isto o botão ficaria
-            preso atrás de uma lista que nunca vai existir. */}
-        {(revisados.length > 0 || qtdSaidas === 0) && (
-          <Fechar
-            faltam={faltam}
-            naRua={resumo.naRua}
-            semSaidas={qtdSaidas === 0}
-            precisaSaldoInicial={resumo.saldoInicial === null}
-            invadeFechado={invadeFechado}
-            buracoDesde={buracoDesde}
-            deDoPeriodo={de}
-            saldoEsperado={resumo.saldoEsperado}
-            pendente={fechar.isPending}
-            onFechar={(dados) => fechar.mutate(dados)}
-          />
-        )}
-      </Bloco>
+          {fechamentos.length > 0 && (
+            <Bloco titulo="Fechamentos deste período" className="surgir mt-5">
+              <ul className="lista-dividida">
+                {fechamentos.map((f, i) => (
+                  <LinhaDoFechamento
+                    key={f.id}
+                    fechamento={f}
+                    /* Só o mais recente aceita correção — os de trás já têm
+                       gente apoiada neles, e o servidor recusa de todo jeito. */
+                    podeCorrigir={i === 0}
+                    onCorrigido={recarregar}
+                  />
+                ))}
+              </ul>
+            </Bloco>
+          )}
+        </>
+      )}
 
-      {fechamentos.length > 0 && (
-        <Bloco titulo="Fechamentos deste período" className="surgir mt-5">
-          <ul className="lista-dividida">
-            {fechamentos.map((f, i) => (
-              <LinhaDoFechamento
-                key={f.id}
-                fechamento={f}
-                /* Só o mais recente aceita correção — os de trás já têm gente
-                   apoiada neles, e o servidor recusa de todo jeito. */
-                podeCorrigir={i === 0}
-                onCorrigido={recarregar}
-              />
-            ))}
-          </ul>
+      {aba === 'conferir' && (
+        <Bloco
+          titulo={soSaidas ? 'Saídas a conferir' : 'Lançamentos a conferir'}
+          semPadding
+          className="surgir"
+          acao={
+            <div className="flex items-center gap-3">
+              {faltam > 0 && (
+                <Selo tom="atencao">
+                  {faltam === 1 ? 'falta 1' : `faltam ${faltam}`}
+                </Selo>
+              )}
+              <button
+                type="button"
+                onClick={() => setSoSaidas((v) => !v)}
+                className="btn btn-p btn-sutil"
+              >
+                {soSaidas
+                  ? `Mostrar as ${qtdEntradas} entradas também`
+                  : 'Mostrar só as saídas'}
+              </button>
+            </div>
+          }
+        >
+          {aConferir.length > 0 ? (
+            <TabelaDeLancamentos
+              caixaId={caixaId}
+              itens={aConferir}
+              revisados={false}
+              podeConferir={podeConferir}
+              onConferiu={marcarNoCache}
+              onMudouNota={marcarNotaNoCache}
+              onErro={setErro}
+            />
+          ) : (
+            <Vazio titulo="Nada a conferir">
+              {qtdSaidas === 0
+                ? 'Não houve saída neste período.'
+                : 'Todas as saídas do período já foram revisadas.'}
+            </Vazio>
+          )}
         </Bloco>
       )}
+
+      {aba === 'revisados' && (
+        <Bloco
+          titulo="Revisados"
+          semPadding
+          className="surgir"
+          acao={
+            revisados.length > 0 ? (
+              <Selo tom="pago">
+                {revisados.length === 1
+                  ? '1 revisado'
+                  : `${revisados.length} revisados`}
+              </Selo>
+            ) : undefined
+          }
+        >
+          {revisados.length > 0 ? (
+            <TabelaDeLancamentos
+              caixaId={caixaId}
+              itens={revisados}
+              revisados
+              podeConferir={podeConferir}
+              onConferiu={marcarNoCache}
+              onMudouNota={marcarNotaNoCache}
+              onErro={setErro}
+            />
+          ) : (
+            <Vazio titulo="Nada revisado ainda">
+              Dê OK nas saídas da aba anterior; elas passam para cá.
+            </Vazio>
+          )}
+        </Bloco>
+      )}
+
+      {aba === 'historico' && <Historico caixaId={caixaId} />}
     </>
   );
 }
 
-/** A mesma tabela nas duas áreas: o que muda é a coluna da ação. */
+/** A barra de abas, no modelo da tela do IXC. */
+function Abas<T extends string>({
+  atual,
+  abas,
+  onTrocar,
+}: {
+  atual: T;
+  abas: Array<{ id: T; rotulo: string; selo?: number }>;
+  onTrocar: (id: T) => void;
+}) {
+  return (
+    <div className="surgir mb-5 flex flex-wrap gap-1 border-b border-tinta-200">
+      {abas.map((a) => (
+        <button
+          key={a.id}
+          type="button"
+          onClick={() => onTrocar(a.id)}
+          className={
+            'relative -mb-px rounded-t-xl border border-b-0 px-4 py-2 text-sm ' +
+            (a.id === atual
+              ? 'border-tinta-200 bg-papel font-medium text-tinta-800'
+              : 'border-transparent text-tinta-500 hover:text-tinta-800')
+          }
+        >
+          {a.rotulo}
+          {a.selo !== undefined && (
+            <span className="ml-2 rounded-full bg-tinta-200/70 px-2 py-0.5 text-xs text-tinta-600">
+              {a.selo}
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * O histórico do que já foi conferido, com busca.
+ *
+ * Lê só o que esta casa guardou — o retrato que a conferência copiou do
+ * lançamento —, e nunca o IXC: achar um pagamento de três meses atrás varrendo
+ * lá seria mês a mês de leitura, que é o que derruba esta página. O preço é que
+ * só aparece aqui o que passou pela conferência, e é exatamente esse o
+ * histórico que se quer consultar.
+ */
+function Historico({ caixaId }: { caixaId: number }) {
+  const [termo, setTermo] = useState('');
+  const [de, setDe] = useState('');
+  const [ate, setAte] = useState('');
+  const [busca, setBusca] = useState('');
+
+  // A busca só sai quando quem digita para: cada tecla aqui é uma consulta.
+  useEffect(() => {
+    const id = setTimeout(() => setBusca(termo.trim()), 400);
+    return () => clearTimeout(id);
+  }, [termo]);
+
+  const historico = useQuery({
+    queryKey: ['caixa', 'historico', caixaId, busca, de, ate],
+    queryFn: async () =>
+      (
+        await api.get<ItemDoHistorico[]>(`/caixa/${caixaId}/historico`, {
+          params: {
+            busca: busca || undefined,
+            de: de || undefined,
+            ate: ate || undefined,
+          },
+        })
+      ).data,
+  });
+
+  const fechamentos = useQuery({
+    queryKey: ['caixa', 'fechamentos', caixaId],
+    queryFn: async () =>
+      (await api.get<FechamentoDoPeriodo[]>(`/caixa/${caixaId}/fechamentos`))
+        .data,
+  });
+
+  return (
+    <>
+      <Bloco titulo="Procurar um pagamento" className="surgir mb-5">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+          <div className="sm:col-span-2">
+            <label className="rotulo" htmlFor="busca-historico">
+              Histórico ou observação
+            </label>
+            <input
+              id="busca-historico"
+              value={termo}
+              onChange={(e) => setTermo(e.target.value)}
+              className="campo"
+              placeholder="nome do fornecedor, documento, o que estiver escrito…"
+            />
+          </div>
+          <div>
+            <label className="rotulo" htmlFor="hist-de">
+              De
+            </label>
+            <input
+              id="hist-de"
+              type="date"
+              value={de}
+              onChange={(e) => setDe(e.target.value)}
+              className="campo"
+            />
+          </div>
+          <div>
+            <label className="rotulo" htmlFor="hist-ate">
+              Até
+            </label>
+            <input
+              id="hist-ate"
+              type="date"
+              value={ate}
+              onChange={(e) => setAte(e.target.value)}
+              className="campo"
+            />
+          </div>
+        </div>
+        <p className="ajuda mt-2">
+          Aqui está o que já passou pela conferência, de qualquer período — não
+          só o que está aberto na tela. Cada linha abre a nota que foi
+          fotografada.
+        </p>
+      </Bloco>
+
+      <Bloco titulo="Pagamentos conferidos" semPadding className="surgir mb-5">
+        {historico.isLoading && <Carregando texto="Procurando…" />}
+        {historico.isError && (
+          <div className="p-4">
+            <Aviso tom="erro">{mensagemErro(historico.error)}</Aviso>
+          </div>
+        )}
+        {historico.data?.length === 0 && (
+          <Vazio titulo="Nada encontrado">
+            {busca || de || ate
+              ? 'Nenhum pagamento conferido bate com esta procura.'
+              : 'Assim que houver saídas conferidas, elas aparecem aqui.'}
+          </Vazio>
+        )}
+        {!!historico.data?.length && (
+          <ul className="lista-dividida px-5">
+            {historico.data.map((h) => (
+              <LinhaDoHistorico key={h.id} item={h} caixaId={caixaId} />
+            ))}
+          </ul>
+        )}
+      </Bloco>
+
+      <Bloco titulo="Fechamentos deste caixa" className="surgir">
+        {fechamentos.isLoading && <Carregando texto="Lendo…" />}
+        {fechamentos.data?.length === 0 && (
+          <Vazio titulo="Nenhum fechamento ainda">
+            O primeiro período dado por conferido aparece aqui.
+          </Vazio>
+        )}
+        {!!fechamentos.data?.length && (
+          <ul className="lista-dividida">
+            {fechamentos.data.map((f) => (
+              <LinhaDoFechamento
+                key={f.id}
+                fechamento={f}
+                podeCorrigir={false}
+                onCorrigido={() => undefined}
+              />
+            ))}
+          </ul>
+        )}
+      </Bloco>
+    </>
+  );
+}
+
+function LinhaDoHistorico({
+  item,
+  caixaId,
+}: {
+  item: ItemDoHistorico;
+  caixaId: number;
+}) {
+  const [aberto, setAberto] = useState(false);
+
+  return (
+    <li className="py-2 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <span className="num text-tinta-400">
+            {formatData(item.dataLancamento)}
+          </span>{' '}
+          <span className="text-tinta-800">
+            {item.historico || 'sem histórico'}
+          </span>
+          {item.observacao && (
+            <div className="text-xs text-tinta-400">{item.observacao}</div>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="valor">{formatBRL(Number(item.valor ?? 0))}</span>
+          {item.qtdNotas > 0 ? (
+            <button
+              type="button"
+              onClick={() => setAberto((v) => !v)}
+              className="btn btn-p btn-ferramenta"
+            >
+              {aberto
+                ? 'Fechar'
+                : item.qtdNotas === 1
+                  ? 'Ver nota'
+                  : `Ver ${item.qtdNotas} notas`}
+            </button>
+          ) : (
+            <span className="text-xs text-tinta-400">sem nota</span>
+          )}
+        </div>
+      </div>
+      {aberto && (
+        <NotasDoLancamento
+          caixaId={caixaId}
+          idLancamento={item.idLancamentoIxc}
+          somenteLeitura
+        />
+      )}
+    </li>
+  );
+}
+
+/** A mesma tabela nas duas abas: o que muda é a coluna da ação. */
 function TabelaDeLancamentos({
   caixaId,
   itens,
   revisados,
+  podeConferir,
   onConferiu,
   onMudouNota,
   onErro,
@@ -539,8 +806,10 @@ function TabelaDeLancamentos({
   caixaId: number;
   itens: LancamentoDoCaixa[];
   revisados: boolean;
+  /** Dar por conferido é de ADMIN; fotografar é de quem opera o caixa. */
+  podeConferir: boolean;
   onConferiu: (id: number, conferido: boolean) => void;
-  onMudouNota: (id: number, temNota: boolean) => void;
+  onMudouNota: (id: number, qtdNotas: number) => void;
   onErro: (m: string) => void;
 }) {
   return (
@@ -551,8 +820,10 @@ function TabelaDeLancamentos({
             <th className="th">Data</th>
             <th className="th">Histórico</th>
             <th className="th text-right">Valor</th>
-            <th className="th">Nota</th>
-            <th className="th text-right">{revisados ? '' : 'Conferir'}</th>
+            <th className="th">Notas</th>
+            <th className="th text-right">
+              {revisados || !podeConferir ? '' : 'Conferir'}
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -562,6 +833,7 @@ function TabelaDeLancamentos({
               caixaId={caixaId}
               lancamento={l}
               revisado={revisados}
+              podeConferir={podeConferir}
               onConferiu={onConferiu}
               onMudouNota={onMudouNota}
               onErro={onErro}
@@ -577,6 +849,7 @@ function LinhaDoLancamento({
   caixaId,
   lancamento: l,
   revisado,
+  podeConferir,
   onConferiu,
   onMudouNota,
   onErro,
@@ -584,16 +857,31 @@ function LinhaDoLancamento({
   caixaId: number;
   lancamento: LancamentoDoCaixa;
   revisado: boolean;
+  podeConferir: boolean;
   onConferiu: (id: number, conferido: boolean) => void;
-  onMudouNota: (id: number, temNota: boolean) => void;
+  onMudouNota: (id: number, qtdNotas: number) => void;
   onErro: (m: string) => void;
 }) {
-  const [vendoNota, setVendoNota] = useState(false);
+  const [vendoNotas, setVendoNotas] = useState(false);
+
+  /**
+   * O retrato do lançamento vai junto do que se grava sobre ele.
+   *
+   * É ele que faz existir o histórico pesquisável meses depois: sem isso, a
+   * conferência guardaria só "olhei este" e o número no IXC, e achar um
+   * pagamento antigo exigiria varrer o IXC mês a mês.
+   */
+  const retrato = {
+    dataLancamento: diaDoISO(l.data),
+    valor: l.valor,
+    historico: l.historico,
+  };
 
   const conferir = useMutation({
     mutationFn: async (conferido: boolean) => {
       await api.put(`/caixa/${caixaId}/lancamentos/${l.id}/conferir`, {
         conferido,
+        ...retrato,
       });
       return conferido;
     },
@@ -601,12 +889,18 @@ function LinhaDoLancamento({
     onError: (e) => onErro(mensagemErro(e)),
   });
 
-  const salvarNota = useMutation({
-    mutationFn: async (notaFoto: string | null) => {
-      await api.put(`/caixa/${caixaId}/lancamentos/${l.id}/nota`, { notaFoto });
-      return notaFoto;
+  const anexar = useMutation({
+    mutationFn: async (notaFoto: string) =>
+      (
+        await api.post<{ qtdNotas: number }>(
+          `/caixa/${caixaId}/lancamentos/${l.id}/notas`,
+          { notaFoto, ...retrato },
+        )
+      ).data,
+    onSuccess: (r) => {
+      onMudouNota(l.id, r.qtdNotas);
+      setVendoNotas(true);
     },
-    onSuccess: (notaFoto) => onMudouNota(l.id, !!notaFoto),
     onError: (e) => onErro(mensagemErro(e)),
   });
 
@@ -626,17 +920,31 @@ function LinhaDoLancamento({
           <span className="valor">{formatBRL(l.valor)}</span>
         </td>
         <td className="td">
-          <EscolherNota
-            temNota={l.temNota}
-            pendente={salvarNota.isPending}
-            onEscolher={(dataUrl) => salvarNota.mutate(dataUrl)}
-            onVer={() => setVendoNota(true)}
-            onTirar={() => salvarNota.mutate(null)}
-            onErro={onErro}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            {l.qtdNotas > 0 && (
+              <button
+                type="button"
+                onClick={() => setVendoNotas((v) => !v)}
+                className="btn btn-p btn-ferramenta"
+              >
+                {l.qtdNotas === 1 ? 'Ver nota' : `Ver ${l.qtdNotas} notas`}
+              </button>
+            )}
+            {/* Anexar continua aparecendo com foto já anexada: uma nota nem
+                sempre cabe numa foto só — cupom comprido, verso escrito, a
+                foto tremida que pede a segunda. */}
+            <EscolherFoto
+              rotulo={l.qtdNotas > 0 ? '+ foto' : 'Anexar nota'}
+              pendente={anexar.isPending}
+              onEscolher={(dataUrl) => anexar.mutate(dataUrl)}
+              onErro={onErro}
+            />
+          </div>
         </td>
         <td className="td text-right">
-          {revisado ? (
+          {/* Sem perfil para conferir, a coluna some em vez de mostrar um botão
+              que o servidor vai recusar. */}
+          {!podeConferir ? null : revisado ? (
             /* Desfazer: um OK dado por engano tem de ter volta, ou a
                conferência vira uma armadilha de um clique. */
             <button
@@ -644,7 +952,7 @@ function LinhaDoLancamento({
               onClick={() => conferir.mutate(false)}
               disabled={conferir.isPending}
               className="btn btn-p btn-sutil"
-              title="Devolve este lançamento para a lista de cima"
+              title="Devolve este lançamento para a aba de conferir"
             >
               Desfazer
             </button>
@@ -661,12 +969,13 @@ function LinhaDoLancamento({
           )}
         </td>
       </tr>
-      {vendoNota && (
+      {vendoNotas && (
         <tr>
           <td colSpan={5} className="bg-tinta-50/80 px-4 pb-4">
-            <VerNota
-              url={`/caixa/${caixaId}/lancamentos/${l.id}/nota`}
-              onFechar={() => setVendoNota(false)}
+            <NotasDoLancamento
+              caixaId={caixaId}
+              idLancamento={l.id}
+              onMudou={(qtd) => onMudouNota(l.id, qtd)}
             />
           </td>
         </tr>
@@ -675,20 +984,16 @@ function LinhaDoLancamento({
   );
 }
 
-/** O botão de anexar/ver/tirar a foto, com a redução feita antes do envio. */
-function EscolherNota({
-  temNota,
+/** O botão de escolher uma foto, com a redução feita antes do envio. */
+function EscolherFoto({
+  rotulo,
   pendente,
   onEscolher,
-  onVer,
-  onTirar,
   onErro,
 }: {
-  temNota: boolean;
+  rotulo: string;
   pendente: boolean;
   onEscolher: (dataUrl: string) => void;
-  onVer: () => void;
-  onTirar: () => void;
   onErro: (m: string) => void;
 }) {
   async function aoEscolher(e: React.ChangeEvent<HTMLInputElement>) {
@@ -704,31 +1009,12 @@ function EscolherNota({
     }
   }
 
-  if (temNota) {
-    return (
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" onClick={onVer} className="btn btn-p btn-ferramenta">
-          Ver nota
-        </button>
-        <button
-          type="button"
-          onClick={onTirar}
-          disabled={pendente}
-          className="btn btn-p btn-sutil"
-          title="Tira a foto que está guardada aqui"
-        >
-          Tirar
-        </button>
-      </div>
-    );
-  }
-
   return (
     <label
       className="btn btn-p btn-neutro w-fit cursor-pointer"
       title="Fotografe a nota ou escolha uma imagem já salva"
     >
-      {pendente ? 'Enviando…' : 'Anexar nota'}
+      {pendente ? 'Enviando…' : rotulo}
       <input
         type="file"
         accept="image/*"
@@ -740,31 +1026,110 @@ function EscolherNota({
   );
 }
 
-/** A foto vem sob demanda: ela não trafega na listagem. */
-function VerNota({ url, onFechar }: { url: string; onFechar: () => void }) {
-  const nota = useQuery({
-    queryKey: ['caixa', 'nota', url],
+/**
+ * As fotos de um lançamento.
+ *
+ * A lista vem sem as imagens — só os números —, e cada imagem é pedida quando
+ * vai aparecer. São centenas de KB cada: trazê-las todas de uma vez para
+ * desenhar miniaturas é a diferença entre uma tela que abre e uma que trava no
+ * celular de quem está no balcão.
+ */
+function NotasDoLancamento({
+  caixaId,
+  idLancamento,
+  onMudou,
+  somenteLeitura = false,
+}: {
+  caixaId: number;
+  idLancamento: number;
+  onMudou?: (qtdNotas: number) => void;
+  somenteLeitura?: boolean;
+}) {
+  const qc = useQueryClient();
+  const chave = ['caixa', 'notas', caixaId, idLancamento];
+
+  const notas = useQuery({
+    queryKey: chave,
     queryFn: async () =>
-      (await api.get<{ notaFoto: string | null }>(url)).data,
+      (
+        await api.get<Array<{ id: string; createdAt: string }>>(
+          `/caixa/${caixaId}/lancamentos/${idLancamento}/notas`,
+        )
+      ).data,
+  });
+
+  const apagar = useMutation({
+    mutationFn: async (fotoId: string) => api.delete(`/caixa/notas/${fotoId}`),
+    onSuccess: async () => {
+      const { data } = await api.get<Array<{ id: string }>>(
+        `/caixa/${caixaId}/lancamentos/${idLancamento}/notas`,
+      );
+      qc.setQueryData(chave, data);
+      onMudou?.(data.length);
+    },
+  });
+
+  if (notas.isLoading) return <Carregando texto="Abrindo as fotos…" />;
+  if (!notas.data?.length) {
+    return <p className="ajuda pt-3">Nenhuma foto anexada.</p>;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-3 pt-3">
+      {notas.data.map((n, i) => (
+        <UmaFoto
+          key={n.id}
+          fotoId={n.id}
+          numero={i + 1}
+          total={notas.data.length}
+          onApagar={somenteLeitura ? undefined : () => apagar.mutate(n.id)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function UmaFoto({
+  fotoId,
+  numero,
+  total,
+  onApagar,
+}: {
+  fotoId: string;
+  numero: number;
+  total: number;
+  onApagar?: () => void;
+}) {
+  const foto = useQuery({
+    queryKey: ['caixa', 'foto', fotoId],
+    queryFn: async () =>
+      (await api.get<{ foto: string | null }>(`/caixa/notas/${fotoId}`)).data,
   });
 
   return (
-    <div className="pt-3">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="rotulo mb-0">Nota anexada</span>
-        <button type="button" onClick={onFechar} className="btn btn-p btn-sutil">
-          Fechar
-        </button>
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between gap-2 text-xs text-tinta-400">
+        <span>
+          {numero} de {total}
+        </span>
+        {onApagar && (
+          <button type="button" onClick={onApagar} className="hover:text-rose-600">
+            tirar
+          </button>
+        )}
       </div>
-      {nota.isLoading && <Carregando texto="Abrindo a foto…" />}
-      {nota.data?.notaFoto ? (
-        <img
-          src={nota.data.notaFoto}
-          alt="Foto da nota"
-          className="max-h-[28rem] rounded-xl border border-tinta-200"
-        />
+      {foto.isLoading ? (
+        <div className="h-40 w-40 animate-pulse rounded-xl border border-tinta-200 bg-tinta-100" />
+      ) : foto.data?.foto ? (
+        <a href={foto.data.foto} target="_blank" rel="noreferrer">
+          <img
+            src={foto.data.foto}
+            alt={`Nota ${numero} de ${total}`}
+            className="max-h-64 rounded-xl border border-tinta-200"
+          />
+        </a>
       ) : (
-        !nota.isLoading && <p className="ajuda">A foto não está mais aqui.</p>
+        <p className="ajuda">A foto não está mais aqui.</p>
       )}
     </div>
   );
@@ -1040,7 +1405,9 @@ function AcertarConta({
    * compra de fato aconteceu noutro dia.
    */
   const [data, setData] = useState(diaDeHoje);
-  const [foto, setFoto] = useState<string | null>(null);
+  /* Várias: uma nota nem sempre cabe numa foto só — cupom comprido, verso
+     escrito, a foto tremida que pede a segunda tentativa. */
+  const [fotos, setFotos] = useState<string[]>([]);
   const [erro, setErro] = useState<string | null>(null);
 
   // A despesa que a nota vira no IXC.
@@ -1110,7 +1477,7 @@ function AcertarConta({
             tipo,
             valor: quanto,
             data,
-            notaFoto: foto ?? undefined,
+            notasFoto: fotos.length ? fotos : undefined,
             despesa: comDespesa
               ? {
                   idFornecedorIxc: fornecedor!.idFornecedor,
@@ -1127,7 +1494,7 @@ function AcertarConta({
       // Os campos se limpam para o próximo acerto; a conta continua aberta
       // enquanto sobrar saldo, e some da lista quando ele zera.
       setValor('');
-      setFoto(null);
+      setFotos([]);
       setData(diaDeHoje());
       setFornecedor(null);
       setTermo('');
@@ -1296,25 +1663,27 @@ function AcertarConta({
         )}
         {ehNota && (
           <div>
-            <label className="rotulo">Foto da nota</label>
-            {foto ? (
-              <div className="flex items-center gap-2">
-                <img
-                  src={foto}
-                  alt="Nota"
-                  className="h-[42px] w-16 rounded-lg border border-tinta-200 object-cover"
-                />
-                <button
-                  type="button"
-                  onClick={() => setFoto(null)}
-                  className="btn btn-p btn-sutil"
-                >
-                  Trocar
-                </button>
-              </div>
-            ) : (
-              <label className="btn btn-neutro w-fit cursor-pointer">
-                Anexar foto
+            <label className="rotulo">Fotos da nota</label>
+            <div className="flex flex-wrap items-center gap-2">
+              {fotos.map((f, i) => (
+                <div key={f.slice(-32) + i} className="relative">
+                  <img
+                    src={f}
+                    alt={`Nota ${i + 1}`}
+                    className="h-[42px] w-16 rounded-lg border border-tinta-200 object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setFotos((atual) => atual.filter((_, j) => j !== i))}
+                    className="absolute -right-1 -top-1 rounded-full bg-tinta-800 px-1 text-xs text-papel"
+                    title="Tirar esta foto"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              <label className="btn btn-p btn-neutro w-fit cursor-pointer">
+                {fotos.length ? '+ foto' : 'Anexar foto'}
                 <input
                   type="file"
                   accept="image/*"
@@ -1325,7 +1694,8 @@ function AcertarConta({
                     e.target.value = '';
                     if (!arquivo) return;
                     try {
-                      setFoto(await reduzirFoto(arquivo));
+                      const reduzida = await reduzirFoto(arquivo);
+                      setFotos((atual) => [...atual, reduzida]);
                       setErro(null);
                     } catch (err) {
                       setErro(err instanceof Error ? err.message : String(err));
@@ -1333,7 +1703,7 @@ function AcertarConta({
                   }}
                 />
               </label>
-            )}
+            </div>
           </div>
         )}
       </div>

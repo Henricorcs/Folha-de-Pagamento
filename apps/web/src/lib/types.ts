@@ -1293,8 +1293,26 @@ export interface LancamentoDoCaixa {
   tipo: 'ENTRADA' | 'SAIDA';
   conferido: boolean;
   conferidoEm: string | null;
-  temNota: boolean;
+  /** Quantas fotos de nota há. As imagens vêm sob demanda, uma a uma. */
+  qtdNotas: number;
   observacao: string | null;
+}
+
+/**
+ * Uma linha do histórico: o retrato que a conferência copiou do lançamento.
+ *
+ * Vem daqui, e não do IXC — achar um pagamento de meses atrás varrendo lá seria
+ * mês a mês de leitura. O preço é que só aparece o que passou pela conferência.
+ */
+export interface ItemDoHistorico {
+  id: string;
+  idLancamentoIxc: number;
+  dataLancamento: string | null;
+  valor: string | null;
+  historico: string | null;
+  observacao: string | null;
+  conferidoEm: string | null;
+  qtdNotas: number;
 }
 
 /** O que se faz com o dinheiro que está na rua. */
@@ -1309,7 +1327,8 @@ export interface MovimentoDaRua {
   /** Dia em que aconteceu — não o dia em que foi digitado. */
   data: string;
   observacao: string | null;
-  temNota: boolean;
+  /** Quantas fotos de nota há neste acerto. */
+  qtdNotas: number;
   /** Título gerado no IXC pela despesa desta nota. */
   idFnApagarIxc: number | null;
   contaPagarId: string | null;

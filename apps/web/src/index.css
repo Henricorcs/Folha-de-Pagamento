@@ -101,9 +101,17 @@
    *   num azul-acinzentado que parecia apagado ao lado do nome. Contra o cartão
    *   escuro ele agora dá 9,6:1, e o 900 chega perto do branco.
    */
-  --tinta-50: 15 22 38;
-  --tinta-100: 28 39 61;
-  --tinta-200: 44 60 90;
+  /*
+   * O fundo da página é o mais escuro de tudo, e por uma margem que se vê.
+   *
+   * Ele e o cartão estavam a oito pontos de distância (15,22,38 contra
+   * 23,33,54): as duas superfícies quase se confundiam, e um cartão de
+   * indicador parecia flutuar sem borda no meio da tela. Descendo a página e
+   * subindo o cartão, o que se quer ler ganha um degrau de verdade por baixo.
+   */
+  --tinta-50: 8 13 25;
+  --tinta-100: 24 34 55;
+  --tinta-200: 42 57 86;
   --tinta-300: 108 125 158;
   --tinta-400: 148 165 195;
   --tinta-500: 188 201 222;
@@ -112,15 +120,17 @@
   --tinta-800: 242 246 252;
   --tinta-900: 252 253 255;
 
-  --papel: 23 33 54;
-  --barra: 10 16 32;
+  --papel: 27 38 62;
+  /* A barra fica entre a página e o cartão: mais escura que o conteúdo, para
+     não disputar com ele, e mais clara que o fundo, para ter forma. */
+  --barra: 14 21 38;
 
   /*
    * No escuro a faixa é mais clara que o cartão, não mais escura: abaixo dele
    * ela cairia no fundo da página e a linha par pareceria um buraco.
    */
-  --faixa: 29 40 63;
-  --linha-hover: 39 53 83;
+  --faixa: 34 47 74;
+  --linha-hover: 45 61 95;
 
   /*
    * Mais claro que o cartão **e** que a página — as duas superfícies em que um
@@ -128,8 +138,8 @@
    * solta fora de cartão, ficava sem fundo nenhum: só a borda dizia que ali
    * dava para escrever.
    */
-  --campo: 34 48 77;
-  --campo-foco: 44 61 96;
+  --campo: 39 55 88;
+  --campo-foco: 50 69 108;
 
   /* Só o violeta muda: os outros quatro passam nos dois fundos. */
   --serie-5: #8b5cf6;

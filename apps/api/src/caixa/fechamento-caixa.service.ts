@@ -36,7 +36,8 @@ export interface DespesaDaPrestacao {
 export interface LancamentoConferido extends LancamentoDoCaixa {
   conferido: boolean;
   conferidoEm: Date | null;
-  temNota: boolean;
+  /** Quantas fotos de nota há. As fotos em si vêm sob demanda. */
+  qtdNotas: number;
   observacao: string | null;
 }
 
@@ -122,6 +123,9 @@ export class FechamentoCaixaService {
         caixaId,
         idLancamentoIxc: { in: lancamentos.map((l) => l.id) },
       },
+      // Quantas fotos, e não as fotos: são centenas de KB cada, e uma semana de
+      // caixa viraria megabytes de resposta para desenhar uma tabela.
+      include: { _count: { select: { fotos: true } } },
     });
     const porId = new Map(conferencias.map((c) => [c.idLancamentoIxc, c]));
 
@@ -131,9 +135,9 @@ export class FechamentoCaixaService {
         ...l,
         conferido: c?.conferido ?? false,
         conferidoEm: c?.conferidoEm ?? null,
-        // A foto não vai na listagem: são centenas de KB por linha, e a tela
-        // só precisa saber que existe. Quem quer ver pede a dela.
-        temNota: !!c?.notaFoto,
+        // A foto não vai na listagem: a tela só precisa saber quantas existem.
+        // Quem quer ver pede as daquele lançamento.
+        qtdNotas: c?._count.fotos ?? 0,
         observacao: c?.observacao ?? null,
       };
     });
@@ -143,7 +147,12 @@ export class FechamentoCaixaService {
     const naRua = await this.prisma.dinheiroNaRua.findMany({
       where: { caixaId, baixadoEm: null },
       orderBy: { entregueEm: 'asc' },
-      include: { movimentos: { orderBy: { data: 'asc' } } },
+      include: {
+        movimentos: {
+          orderBy: { data: 'asc' },
+          include: { _count: { select: { fotos: true } } },
+        },
+      },
     });
 
     const fechamentos = await this.prisma.fechamentoCaixa.findMany({
@@ -320,11 +329,24 @@ export class FechamentoCaixaService {
     };
   }
 
-  /** Marca ou desmarca um lançamento como conferido. */
+  /**
+   * Marca ou desmarca um lançamento como conferido.
+   *
+   * O retrato do lançamento (data, valor, histórico) vem junto e fica gravado:
+   * é ele que faz existir um histórico pesquisável meses depois, sem ter de
+   * varrer o IXC mês a mês para achar um pagamento — a leitura que já derrubou
+   * esta página com 502.
+   */
   async conferir(
     caixaId: number,
     idLancamentoIxc: number,
-    dados: { conferido?: boolean; observacao?: string | null },
+    dados: {
+      conferido?: boolean;
+      observacao?: string | null;
+      dataLancamento?: string;
+      valor?: number;
+      historico?: string;
+    },
     usuarioId?: string,
   ) {
     const conferido = dados.conferido ?? true;
@@ -335,6 +357,7 @@ export class FechamentoCaixaService {
       ...(dados.observacao === undefined
         ? {}
         : { observacao: dados.observacao?.trim() || null }),
+      ...retratoDoLancamento(dados),
     };
 
     const salvo = await this.prisma.conferenciaCaixa.upsert({
@@ -342,30 +365,124 @@ export class FechamentoCaixaService {
       create: { caixaId, idLancamentoIxc, ...base },
       update: base,
     });
-    return semFoto(salvo);
+    return { ...salvo, qtdNotas: await this.contarNotas(salvo.id) };
   }
 
-  /** Guarda (ou tira) a foto da nota de um lançamento. */
-  async guardarNota(
+  /**
+   * Anexa mais uma foto à nota de um lançamento.
+   *
+   * Mais uma, e não "a" foto: uma nota nem sempre cabe numa só — cupom
+   * comprido, verso escrito, a foto tremida que pede a segunda tentativa. O
+   * campo único apagava a anterior sem avisar.
+   */
+  async adicionarNota(
     caixaId: number,
     idLancamentoIxc: number,
-    notaFoto: string | null,
+    foto: string,
+    retrato: { dataLancamento?: string; valor?: number; historico?: string },
+    usuarioId?: string,
   ) {
-    const salvo = await this.prisma.conferenciaCaixa.upsert({
+    const conferencia = await this.prisma.conferenciaCaixa.upsert({
       where: { caixaId_idLancamentoIxc: { caixaId, idLancamentoIxc } },
-      create: { caixaId, idLancamentoIxc, notaFoto },
-      update: { notaFoto },
+      create: { caixaId, idLancamentoIxc, ...retratoDoLancamento(retrato) },
+      update: retratoDoLancamento(retrato),
     });
-    return semFoto(salvo);
+
+    await this.prisma.fotoDaNota.create({
+      data: {
+        conferenciaId: conferencia.id,
+        foto,
+        criadoPor: usuarioId ?? null,
+      },
+    });
+    return { qtdNotas: await this.contarNotas(conferencia.id) };
   }
 
-  /** A foto de um lançamento, sob demanda — ela não vai na listagem. */
-  async nota(caixaId: number, idLancamentoIxc: number) {
+  /** As fotos de um lançamento — os números, não as imagens. */
+  async notas(caixaId: number, idLancamentoIxc: number) {
     const c = await this.prisma.conferenciaCaixa.findUnique({
       where: { caixaId_idLancamentoIxc: { caixaId, idLancamentoIxc } },
-      select: { notaFoto: true },
+      select: {
+        fotos: {
+          select: { id: true, createdAt: true },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
     });
-    return { notaFoto: c?.notaFoto ?? null };
+    return c?.fotos ?? [];
+  }
+
+  /** Uma foto, sob demanda. É aqui que a imagem trafega, e em lugar nenhum mais. */
+  async foto(id: string) {
+    const f = await this.prisma.fotoDaNota.findUnique({
+      where: { id },
+      select: { foto: true },
+    });
+    return { foto: f?.foto ?? null };
+  }
+
+  async apagarFoto(id: string) {
+    const f = await this.prisma.fotoDaNota.findUnique({ where: { id } });
+    if (!f) throw new BadRequestException('Esta foto não existe mais.');
+    await this.prisma.fotoDaNota.delete({ where: { id } });
+  }
+
+  private async contarNotas(conferenciaId: string) {
+    return this.prisma.fotoDaNota.count({ where: { conferenciaId } });
+  }
+
+  /**
+   * O histórico do que já foi conferido, com busca.
+   *
+   * Lê só o que esta casa guardou — o retrato que a conferência copiou —, e
+   * nunca o IXC: achar um pagamento de três meses atrás varrendo lá seria mês a
+   * mês de leitura, que é o que derruba esta página. O preço é que só aparece
+   * aqui o que passou pela conferência, e é exatamente esse o histórico que se
+   * quer.
+   */
+  async historicoConferido(
+    caixaId: number,
+    filtros: { busca?: string; de?: string; ate?: string; limite?: number },
+  ) {
+    const busca = filtros.busca?.trim();
+    const conferencias = await this.prisma.conferenciaCaixa.findMany({
+      where: {
+        caixaId,
+        conferido: true,
+        ...(filtros.de || filtros.ate
+          ? {
+              dataLancamento: {
+                ...(filtros.de ? { gte: dataDoDia(filtros.de, 'inicial') } : {}),
+                ...(filtros.ate
+                  ? { lte: fimDoDia(dataDoDia(filtros.ate, 'final')) }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(busca
+          ? {
+              OR: [
+                { historico: { contains: busca, mode: 'insensitive' as const } },
+                { observacao: { contains: busca, mode: 'insensitive' as const } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ dataLancamento: 'desc' }, { conferidoEm: 'desc' }],
+      take: filtros.limite ?? 200,
+      include: { _count: { select: { fotos: true } } },
+    });
+
+    return conferencias.map((c) => ({
+      id: c.id,
+      idLancamentoIxc: c.idLancamentoIxc,
+      dataLancamento: c.dataLancamento,
+      valor: c.valor,
+      historico: c.historico,
+      observacao: c.observacao,
+      conferidoEm: c.conferidoEm,
+      qtdNotas: c._count.fotos,
+    }));
   }
 
   // -------------------------------------------------------------------------
@@ -427,7 +544,8 @@ export class FechamentoCaixaService {
       valor: number;
       /** Dia em que aconteceu (AAAA-MM-DD). Vazio = hoje. */
       data?: string;
-      notaFoto?: string | null;
+      /** As fotos da nota que a pessoa trouxe. */
+      notasFoto?: string[];
       observacao?: string;
       /** Só para NOTA: a conta a pagar a lançar pelo que foi gasto. */
       despesa?: DespesaDaPrestacao;
@@ -488,14 +606,24 @@ export class FechamentoCaixaService {
       : null;
 
     const movimento = await this.prisma.movimentoDaRua.create({
+      include: { _count: { select: { fotos: true } } },
       data: {
         entregaId,
         tipo: dados.tipo,
         valor: new Prisma.Decimal(arredondar(dados.valor)),
         data: dia,
         observacao: dados.observacao?.trim() || null,
-        notaFoto: dados.notaFoto ?? null,
         criadoPor: usuarioId ?? null,
+        ...(dados.notasFoto?.length
+          ? {
+              fotos: {
+                create: dados.notasFoto.map((foto) => ({
+                  foto,
+                  criadoPor: usuarioId ?? null,
+                })),
+              },
+            }
+          : {}),
         ...(lancada
           ? {
               idFnApagarIxc: lancada.idFnApagarIxc,
@@ -508,22 +636,23 @@ export class FechamentoCaixaService {
     });
 
     /*
-     * A saída que a despesa acabou de criar no IXC já nasce conferida, com a
-     * foto que veio aqui.
+     * A saída que a despesa criou no IXC recebe as fotos do acerto — e só isso.
      *
-     * Ela vai aparecer na lista de saídas a conferir daqui a pouco — é o mesmo
-     * caixa —, e pedir que alguém a marque de novo, e fotografe de novo a
-     * mesma nota que acabou de ser fotografada, é trabalho repetido por um
-     * detalhe de arquitetura: a foto do acerto mora no lançamento da rua, e a
-     * da conferência mora na conferência.
+     * A foto vai porque fotografar de novo a mesma nota é trabalho repetido por
+     * um detalhe de arquitetura: a do acerto mora no lançamento da rua, a da
+     * conferência mora na conferência. O "OK" **não** vai: a saída tem de
+     * passar pela fila de conferência como qualquer outra. Quem presta contas e
+     * quem confere o caixa não são o mesmo gesto, e dar por conferido o que a
+     * própria pessoa acabou de lançar tira da conferência o sentido que ela
+     * tem.
      */
-    if (lancada?.pagoEm) {
-      await this.conferirALancadaNoIxc({
+    if (lancada?.pagoEm && dados.notasFoto?.length) {
+      await this.levarAsFotosParaAConferencia({
         caixaId: conta.caixaId,
         valor: dados.valor,
         dia: lancada.pagoEm,
         fornecedor: lancada.fornecedorNome,
-        notaFoto: dados.notaFoto ?? null,
+        notasFoto: dados.notasFoto,
         usuarioId,
       });
     }
@@ -552,7 +681,7 @@ export class FechamentoCaixaService {
     );
 
     return {
-      movimento: semFoto(movimento),
+      movimento: comQtdNotas(movimento),
       saldo: novoSaldo,
       acertada: fechou,
       despesa: lancada,
@@ -560,25 +689,27 @@ export class FechamentoCaixaService {
   }
 
   /**
-   * Dá por conferida, com a foto, a saída que a despesa criou no IXC.
+   * Leva as fotos do acerto para a saída que a despesa criou no IXC.
    *
    * O que se conhece depois da baixa é o número do **título** (`fn_apagar`), e
    * o que a conferência indexa é o número do **lançamento** da movimentação —
    * dois números diferentes, e o segundo o IXC não devolve. Então ele é
    * procurado: entre as saídas daquele caixa naquele dia, a do mesmo valor que
-   * ainda não foi conferida. Havendo mais de uma candidata, o nome do
+   * ainda não tem foto nenhuma. Havendo mais de uma candidata, o nome do
    * fornecedor no histórico desempata.
+   *
+   * A saída continua **por conferir**: o que viaja é a foto, não o "olhei".
    *
    * Falha para dentro, sempre. Isto é conveniência — poupar a segunda foto da
    * mesma nota —, e derrubar por causa dela um acerto que já escreveu no IXC
    * seria trocar um incômodo por um estrago.
    */
-  private async conferirALancadaNoIxc(dados: {
+  private async levarAsFotosParaAConferencia(dados: {
     caixaId: number;
     valor: number;
     dia: Date;
     fornecedor: string;
-    notaFoto: string | null;
+    notasFoto: string[];
     usuarioId?: string;
   }) {
     try {
@@ -596,23 +727,23 @@ export class FechamentoCaixaService {
       if (doValor.length === 0) {
         this.logger.warn(
           `Não achei no IXC a saída de ${dados.valor} do caixa #${dados.caixaId} ` +
-            `em ${diaISO(dados.dia)} para dá-la por conferida. Ela vai aparecer ` +
-            'na lista para ser marcada à mão.',
+            `em ${diaISO(dados.dia)} para anexar a foto. Ela vai aparecer na ` +
+            'lista para receber a foto à mão.',
         );
         return;
       }
 
-      // O que já foi conferido não se toma de novo: numa fatura de dois
-      // pagamentos iguais no mesmo dia, o segundo tem de achar o segundo.
-      const jaConferidos = await this.prisma.conferenciaCaixa.findMany({
+      // O que já tem foto não se toma de novo: numa fatura de dois pagamentos
+      // iguais no mesmo dia, o segundo tem de achar o segundo.
+      const jaComFoto = await this.prisma.conferenciaCaixa.findMany({
         where: {
           caixaId: dados.caixaId,
           idLancamentoIxc: { in: doValor.map((l) => l.id) },
-          conferido: true,
+          fotos: { some: {} },
         },
         select: { idLancamentoIxc: true },
       });
-      const tomados = new Set(jaConferidos.map((c) => c.idLancamentoIxc));
+      const tomados = new Set(jaComFoto.map((c) => c.idLancamentoIxc));
       const livres = doValor.filter((l) => !tomados.has(l.id));
       if (livres.length === 0) return;
 
@@ -622,7 +753,14 @@ export class FechamentoCaixaService {
           livres.find((l) => l.historico.toLowerCase().includes(primeiroNome))) ||
         livres[0];
 
-      await this.prisma.conferenciaCaixa.upsert({
+      // O retrato vem do próprio lançamento achado: é ele que o histórico
+      // vai pesquisar depois.
+      const retrato = {
+        dataLancamento: escolhido.data,
+        valor: new Prisma.Decimal(arredondar(escolhido.valor)),
+        historico: escolhido.historico,
+      };
+      const conferencia = await this.prisma.conferenciaCaixa.upsert({
         where: {
           caixaId_idLancamentoIxc: {
             caixaId: dados.caixaId,
@@ -632,24 +770,22 @@ export class FechamentoCaixaService {
         create: {
           caixaId: dados.caixaId,
           idLancamentoIxc: escolhido.id,
-          conferido: true,
-          conferidoEm: new Date(),
-          conferidoPor: dados.usuarioId ?? null,
-          notaFoto: dados.notaFoto,
+          ...retrato,
         },
-        update: {
-          conferido: true,
-          conferidoEm: new Date(),
-          conferidoPor: dados.usuarioId ?? null,
-          // A foto só se escreve quando veio uma: um acerto sem foto não apaga
-          // a que alguém já tinha anexado pela lista.
-          ...(dados.notaFoto ? { notaFoto: dados.notaFoto } : {}),
-        },
+        update: retrato,
+      });
+
+      await this.prisma.fotoDaNota.createMany({
+        data: dados.notasFoto.map((foto) => ({
+          conferenciaId: conferencia.id,
+          foto,
+          criadoPor: dados.usuarioId ?? null,
+        })),
       });
       this.logger.log(
-        `Saída #${escolhido.id} do caixa #${dados.caixaId} dada por conferida ` +
-          'pelo acerto da rua' +
-          (dados.notaFoto ? ', com a foto da nota' : ''),
+        `Saída #${escolhido.id} do caixa #${dados.caixaId} recebeu ` +
+          `${dados.notasFoto.length} foto(s) do acerto da rua. Ela continua ` +
+          'por conferir.',
       );
     } catch (err) {
       this.logger.warn(
@@ -727,13 +863,28 @@ export class FechamentoCaixaService {
     };
   }
 
-  /** A foto da nota de um lançamento da rua. */
-  async notaDoMovimento(id: string) {
+  /** As fotos de um acerto da rua — os números, não as imagens. */
+  async notasDoMovimento(id: string) {
     const m = await this.prisma.movimentoDaRua.findUnique({
       where: { id },
-      select: { notaFoto: true },
+      select: {
+        fotos: {
+          select: { id: true, createdAt: true },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
     });
-    return { notaFoto: m?.notaFoto ?? null };
+    return m?.fotos ?? [];
+  }
+
+  /** Anexa mais uma foto a um acerto já lançado. */
+  async adicionarNotaAoMovimento(id: string, foto: string, usuarioId?: string) {
+    const m = await this.prisma.movimentoDaRua.findUnique({ where: { id } });
+    if (!m) throw new BadRequestException('Este lançamento não existe.');
+    await this.prisma.fotoDaNota.create({
+      data: { movimentoId: id, foto, criadoPor: usuarioId ?? null },
+    });
+    return { qtdNotas: await this.prisma.fotoDaNota.count({ where: { movimentoId: id } }) };
   }
 
   /**
@@ -790,7 +941,12 @@ export class FechamentoCaixaService {
   async desfazerAcertos(entregaId: string) {
     const conta = await this.prisma.dinheiroNaRua.findUnique({
       where: { id: entregaId },
-      include: { movimentos: { orderBy: { createdAt: 'desc' } } },
+      include: {
+        movimentos: {
+          orderBy: { createdAt: 'desc' },
+          include: { _count: { select: { fotos: true } } },
+        },
+      },
     });
     if (!conta) throw new BadRequestException('Esta entrega não existe.');
 
@@ -807,7 +963,12 @@ export class FechamentoCaixaService {
 
     const atual = await this.prisma.dinheiroNaRua.findUnique({
       where: { id: entregaId },
-      include: { movimentos: { orderBy: { data: 'asc' } } },
+      include: {
+        movimentos: {
+          orderBy: { data: 'asc' },
+          include: { _count: { select: { fotos: true } } },
+        },
+      },
     });
     return { desfeitos, mantidos, conta: atual ? comSaldo(atual) : null };
   }
@@ -833,7 +994,12 @@ export class FechamentoCaixaService {
       where: { caixaId },
       orderBy: [{ entregueEm: 'desc' }],
       take: 200,
-      include: { movimentos: { orderBy: { data: 'asc' } } },
+      include: {
+        movimentos: {
+          orderBy: { data: 'asc' },
+          include: { _count: { select: { fotos: true } } },
+        },
+      },
     });
     return itens.map(comSaldo);
   }
@@ -1025,13 +1191,24 @@ function saldoQueSegue(f: {
 
 /** Uma conta da rua com o que se precisa saber dela: quanto ainda está fora. */
 function comSaldo<
-  T extends { movimentos: Array<{ notaFoto?: string | null }> },
+  T extends { movimentos: Array<{ _count?: { fotos: number } }> },
 >(conta: T) {
   return {
     ...conta,
     saldo: saldoDaConta(conta as never),
-    movimentos: conta.movimentos.map(semFoto),
+    movimentos: conta.movimentos.map(comQtdNotas),
   };
+}
+
+/**
+ * Quantas fotos há, e nenhuma delas.
+ *
+ * São centenas de KB cada: uma semana de caixa viraria megabytes de resposta
+ * para desenhar uma tabela. Quem quer ver pede as daquele lançamento.
+ */
+function comQtdNotas<T extends { _count?: { fotos: number } }>(registro: T) {
+  const { _count, ...resto } = registro;
+  return { ...resto, qtdNotas: _count?.fotos ?? 0 };
 }
 
 /**
@@ -1051,12 +1228,25 @@ function saldoDaConta(conta: {
 }
 
 /**
- * A foto nunca vai numa listagem: são centenas de KB por linha, e uma semana
- * de caixa viraria megabytes de resposta para desenhar uma tabela.
+ * O retrato do lançamento, para gravar junto da conferência.
+ *
+ * Só o que veio: um "conferir" que não mande o retrato não apaga o que já
+ * estava gravado — a marca e a foto podem chegar em ordens diferentes.
  */
-function semFoto<T extends { notaFoto?: string | null }>(registro: T) {
-  const { notaFoto, ...resto } = registro;
-  return { ...resto, temNota: !!notaFoto };
+function retratoDoLancamento(d: {
+  dataLancamento?: string;
+  valor?: number;
+  historico?: string;
+}) {
+  return {
+    ...(d.dataLancamento
+      ? { dataLancamento: dataDoDia(d.dataLancamento, 'do lançamento') }
+      : {}),
+    ...(d.valor === undefined
+      ? {}
+      : { valor: new Prisma.Decimal(arredondar(d.valor)) }),
+    ...(d.historico ? { historico: d.historico } : {}),
+  };
 }
 
 /** "AAAA-MM-DD" para Date, recusando o que não é data. */
