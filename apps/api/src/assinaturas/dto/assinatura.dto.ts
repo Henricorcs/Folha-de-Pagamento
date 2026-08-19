@@ -1,12 +1,5 @@
 import { ModoAssinatura } from '@prisma/client';
-import {
-  IsEnum,
-  IsOptional,
-  IsString,
-  Matches,
-  MaxLength,
-  MinLength,
-} from 'class-validator';
+import { IsBoolean, IsEnum, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 
 /**
  * O que a pessoa manda ao assinar. Vem de fora do login — quem tem o link
@@ -33,4 +26,17 @@ export class AssinarDto {
    * Vazio = desenhada, que é o caminho normal.
    */
   @IsOptional() @IsEnum(ModoAssinatura) modo?: ModoAssinatura;
+}
+
+/**
+ * A abertura da coleta.
+ *
+ * `substituir` é a confirmação da tela chegando ao servidor: sem ela, uma
+ * diária já assinada é recusada. Não é segurança contra ninguém — é a rede que
+ * impede um clique solto de apagar o que alguém assinou.
+ */
+export class AbrirColetaDto {
+  @IsOptional()
+  @IsBoolean()
+  substituir?: boolean;
 }

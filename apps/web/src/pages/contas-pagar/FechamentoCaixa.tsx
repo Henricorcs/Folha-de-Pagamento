@@ -27,6 +27,14 @@ import type {
   TipoMovimentoDaRua,
 } from '../../lib/types';
 
+/** Uma nota de lançamento: a foto tirada, ou o recibo que o diarista assinou. */
+interface NotaDoLancamento {
+  id: string;
+  createdAt: string;
+  tipo: 'FOTO' | 'RECIBO';
+  diariaId: string | null;
+}
+
 /** As abas da tela, no modelo da do IXC. */
 type AbaDoCaixa = 'caixa' | 'conferir' | 'revisados' | 'historico';
 
@@ -1231,7 +1239,7 @@ function NotasDoLancamento({
     queryKey: chave,
     queryFn: async () =>
       (
-        await api.get<Array<{ id: string; createdAt: string }>>(
+        await api.get<NotaDoLancamento[]>(
           `/caixa/${caixaId}/lancamentos/${idLancamento}/notas`,
         )
       ).data,
@@ -1240,7 +1248,7 @@ function NotasDoLancamento({
   const apagar = useMutation({
     mutationFn: async (fotoId: string) => api.delete(`/caixa/notas/${fotoId}`),
     onSuccess: async () => {
-      const { data } = await api.get<Array<{ id: string }>>(
+      const { data } = await api.get<NotaDoLancamento[]>(
         `/caixa/${caixaId}/lancamentos/${idLancamento}/notas`,
       );
       qc.setQueryData(chave, data);
@@ -1255,15 +1263,84 @@ function NotasDoLancamento({
 
   return (
     <div className="flex flex-wrap gap-3 pt-3">
-      {notas.data.map((n, i) => (
-        <UmaFoto
-          key={n.id}
-          fotoId={n.id}
-          numero={i + 1}
-          total={notas.data.length}
-          onApagar={somenteLeitura ? undefined : () => apagar.mutate(n.id)}
-        />
-      ))}
+      {notas.data.map((n, i) =>
+        n.tipo === 'RECIBO' ? (
+          <UmRecibo
+            key={n.id}
+            diariaId={n.diariaId!}
+            numero={i + 1}
+            total={notas.data.length}
+          />
+        ) : (
+          <UmaFoto
+            key={n.id}
+            fotoId={n.id}
+            numero={i + 1}
+            total={notas.data.length}
+            onApagar={somenteLeitura ? undefined : () => apagar.mutate(n.id)}
+          />
+        ),
+      )}
+    </div>
+  );
+}
+
+/**
+ * O recibo assinado do diarista, valendo como nota deste pagamento.
+ *
+ * Ele não é copiado para a conferência: é montado na hora, do retrato congelado
+ * da assinatura. Guardar uma cópia seria criar uma segunda verdade sobre o
+ * mesmo pagamento — e reimprimir o de março tem de dar o mesmo papel que saiu
+ * em março.
+ */
+function UmRecibo({
+  diariaId,
+  numero,
+  total,
+}: {
+  diariaId: string;
+  numero: number;
+  total: number;
+}) {
+  const [erro, setErro] = useState<string | null>(null);
+
+  /*
+   * O PDF vem pela API autenticada, e não por um `href` direto: o token vive
+   * no cabeçalho, e uma aba aberta na mão chegaria lá sem ele.
+   */
+  const abrir = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.get<Blob>(
+        `/diarias/${diariaId}/recibo.pdf`,
+        { responseType: 'blob' },
+      );
+      const url = URL.createObjectURL(data);
+      window.open(url, '_blank', 'noopener');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    },
+    onError: (e) => setErro(mensagemErro(e)),
+  });
+
+  return (
+    <div className="flex w-52 flex-col gap-1">
+      <div className="text-xs text-tinta-400">
+        {numero} de {total}
+      </div>
+      <div className="flex flex-col gap-2 rounded-xl border border-tinta-200 p-3">
+        <Selo tom="pago">Recibo assinado</Selo>
+        <p className="text-xs text-tinta-400">
+          O diarista assinou o recibo deste pagamento; ele vale como a nota.
+        </p>
+        <button
+          type="button"
+          onClick={() => abrir.mutate()}
+          disabled={abrir.isPending}
+          className="btn btn-p btn-primario"
+        >
+          {abrir.isPending ? 'Abrindo…' : 'Ver o recibo'}
+        </button>
+        {erro && <p className="text-xs text-rose-600">{erro}</p>}
+      </div>
     </div>
   );
 }

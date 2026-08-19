@@ -648,6 +648,10 @@ model Diaria {
 
   forma FormaPagamento
 
+  /// O recibo assinado desta diária, quando ele já vale como nota de um
+  /// lançamento do caixa.
+  notaNoCaixa FotoDaNota?
+
   /// Conta a pagar gerada no IXC (só na forma IXC)
   contaPagar   ContaPagar? @relation(fields: [contaPagarId], references: [id], onDelete: SetNull)
   contaPagarId String?     @unique @map("conta_pagar_id")
@@ -732,6 +736,16 @@ model AssinaturaDiaria {
   // --- De onde veio a assinatura, para o caso de alguém contestar ---
   ip        String?
   userAgent String? @map("user_agent")
+
+  // --- Recoleta ---
+  /// Quando alguém pediu para assinar de novo. Enquanto está preenchido, o
+  /// link novo vale e a assinatura antiga continua respondendo pelo recibo —
+  /// ela só é substituída quando a nova chega.
+  recoletandoDesde DateTime? @map("recoletando_desde")
+  recoletadoPor    String?   @map("recoletado_por")
+  /// Quantas vezes foi refeita. Um recibo assinado três vezes é uma pergunta
+  /// que alguém vai querer fazer.
+  recoletas        Int       @default(0)
 
   /// Quem gerou o link
   criadoPor String?  @map("criado_por")
@@ -1203,7 +1217,7 @@ model ConferenciaCaixa {
   @@map("conferencias_caixa")
 }
 
-/// Uma foto de nota fiscal, em data URL.
+/// A nota de um lançamento: uma foto, ou o recibo assinado de uma diária.
 ///
 /// Tabela própria, e não uma lista na linha, para a listagem poder perguntar
 /// "quantas há?" sem carregar nenhuma: são centenas de KB cada, e uma semana de
@@ -1211,20 +1225,31 @@ model ConferenciaCaixa {
 model FotoDaNota {
   id String @id @default(uuid())
 
-  /// Uma das duas, nunca as duas: a foto é da conferência de um lançamento do
+  /// Uma das duas, nunca as duas: a nota é da conferência de um lançamento do
   /// caixa, ou do acerto de quem levou dinheiro para a rua.
   conferencia   ConferenciaCaixa? @relation(fields: [conferenciaId], references: [id], onDelete: Cascade)
   conferenciaId String?           @map("conferencia_id")
   movimento     MovimentoDaRua?   @relation(fields: [movimentoId], references: [id], onDelete: Cascade)
   movimentoId   String?           @map("movimento_id")
 
-  foto String
+  /// A imagem, em data URL. Vazia quando a nota é um recibo.
+  foto String?
+
+  /// A diária cujo recibo assinado é a nota deste pagamento.
+  ///
+  /// O recibo não é copiado para cá: ele é montado na hora, do retrato
+  /// congelado da assinatura. Guardar uma cópia seria criar uma segunda verdade
+  /// sobre o mesmo pagamento, e reimprimir o de março tem de dar o mesmo papel
+  /// que saiu em março.
+  diaria   Diaria? @relation(fields: [diariaId], references: [id], onDelete: Cascade)
+  diariaId String? @unique @map("diaria_id")
 
   criadoPor String?  @map("criado_por")
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([conferenciaId])
   @@index([movimentoId])
+  @@index([diariaId])
   @@map("fotos_da_nota")
 }
 

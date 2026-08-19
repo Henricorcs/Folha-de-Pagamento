@@ -12,7 +12,7 @@ import {
 import type { Request, Response } from 'express';
 import { Public } from '../auth/public.decorator';
 import { AssinaturasService } from './assinaturas.service';
-import { AssinarDto } from './dto/assinatura.dto';
+import { AssinarDto, AbrirColetaDto } from './dto/assinatura.dto';
 import { gerarReciboPdf } from './recibo.pdf';
 
 function usuarioId(req: Request): string | undefined {
@@ -47,10 +47,19 @@ export class AssinaturasController {
   // --- De quem paga (autenticado) ---
 
   /** Abre a coleta e devolve o link para mandar (ou abrir ali mesmo). */
+  /**
+   * Abre a coleta. `substituir` só faz falta quando já há assinatura: é a
+   * confirmação da tela chegando aqui, para nenhum clique solto apagar o que
+   * alguém assinou.
+   */
   @Post('diarias/:id/assinatura')
   @HttpCode(201)
-  async gerarLink(@Param('id') id: string, @Req() req: Request) {
-    const a = await this.service.gerarLink(id, usuarioId(req));
+  async gerarLink(
+    @Param('id') id: string,
+    @Body() dto: AbrirColetaDto,
+    @Req() req: Request,
+  ) {
+    const a = await this.service.gerarLink(id, usuarioId(req), dto.substituir);
     return { token: a.token, expiraEm: a.expiraEm, assinadoEm: a.assinadoEm };
   }
 

@@ -52,10 +52,24 @@ function montarServico(
     },
     assinaturaDiaria: {
       findUnique: jest.fn().mockResolvedValue(opts.assinatura ?? null),
-      upsert: jest.fn(async ({ create }: { create: Record<string, unknown> }) => {
-        guardado.push(create);
-        return { ...create, id: 'a1' };
-      }),
+      upsert: jest.fn(
+        async ({
+          create,
+          update,
+        }: {
+          create: Record<string, unknown>;
+          update: Record<string, unknown>;
+        }) => {
+          // Reabrindo uma diária que já tem assinatura, é o `update` que vale.
+          const usado = opts.diaria &&
+            (opts.diaria as { assinatura?: { assinadoEm?: Date } }).assinatura
+              ?.assinadoEm
+            ? update
+            : create;
+          guardado.push(usado);
+          return { ...usado, id: 'a1' };
+        },
+      ),
       update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
         guardado.push(data);
         return { ...(opts.assinatura ?? {}), ...data };
@@ -345,5 +359,90 @@ describe('modo da assinatura', () => {
     const recibo = await service.abrirPorToken('tok');
 
     expect(recibo.modo).toBe('DIGITADA');
+  });
+});
+
+/*
+ * Assinado era o fim, e na prática há motivo para refazer: assinou no lugar
+ * errado, o traço saiu ilegível, quem segurava o celular era outra pessoa. Sem
+ * caminho, a saída era apagar a diária e lançar de novo — mexer no caixa para
+ * consertar um rabisco.
+ */
+describe('coletar a assinatura de novo', () => {
+  const assinada = {
+    ...DIARIA,
+    assinatura: { id: 'a1', assinadoEm: new Date('2026-08-11T10:00:00Z') },
+  };
+
+  it('sem confirmar, a diária já assinada é recusada', async () => {
+    const { service } = montarServico({ diaria: assinada });
+
+    await expect(service.gerarLink('dia1')).rejects.toThrow(
+      /substituir a assinatura atual/i,
+    );
+  });
+
+  it('confirmando, sai link novo e fica marcado que se espera outra', async () => {
+    const { service, guardado } = montarServico({ diaria: assinada });
+
+    const a = await service.gerarLink('dia1', 'u1', true);
+
+    expect(a.token).toEqual(expect.any(String));
+    const gravado = guardado[0];
+    expect(gravado.recoletandoDesde).toBeInstanceOf(Date);
+    expect(gravado.recoletadoPor).toBe('u1');
+    /*
+     * A antiga não é limpa aqui: o recibo dela pode já ser a nota de um
+     * lançamento do caixa, e apagá-la ao reabrir deixaria essa nota sem
+     * documento até alguém assinar de novo.
+     */
+    expect(gravado.assinaturaPng).toBeUndefined();
+    expect(gravado.assinadoEm).toBeUndefined();
+  });
+
+  it('a nova assinatura substitui a antiga e conta a recoleta', async () => {
+    const { service, guardado } = montarServico({
+      assinatura: {
+        id: 'a1',
+        diariaId: 'dia1',
+        token: 'tk',
+        expiraEm: new Date('2099-01-01'),
+        assinadoEm: new Date('2026-08-11T10:00:00Z'),
+        recoletandoDesde: new Date('2026-08-12T09:00:00Z'),
+        recoletas: 0,
+        diaria: DIARIA,
+        valor: 290,
+        descricao: 'Roçada do terreno',
+        dataDiaria: DIARIA.data,
+        empresaNome: 'ILNET',
+      },
+    });
+
+    await service.assinar('tk', { assinatura: PNG }, {});
+
+    const gravado = guardado[0];
+    expect(gravado.assinaturaPng).toBe(PNG);
+    expect(gravado.recoletandoDesde).toBeNull();
+    expect(gravado.recoletas).toEqual({ increment: 1 });
+  });
+
+  /* Sem recoleta pedida, o link de uma assinada continua morto. */
+  it('link de recibo assinado, sem recoleta, continua recusando', async () => {
+    const { service } = montarServico({
+      assinatura: {
+        id: 'a1',
+        diariaId: 'dia1',
+        token: 'tk',
+        expiraEm: new Date('2099-01-01'),
+        assinadoEm: new Date('2026-08-11T10:00:00Z'),
+        recoletandoDesde: null,
+        recoletas: 0,
+        diaria: DIARIA,
+      },
+    });
+
+    await expect(
+      service.assinar('tk', { assinatura: PNG }, {}),
+    ).rejects.toThrow(/já foi assinado/i);
   });
 });

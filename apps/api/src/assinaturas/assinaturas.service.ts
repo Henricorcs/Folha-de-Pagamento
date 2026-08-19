@@ -54,12 +54,23 @@ export class AssinaturasService {
    * que dizia quando ele assinou.
    *
    * Chamar de novo antes de alguém assinar sorteia outro token e estica o
-   * prazo — é o "perdi o link, manda de novo". Depois de assinado não há o que
-   * reabrir: o recibo está pronto.
+   * prazo — é o "perdi o link, manda de novo".
+   *
+   * Depois de assinado, só com `substituir`. Assinado era o fim, e na prática
+   * há motivo para refazer: assinou no lugar errado, o traço saiu ilegível, quem
+   * segurava o celular era outra pessoa. Sem caminho, a saída era apagar a
+   * diária e lançar de novo — mexer no caixa para consertar um rabisco. A
+   * confirmação é da tela; aqui a recusa é só a rede de segurança, para nenhum
+   * clique solto apagar uma assinatura.
+   *
+   * A assinatura antiga fica até a nova chegar: o recibo dela pode já ser a
+   * nota de um lançamento do caixa, e limpá-la ao reabrir deixaria essa nota
+   * sem documento no meio do caminho.
    */
   async gerarLink(
     diariaId: string,
     usuarioId?: string,
+    substituir = false,
   ): Promise<AssinaturaDiaria> {
     const diaria = await this.prisma.diaria.findUnique({
       where: { id: diariaId },
@@ -73,9 +84,11 @@ export class AssinaturasService {
           'A assinatura serve ao dinheiro entregue em mãos.',
       );
     }
-    if (diaria.assinatura?.assinadoEm) {
+    const jaAssinada = !!diaria.assinatura?.assinadoEm;
+    if (jaAssinada && !substituir) {
       throw new BadRequestException(
-        'Esta diária já foi assinada. O recibo está guardado.',
+        'Esta diária já foi assinada. Para coletar de novo, confirme que quer ' +
+          'substituir a assinatura atual.',
       );
     }
 
@@ -113,6 +126,12 @@ export class AssinaturasService {
         expiraEm: daquiADias(VALIDADE_DIAS),
         criadoPor: usuarioId ?? null,
         ...retrato,
+        // Reabrindo uma já assinada, fica marcado que se espera outra — é o que
+        // destrava o link de assinar. A antiga continua respondendo pelo recibo
+        // até a nova chegar.
+        ...(jaAssinada
+          ? { recoletandoDesde: new Date(), recoletadoPor: usuarioId ?? null }
+          : {}),
       },
     });
   }
@@ -160,6 +179,10 @@ export class AssinaturasService {
    * deixar o link vivo depois disso é convite para a mesma diária ganhar duas
    * assinaturas diferentes.
    *
+   * A exceção é a recoleta, pedida de propósito lá de dentro: aí a nova
+   * assinatura substitui a anterior, e a contagem de recoletas sobe — um recibo
+   * assinado três vezes é uma pergunta que alguém vai querer fazer.
+   *
    * O IP e o aparelho ficam junto. Não provam quem segurava o celular, mas são
    * o que existe para responder "de onde veio isso" se alguém contestar.
    */
@@ -169,7 +192,8 @@ export class AssinaturasService {
     origem: { ip?: string; userAgent?: string },
   ): Promise<ReciboPublico> {
     const a = await this.buscarPorToken(token);
-    if (a.assinadoEm) {
+    const recoletando = !!a.recoletandoDesde;
+    if (a.assinadoEm && !recoletando) {
       throw new BadRequestException('Este recibo já foi assinado.');
     }
     if (a.expiraEm < new Date()) {
@@ -187,11 +211,17 @@ export class AssinaturasService {
         nomeAssinante: dto.nome?.trim() || a.diaria.diarista.nome,
         ip: origem.ip?.slice(0, 60) ?? null,
         userAgent: origem.userAgent?.slice(0, 300) ?? null,
+        ...(recoletando
+          ? { recoletandoDesde: null, recoletas: { increment: 1 } }
+          : {}),
       },
     });
 
     this.logger.log(
-      `Diária ${a.diariaId} assinada por quem recebeu (recibo ${a.id}).`,
+      `Diária ${a.diariaId} assinada por quem recebeu (recibo ${a.id})` +
+        (recoletando
+          ? ` — assinatura substituída (${a.recoletas + 1}ª recoleta)`
+          : ''),
     );
     return this.abrirPorToken(token);
   }

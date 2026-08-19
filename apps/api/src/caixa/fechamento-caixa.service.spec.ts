@@ -64,6 +64,8 @@ function montarServico(
     ultimo?: Record<string, unknown> | null;
     /** O que o lançamento da despesa devolve. */
     despesaLancada?: Record<string, unknown>;
+    /** Diárias assinadas, pagas em mãos, à espera de virar nota. */
+    diariasAssinadas?: Array<Record<string, unknown>>;
   } = {},
 ) {
   const lancamentos = opts.lancamentos ?? [];
@@ -83,6 +85,9 @@ function montarServico(
         ...create,
       })),
       findUnique: jest.fn().mockResolvedValue(null),
+    },
+    diaria: {
+      findMany: jest.fn().mockResolvedValue(opts.diariasAssinadas ?? []),
     },
     dinheiroNaRua: {
       // Primeira chamada: as contas abertas. Segunda: as entregas do período,
@@ -311,6 +316,60 @@ describe('extrato do caixa', () => {
 
     expect(e.resumo.entregueNoPeriodo).toBe(50);
     expect(e.resumo.saldoEsperado).toBe(950);
+  });
+
+  /*
+   * A nota daquele pagamento já existe neste sistema: é o recibo que a pessoa
+   * assinou com o dedo. Sem a ligação, quem fecha o caixa imprimia o recibo,
+   * fotografava o papel e anexava a foto do papel que o sistema gerou.
+   */
+  it('o recibo assinado do diarista vira a nota da saída dele', async () => {
+    const { service, prisma } = montarServico({
+      lancamentos: [
+        { ...saida(90, 290), historico: 'Pag. João da Silva - doc.: 12' },
+      ],
+      diariasAssinadas: [
+        { id: 'dia1', valor: 290, diarista: { nome: 'João da Silva', nomeFantasia: null } },
+      ],
+    });
+
+    const e = await service.extrato(7, '2026-08-01', '2026-08-31');
+
+    const [{ data }] = prisma.fotoDaNota.create.mock.calls[0];
+    expect(data.diariaId).toBe('dia1');
+    // A tela recebe o número já certo, sem precisar de outra ida.
+    expect(e.lancamentos[0].qtdNotas).toBe(1);
+  });
+
+  it('valor igual mas outro nome não casa', async () => {
+    const { service, prisma } = montarServico({
+      lancamentos: [
+        { ...saida(90, 290), historico: 'Pag. Auto Peças Silva - doc.: 12' },
+      ],
+      diariasAssinadas: [
+        { id: 'dia1', valor: 290, diarista: { nome: 'Jeferson Alves', nomeFantasia: null } },
+      ],
+    });
+
+    await service.extrato(7, '2026-08-01', '2026-08-31');
+
+    expect(prisma.fotoDaNota.create).not.toHaveBeenCalled();
+  });
+
+  it('saída que já tem nota não recebe o recibo por cima', async () => {
+    const { service, prisma } = montarServico({
+      lancamentos: [
+        { ...saida(90, 290), historico: 'Pag. João da Silva - doc.: 12' },
+      ],
+      conferencias: [{ idLancamentoIxc: 90, conferido: false, qtdNotas: 1 }],
+      diariasAssinadas: [
+        { id: 'dia1', valor: 290, diarista: { nome: 'João da Silva', nomeFantasia: null } },
+      ],
+    });
+
+    await service.extrato(7, '2026-08-01', '2026-08-31');
+
+    expect(prisma.fotoDaNota.create).not.toHaveBeenCalled();
   });
 
   it('recusa período de trás para frente', async () => {

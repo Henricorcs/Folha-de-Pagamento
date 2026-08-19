@@ -265,6 +265,21 @@ export class FechamentoCaixaService {
       (m) => m.gastoPagoEm,
     );
 
+    /*
+     * O recibo assinado do diarista vale como nota do pagamento dele.
+     *
+     * A diária paga em mãos vira conta a pagar baixada no caixa, e a saída
+     * chega aqui pedindo foto — só que a nota daquele pagamento já existe neste
+     * sistema: é o recibo que a pessoa assinou com o dedo na tela. Sem esta
+     * ligação, quem fecha o caixa imprimia o recibo, fotografava o papel e
+     * anexava a foto do papel que o próprio sistema tinha gerado.
+     *
+     * Roda na leitura, e não no momento da assinatura, porque as duas coisas
+     * não têm ordem garantida: assina-se antes ou depois de a baixa chegar ao
+     * IXC. Aqui os dois lados já existem, e o que não casar hoje casa amanhã.
+     */
+    await this.ligarRecibosAssinados(caixaId, inicio, fim, comConferencia);
+
     const soma = (t: 'ENTRADA' | 'SAIDA') =>
       arredondar(
         comConferencia
@@ -327,6 +342,105 @@ export class FechamentoCaixaService {
       },
       fechamentos,
     };
+  }
+
+  /**
+   * Liga o recibo assinado de cada diária à saída dela no caixa.
+   *
+   * O que existe dos dois lados é o valor e o nome de quem recebeu: a
+   * movimentação do IXC guarda o histórico da baixa ("Pag. Fulano - doc.: 9"),
+   * e a diária guarda o diarista. Não há um número em comum — o que a baixa
+   * devolve é o id do título, e a conferência é indexada pelo id do lançamento.
+   * Então o casamento é por valor mais nome, dentro do período, e só sobre
+   * saídas que ainda não têm nota nenhuma.
+   *
+   * Uma diária só é ligada uma vez: o índice único em `diaria_id` é o que
+   * garante isso mesmo se duas leituras acontecerem juntas.
+   *
+   * Falha para dentro. Isto é conveniência — poupar a foto do papel que o
+   * próprio sistema imprimiu —, e derrubar por causa dela a leitura do caixa
+   * seria trocar um incômodo por uma tela que não abre.
+   */
+  private async ligarRecibosAssinados(
+    caixaId: number,
+    inicio: Date,
+    fim: Date,
+    lancamentos: LancamentoConferido[],
+  ) {
+    try {
+      const semNota = lancamentos.filter(
+        (l) => l.tipo === 'SAIDA' && l.qtdNotas === 0,
+      );
+      if (semNota.length === 0) return;
+
+      /*
+       * As diárias assinadas do período que ainda não viraram nota.
+       *
+       * Só as pagas em mãos: a diária paga pelo banco não passa por gaveta
+       * nenhuma, e o recibo dela não tem lançamento de caixa a que se ligar.
+       */
+      const candidatas = await this.prisma.diaria.findMany({
+        where: {
+          forma: 'EM_MAOS',
+          notaNoCaixa: null,
+          assinatura: { assinadoEm: { not: null } },
+          data: { gte: mesesAntes(inicio, 2), lte: fim },
+        },
+        select: {
+          id: true,
+          valor: true,
+          diarista: { select: { nome: true, nomeFantasia: true } },
+        },
+      });
+      if (candidatas.length === 0) return;
+
+      const usados = new Set<number>();
+      for (const d of candidatas) {
+        const valor = Number(d.valor);
+        const nomes = [d.diarista.nome, d.diarista.nomeFantasia]
+          .filter((n): n is string => !!n)
+          .map((n) => n.trim().split(/\s+/)[0].toLowerCase())
+          .filter((n) => n.length >= 3);
+
+        const achado = semNota.find(
+          (l) =>
+            !usados.has(l.id) &&
+            Math.abs(l.valor - valor) < 0.005 &&
+            nomes.some((n) => l.historico.toLowerCase().includes(n)),
+        );
+        if (!achado) continue;
+        usados.add(achado.id);
+
+        const conferencia = await this.prisma.conferenciaCaixa.upsert({
+          where: {
+            caixaId_idLancamentoIxc: { caixaId, idLancamentoIxc: achado.id },
+          },
+          create: {
+            caixaId,
+            idLancamentoIxc: achado.id,
+            dataLancamento: achado.data,
+            valor: new Prisma.Decimal(arredondar(achado.valor)),
+            historico: achado.historico,
+          },
+          update: {},
+        });
+
+        await this.prisma.fotoDaNota.create({
+          data: { conferenciaId: conferencia.id, diariaId: d.id },
+        });
+        // A tela recebe o número já certo, sem precisar de outra ida.
+        achado.qtdNotas += 1;
+        this.logger.log(
+          `Recibo assinado da diária ${d.id} virou a nota da saída ` +
+            `#${achado.id} do caixa #${caixaId}.`,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        'Não deu para ligar os recibos assinados às saídas do caixa: ' +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
   }
 
   /**
@@ -398,27 +512,33 @@ export class FechamentoCaixaService {
     return { qtdNotas: await this.contarNotas(conferencia.id) };
   }
 
-  /** As fotos de um lançamento — os números, não as imagens. */
+  /** As notas de um lançamento — os números, não as imagens. */
   async notas(caixaId: number, idLancamentoIxc: number) {
     const c = await this.prisma.conferenciaCaixa.findUnique({
       where: { caixaId_idLancamentoIxc: { caixaId, idLancamentoIxc } },
       select: {
         fotos: {
-          select: { id: true, createdAt: true },
+          select: { id: true, createdAt: true, diariaId: true },
           orderBy: { createdAt: 'asc' },
         },
       },
     });
-    return c?.fotos ?? [];
+    return (c?.fotos ?? []).map(comTipoDaNota);
   }
 
-  /** Uma foto, sob demanda. É aqui que a imagem trafega, e em lugar nenhum mais. */
+  /**
+   * Uma nota, sob demanda. É aqui que a imagem trafega, e em lugar nenhum mais.
+   *
+   * O recibo não trafega nem aqui: ele é um documento que o sistema monta na
+   * hora, e a tela vai buscá-lo na rota que já existe para imprimi-lo.
+   */
   async foto(id: string) {
     const f = await this.prisma.fotoDaNota.findUnique({
       where: { id },
-      select: { foto: true },
+      select: { foto: true, diariaId: true },
     });
-    return { foto: f?.foto ?? null };
+    if (!f) return { foto: null, diariaId: null };
+    return { foto: f.foto, diariaId: f.diariaId };
   }
 
   async apagarFoto(id: string) {
@@ -863,18 +983,18 @@ export class FechamentoCaixaService {
     };
   }
 
-  /** As fotos de um acerto da rua — os números, não as imagens. */
+  /** As notas de um acerto da rua — os números, não as imagens. */
   async notasDoMovimento(id: string) {
     const m = await this.prisma.movimentoDaRua.findUnique({
       where: { id },
       select: {
         fotos: {
-          select: { id: true, createdAt: true },
+          select: { id: true, createdAt: true, diariaId: true },
           orderBy: { createdAt: 'asc' },
         },
       },
     });
-    return m?.fotos ?? [];
+    return (m?.fotos ?? []).map(comTipoDaNota);
   }
 
   /** Anexa mais uma foto a um acerto já lançado. */
@@ -1262,6 +1382,23 @@ function dataDoDia(valor: string, qual: string): Date {
     throw new BadRequestException(`A data ${qual} não existe no calendário.`);
   }
   return d;
+}
+
+/**
+ * Uma nota diz o que é: foto tirada, ou recibo assinado.
+ *
+ * A tela precisa saber antes de pedir o conteúdo — uma abre numa imagem, a
+ * outra abre no PDF do recibo.
+ */
+function comTipoDaNota<T extends { diariaId: string | null }>(nota: T) {
+  return { ...nota, tipo: nota.diariaId ? ('RECIBO' as const) : ('FOTO' as const) };
+}
+
+/** A mesma data, alguns meses antes. */
+function mesesAntes(d: Date, meses: number): Date {
+  const antes = new Date(d);
+  antes.setMonth(antes.getMonth() - meses);
+  return antes;
 }
 
 /** O último instante do dia de uma data. */

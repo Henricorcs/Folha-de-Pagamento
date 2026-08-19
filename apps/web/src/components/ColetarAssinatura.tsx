@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, mensagemErro } from '../lib/api';
 import { formatBRL } from '../lib/format';
 import type { AssinaturaDiaria, Diaria } from '../lib/types';
-import { Janela } from './ui';
+import { Aviso, Janela } from './ui';
 
 /**
  * A coleta da assinatura de um pagamento em mãos.
@@ -48,9 +48,22 @@ export function ColetarAssinatura({
     refetchOnWindowFocus: true,
   });
 
+  /**
+   * Substituir apaga a assinatura que está lá.
+   *
+   * A confirmação é aqui, e a recusa é no servidor: sem `substituir`, uma
+   * diária já assinada volta com erro. É a rede que impede um clique solto de
+   * apagar o que alguém assinou.
+   */
+  const [confirmandoTroca, setConfirmandoTroca] = useState(false);
+
   const gerar = useMutation({
-    mutationFn: async () =>
-      (await api.post<AssinaturaDiaria>(`/diarias/${diaria.id}/assinatura`)).data,
+    mutationFn: async (substituir?: boolean) =>
+      (
+        await api.post<AssinaturaDiaria>(`/diarias/${diaria.id}/assinatura`, {
+          substituir: substituir || undefined,
+        })
+      ).data,
     onSuccess: (nova) => {
       queryClient.setQueryData(['assinatura-diaria', diaria.id], nova);
       // A fila lá atrás passa a dizer "link enviado" em vez de "sem link".
@@ -119,7 +132,7 @@ export function ColetarAssinatura({
   useEffect(() => {
     if (assinatura.isSuccess && !atual && !jaPediu.current) {
       jaPediu.current = true;
-      gerar.mutate();
+      gerar.mutate(false);
     }
   }, [assinatura.isSuccess, atual, gerar]);
 
@@ -203,6 +216,49 @@ export function ColetarAssinatura({
               O recibo fica guardado aqui — dá para abrir de novo quando
               precisar.
             </p>
+
+            {/* Assinou no lugar errado, o traço saiu ilegível, quem segurava o
+                celular era outra pessoa: sem este caminho, a saída era apagar a
+                diária e lançar de novo — mexer no caixa por um rabisco. */}
+            {confirmandoTroca ? (
+              <div className="mt-4">
+                <Aviso tom="atencao">
+                  <p>
+                    Coletar de novo <strong>apaga a assinatura atual</strong> e
+                    gera um link novo. O recibo de hoje continua valendo até
+                    alguém assinar outra vez.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfirmandoTroca(false);
+                        gerar.mutate(true);
+                      }}
+                      disabled={gerar.isPending}
+                      className="btn btn-p btn-primario"
+                    >
+                      {gerar.isPending ? 'Abrindo…' : 'Sim, substituir'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmandoTroca(false)}
+                      className="btn btn-p btn-sutil"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </Aviso>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmandoTroca(true)}
+                className="btn btn-sutil mt-3 w-full"
+              >
+                Coletar assinatura de novo
+              </button>
+            )}
           </div>
         )}
 
@@ -255,7 +311,7 @@ export function ColetarAssinatura({
                     Abrir a tela de assinar agora
                   </a>
                   <button
-                    onClick={() => gerar.mutate()}
+                    onClick={() => gerar.mutate(false)}
                     disabled={gerar.isPending}
                     className="btn btn-neutro"
                   >
