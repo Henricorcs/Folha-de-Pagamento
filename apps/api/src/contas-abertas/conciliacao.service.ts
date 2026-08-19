@@ -62,6 +62,22 @@ import { PagamentosService } from './pagamentos.service';
  * tela mostra as duas origens separadas. Não existe endpoint de conciliação no
  * webservice: `fn_conciliacao`, `fn_arquivo_importado`, `fn_extrato` e mais
  * dezesseis nomes prováveis respondem "não está disponível".
+ *
+ * ## A vizinha: o Fechamento de Caixa
+ *
+ * Aquela tela lê `fn_movim_finan` da mesma conta, pela mesma chave — a conta e
+ * o id da linha —, e guarda a marca dela em `conferencias_caixa`. São perguntas
+ * diferentes (lá é "vi a nota desta saída?", aqui é "isto bateu com o
+ * extrato?"), mas quem já olhou uma linha lá não precisa olhá-la de novo aqui:
+ * conferência repetida é o começo da marcação cega.
+ *
+ * Então esta tela **lê** a marca de lá e a mostra como tal, dizendo onde ela
+ * foi feita. Nada é escrito nem apagado naquela tabela: é nela que mora a foto
+ * da nota, e apagar a linha levaria a foto junto. O caminho de volta existe e é
+ * do mesmo tipo — `FechamentoCaixaService.extrato` marca com
+ * `conferidoNaConciliacao` a linha que já passou por aqui, sem que isso conte
+ * como conferência de caixa: bater a gaveta é ver a nota, e isso esta tela não
+ * faz.
  */
 
 /** Uma conta de banco ou caixa, do jeito que a conciliação precisa dela. */
@@ -110,11 +126,20 @@ export interface LinhaDaConciliacao {
   valor: number;
   /** Já está marcada como conciliada no próprio IXC. */
   conciliadoNoIxc: boolean;
-  /** Conferida por esta tela. */
+  /**
+   * Já conferida — aqui ou no Fechamento de Caixa.
+   *
+   * As duas telas olham as mesmas linhas do IXC, e conferir duas vezes a mesma
+   * saída é trabalho jogado fora. Então a marca de lá conta aqui, dizendo de
+   * onde veio: quem desfaz uma conferência precisa saber onde ela foi feita.
+   */
   conferida: {
-    em: string;
+    /** Onde a marca foi feita — é lá que ela se desfaz. */
+    onde: 'conciliacao' | 'fechamento-caixa';
+    em: string | null;
     por: string | null;
-    origem: OrigemConciliacao;
+    /** Como foi conferida aqui; vazio quando a marca veio da outra tela. */
+    origem: OrigemConciliacao | null;
     fitId: string | null;
   } | null;
   titulo: TituloDaLinha | null;
@@ -267,14 +292,17 @@ export class ConciliacaoService {
       .map((r) => mapLinha(r))
       .filter((l): l is LinhaCrua => l !== null);
 
-    const [conciliadasNoIxc, conferidas, titulos] = await Promise.all([
-      this.idsConciliadosNoIxc(conta.razao, de, ate, avisos),
-      this.conferidasNoPeriodo(conta.id, de, ate),
-      this.titulosDasLinhas(linhas),
-    ]);
+    const [conciliadasNoIxc, conferidas, noFechamento, titulos] =
+      await Promise.all([
+        this.idsConciliadosNoIxc(conta.razao, de, ate, avisos),
+        this.conferidasNoPeriodo(conta.id, de, ate),
+        this.conferidasNoFechamentoDeCaixa(conta.id, linhas),
+        this.titulosDasLinhas(linhas),
+      ]);
 
     const montadas: LinhaDaConciliacao[] = linhas.map((l) => {
       const conferida = conferidas.get(l.id);
+      const doCaixa = noFechamento.get(l.id);
       return {
         id: l.id,
         data: l.data,
@@ -282,14 +310,24 @@ export class ConciliacaoService {
         documento: l.documento,
         valor: l.valor,
         conciliadoNoIxc: conciliadasNoIxc.has(l.id),
+        // A marca desta tela vem primeiro: sendo dela, é aqui que se desfaz.
         conferida: conferida
           ? {
+              onde: 'conciliacao',
               em: conferida.conferidoEm.toISOString(),
               por: conferida.conferidoPor,
               origem: conferida.origem,
               fitId: conferida.fitId,
             }
-          : null,
+          : doCaixa
+            ? {
+                onde: 'fechamento-caixa',
+                em: doCaixa.conferidoEm?.toISOString() ?? null,
+                por: doCaixa.conferidoPor,
+                origem: null,
+                fitId: null,
+              }
+            : null,
         titulo: l.idTitulo ? (titulos.get(l.idTitulo) ?? null) : null,
         extrato: null,
       };
@@ -597,6 +635,33 @@ export class ConciliacaoService {
     }
   }
 
+  /**
+   * O que a tela de Fechamento de Caixa já conferiu destas mesmas linhas.
+   *
+   * As duas telas leem `fn_movim_finan` da mesma conta e guardam a marca em
+   * tabelas próprias, com a mesma chave: a conta (`contas.id`) e o id da linha.
+   * Quem confere a saída do caixa contra a nota já olhou aquela linha — pedir
+   * que a olhe de novo aqui é trabalho repetido, e é assim que uma conferência
+   * vira marcação cega.
+   *
+   * Só leitura, e só o que está com `conferido = true`: a linha de lá também
+   * existe para guardar foto de nota e observação, e essas nada dizem sobre
+   * conferência. Nada é escrito nem apagado ali — a foto da nota mora naquela
+   * linha, e é da outra tela.
+   */
+  private async conferidasNoFechamentoDeCaixa(conta: number, linhas: LinhaCrua[]) {
+    if (linhas.length === 0) return new Map<number, MarcaDoCaixa>();
+    const registros = await this.prisma.conferenciaCaixa.findMany({
+      where: {
+        caixaId: conta,
+        conferido: true,
+        idLancamentoIxc: { in: linhas.map((l) => l.id) },
+      },
+      select: { idLancamentoIxc: true, conferidoEm: true, conferidoPor: true },
+    });
+    return new Map(registros.map((r) => [r.idLancamentoIxc, r]));
+  }
+
   /** O que já foi conferido nesta tela, no período. */
   private async conferidasNoPeriodo(conta: number, de: string, ate: string) {
     const registros = await this.prisma.conciliacaoLinha.findMany({
@@ -654,6 +719,13 @@ export class ConciliacaoService {
     }
     return conta;
   }
+}
+
+/** O pedaço da conferência do Fechamento de Caixa que interessa aqui. */
+interface MarcaDoCaixa {
+  idLancamentoIxc: number;
+  conferidoEm: Date | null;
+  conferidoPor: string | null;
 }
 
 /** Uma linha do IXC já traduzida, antes de ganhar os estados da tela. */

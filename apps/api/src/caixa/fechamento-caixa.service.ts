@@ -10,6 +10,15 @@ export interface LancamentoConferido extends LancamentoDoCaixa {
   conferidoEm: Date | null;
   temNota: boolean;
   observacao: string | null;
+  /**
+   * Esta mesma linha já foi conferida na Conciliação bancária.
+   *
+   * As duas telas leem `fn_movim_finan` da mesma conta, então a mesma saída
+   * aparece nas duas. Isto é aviso, não conferência: quem bate a gaveta ainda
+   * precisa ver a nota, e é por isso que o `conferido` daqui não muda sozinho
+   * por causa da marca de lá. Serve para não olhar duas vezes sem saber.
+   */
+  conferidoNaConciliacao: boolean;
 }
 
 /**
@@ -77,13 +86,25 @@ export class FechamentoCaixaService {
       cfg,
     );
 
-    const conferencias = await this.prisma.conferenciaCaixa.findMany({
-      where: {
-        caixaId,
-        idLancamentoIxc: { in: lancamentos.map((l) => l.id) },
-      },
-    });
+    const ids = lancamentos.map((l) => l.id);
+    const [conferencias, naConciliacao] = await Promise.all([
+      this.prisma.conferenciaCaixa.findMany({
+        where: { caixaId, idLancamentoIxc: { in: ids } },
+      }),
+      /*
+       * O que a Conciliação bancária já conferiu destas mesmas linhas.
+       *
+       * As duas telas leem `fn_movim_finan` da mesma conta e guardam a marca
+       * com a mesma chave — a conta e o id da linha. Só leitura: nada é
+       * escrito nem apagado do outro lado.
+       */
+      this.prisma.conciliacaoLinha.findMany({
+        where: { contaIxc: caixaId, idMovimFinan: { in: ids } },
+        select: { idMovimFinan: true },
+      }),
+    ]);
     const porId = new Map(conferencias.map((c) => [c.idLancamentoIxc, c]));
+    const conciliadas = new Set(naConciliacao.map((c) => c.idMovimFinan));
 
     const comConferencia: LancamentoConferido[] = lancamentos.map((l) => {
       const c = porId.get(l.id);
@@ -95,6 +116,7 @@ export class FechamentoCaixaService {
         // só precisa saber que existe. Quem quer ver pede a dela.
         temNota: !!c?.notaFoto,
         observacao: c?.observacao ?? null,
+        conferidoNaConciliacao: conciliadas.has(l.id),
       };
     });
 

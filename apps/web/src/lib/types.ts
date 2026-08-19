@@ -1342,11 +1342,17 @@ export interface LinhaDaConciliacao {
   valor: number;
   /** Já marcada como conciliada no próprio IXC */
   conciliadoNoIxc: boolean;
-  /** Conferida por esta tela */
+  /**
+   * Já conferida — aqui ou no Fechamento de Caixa, que olha as mesmas linhas
+   * do IXC. `onde` diz de qual das duas telas veio a marca, porque é nela que
+   * a conferência se desfaz.
+   */
   conferida: {
-    em: string;
+    onde: 'conciliacao' | 'fechamento-caixa';
+    em: string | null;
     por: string | null;
-    origem: 'MANUAL' | 'EXTRATO';
+    /** Como foi conferida aqui; vazio quando a marca veio da outra tela */
+    origem: 'MANUAL' | 'EXTRATO' | null;
     fitId: string | null;
   } | null;
   titulo: TituloDaLinha | null;
@@ -1412,6 +1418,11 @@ export interface LancamentoDoCaixa {
   conferidoEm: string | null;
   temNota: boolean;
   observacao: string | null;
+  /**
+   * Esta mesma linha já foi conferida na Conciliação bancária. É aviso, não
+   * conferência: bater a gaveta é ver a nota, e isso a outra tela não faz.
+   */
+  conferidoNaConciliacao: boolean;
 }
 
 /** Dinheiro que saiu com alguém e ainda não prestou contas. */

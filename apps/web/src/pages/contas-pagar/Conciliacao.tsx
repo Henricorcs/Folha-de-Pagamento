@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Aviso,
   Bloco,
@@ -31,12 +32,16 @@ import type {
  * braçal: com o .ofx do banco arrastado aqui, o que bate já vem batido e sobra
  * na tela só o que precisa de gente.
  *
- * Três estados convivem em cada linha, e a tela não os mistura:
+ * Quatro estados convivem em cada linha, e a tela não os mistura:
  *
  * - **conciliado no IXC** — veio de lá marcado. É leitura; nada a fazer;
  * - **conferido aqui** — marcado nesta tela. Fica gravado deste lado, porque o
  *   webservice do IXC não recebe essa marca (o PUT ignora o campo e ainda apaga
  *   o resto da linha — está provado em `conciliacao.service.ts`);
+ * - **conferido no caixa** — o Fechamento de Caixa olha as mesmas linhas do IXC
+ *   desta conta, e quem conferiu a nota de uma saída lá já olhou aquela linha.
+ *   Pedir que olhe de novo aqui é o caminho para a marcação cega. A marca é de
+ *   lá e se desfaz lá — junto dela mora a foto da nota, que esta tela não toca;
  * - **pendente** — ninguém conferiu ainda.
  *
  * A saída do extrato que não tem lançamento nenhum no IXC é o achado que
@@ -65,6 +70,8 @@ export function Conciliacao() {
   /** A transação do banco para a qual estamos procurando um título em aberto. */
   const [procurando, setProcurando] = useState<TransacaoExtrato | null>(null);
   const [erroDoArquivo, setErroDoArquivo] = useState<string | null>(null);
+  /** O que ficou de fora da última ação, dito em vez de calado. */
+  const [recado, setRecado] = useState<string | null>(null);
 
   const contas = useQuery({
     queryKey: ['conciliacao-contas'],
@@ -131,6 +138,7 @@ export function Conciliacao() {
       aplicarNaTela(
         linhas.map((l) => l.id),
         {
+          onde: 'conciliacao',
           em: new Date().toISOString(),
           por: null,
           origem: linhas.some((l) => l.extrato) ? 'EXTRATO' : 'MANUAL',
@@ -141,14 +149,37 @@ export function Conciliacao() {
     },
   });
 
+  /**
+   * Desfaz só o que foi conferido nesta tela.
+   *
+   * A marca vinda do Fechamento de Caixa mora na tabela de lá, junto da foto
+   * da nota — apagá-la daqui levaria a foto junto. Então ela fica, e a tela
+   * diz quantas ficaram e por quê, em vez de calar e parecer que não fez nada.
+   */
   const desconferir = useMutation({
-    mutationFn: async (ids: number[]) => {
-      await api.post('/contas-abertas/conciliacao/desconferir', { ids });
-      return ids;
+    mutationFn: async (linhas: LinhaDaConciliacao[]) => {
+      const daqui = linhas.filter((l) => l.conferida?.onde === 'conciliacao');
+      if (daqui.length > 0) {
+        await api.post('/contas-abertas/conciliacao/desconferir', {
+          ids: daqui.map((l) => l.id),
+        });
+      }
+      return {
+        desfeitas: daqui.map((l) => l.id),
+        noCaixa: linhas.filter((l) => l.conferida?.onde === 'fechamento-caixa')
+          .length,
+      };
     },
-    onSuccess: (ids) => {
-      aplicarNaTela(ids, null);
+    onSuccess: ({ desfeitas, noCaixa }) => {
+      aplicarNaTela(desfeitas, null);
       setMarcadas(new Set());
+      setRecado(
+        noCaixa > 0
+          ? `${noCaixa} linha(s) continuam conferidas: a marca delas foi feita no ` +
+              'Fechamento de Caixa, e é lá que se desfaz — a foto da nota está ' +
+              'guardada junto com ela.'
+          : null,
+      );
     },
   });
 
@@ -165,6 +196,7 @@ export function Conciliacao() {
   );
 
   const selecionadas = (dados?.linhas ?? []).filter((l) => marcadas.has(l.id));
+  const contaEscolhida = (contas.data ?? []).find((c) => c.id === conta) ?? null;
 
   async function escolherArquivo(arquivo: File | null) {
     if (!arquivo) return;
@@ -211,6 +243,25 @@ export function Conciliacao() {
         }}
       />
 
+      {/* Caixa não tem extrato de banco para importar: o que confere o dinheiro
+          em mãos é a contagem da gaveta, e essa tela é a de Fechamento de
+          Caixa. Aqui a conta continua visível — o movimento dela é o mesmo —,
+          só que dizendo qual é o lugar certo do trabalho. */}
+      {contaEscolhida?.tipo === 'C' && (
+        <Aviso tom="info">
+          <strong>{contaEscolhida.nome}</strong> é caixa de dinheiro em mãos, e
+          não tem extrato de banco para importar. Conferir a nota de cada saída
+          e bater a gaveta é no{' '}
+          <Link
+            to="/contas-pagar/fechamento-caixa"
+            className="font-semibold underline underline-offset-2"
+          >
+            Fechamento de Caixa
+          </Link>
+          . O que for conferido lá aparece conferido aqui.
+        </Aviso>
+      )}
+
       <SeletorDePeriodo
         periodo={periodo}
         onEscolher={(p) => {
@@ -220,6 +271,7 @@ export function Conciliacao() {
       />
 
       {erroDoArquivo && <Aviso tom="erro">{erroDoArquivo}</Aviso>}
+      {recado && <Aviso tom="atencao">{recado}</Aviso>}
       {conciliacao.isError && (
         <Aviso tom="erro">{mensagemErro(conciliacao.error)}</Aviso>
       )}
@@ -264,7 +316,7 @@ export function Conciliacao() {
                   {conferir.isPending ? 'Conferindo…' : 'Conferir'}
                 </button>
                 <button
-                  onClick={() => desconferir.mutate([...marcadas])}
+                  onClick={() => desconferir.mutate(selecionadas)}
                   disabled={desconferir.isPending}
                   className="btn btn-neutro btn-p"
                 >
@@ -836,6 +888,20 @@ function Estado({ linha }: { linha: LinhaDaConciliacao }) {
     return (
       <Selo tom="pago" titulo="Já está conciliada na tela do IXC.">
         conciliado no IXC
+      </Selo>
+    );
+  }
+  if (linha.conferida?.onde === 'fechamento-caixa') {
+    return (
+      <Selo
+        tom="info"
+        titulo={`Conferida no Fechamento de Caixa${
+          linha.conferida.por ? ` por ${linha.conferida.por}` : ''
+        }${
+          linha.conferida.em ? ` em ${formatData(linha.conferida.em)}` : ''
+        } — lá se vê a nota desta saída. Para desfazer, é naquela tela.`}
+      >
+        conferido no caixa
       </Selo>
     );
   }
