@@ -508,6 +508,27 @@ export class FechamentoCaixaService {
     });
 
     /*
+     * A saída que a despesa acabou de criar no IXC já nasce conferida, com a
+     * foto que veio aqui.
+     *
+     * Ela vai aparecer na lista de saídas a conferir daqui a pouco — é o mesmo
+     * caixa —, e pedir que alguém a marque de novo, e fotografe de novo a
+     * mesma nota que acabou de ser fotografada, é trabalho repetido por um
+     * detalhe de arquitetura: a foto do acerto mora no lançamento da rua, e a
+     * da conferência mora na conferência.
+     */
+    if (lancada?.pagoEm) {
+      await this.conferirALancadaNoIxc({
+        caixaId: conta.caixaId,
+        valor: dados.valor,
+        dia: lancada.pagoEm,
+        fornecedor: lancada.fornecedorNome,
+        notaFoto: dados.notaFoto ?? null,
+        usuarioId,
+      });
+    }
+
+    /*
      * Zerou, fecha. O acerto não é um botão à parte: quem acabou de devolver o
      * último real já disse tudo o que havia para dizer, e pedir uma confirmação
      * depois disso só deixaria contas zeradas abertas na tela por esquecimento.
@@ -536,6 +557,106 @@ export class FechamentoCaixaService {
       acertada: fechou,
       despesa: lancada,
     };
+  }
+
+  /**
+   * Dá por conferida, com a foto, a saída que a despesa criou no IXC.
+   *
+   * O que se conhece depois da baixa é o número do **título** (`fn_apagar`), e
+   * o que a conferência indexa é o número do **lançamento** da movimentação —
+   * dois números diferentes, e o segundo o IXC não devolve. Então ele é
+   * procurado: entre as saídas daquele caixa naquele dia, a do mesmo valor que
+   * ainda não foi conferida. Havendo mais de uma candidata, o nome do
+   * fornecedor no histórico desempata.
+   *
+   * Falha para dentro, sempre. Isto é conveniência — poupar a segunda foto da
+   * mesma nota —, e derrubar por causa dela um acerto que já escreveu no IXC
+   * seria trocar um incômodo por um estrago.
+   */
+  private async conferirALancadaNoIxc(dados: {
+    caixaId: number;
+    valor: number;
+    dia: Date;
+    fornecedor: string;
+    notaFoto: string | null;
+    usuarioId?: string;
+  }) {
+    try {
+      const cfg = await this.config.obter();
+      const { lancamentos } = await this.caixa.listarLancamentos(
+        dados.caixaId,
+        dados.dia,
+        dados.dia,
+        cfg,
+      );
+
+      const doValor = lancamentos.filter(
+        (l) => l.tipo === 'SAIDA' && Math.abs(l.valor - dados.valor) < 0.005,
+      );
+      if (doValor.length === 0) {
+        this.logger.warn(
+          `Não achei no IXC a saída de ${dados.valor} do caixa #${dados.caixaId} ` +
+            `em ${diaISO(dados.dia)} para dá-la por conferida. Ela vai aparecer ` +
+            'na lista para ser marcada à mão.',
+        );
+        return;
+      }
+
+      // O que já foi conferido não se toma de novo: numa fatura de dois
+      // pagamentos iguais no mesmo dia, o segundo tem de achar o segundo.
+      const jaConferidos = await this.prisma.conferenciaCaixa.findMany({
+        where: {
+          caixaId: dados.caixaId,
+          idLancamentoIxc: { in: doValor.map((l) => l.id) },
+          conferido: true,
+        },
+        select: { idLancamentoIxc: true },
+      });
+      const tomados = new Set(jaConferidos.map((c) => c.idLancamentoIxc));
+      const livres = doValor.filter((l) => !tomados.has(l.id));
+      if (livres.length === 0) return;
+
+      const primeiroNome = dados.fornecedor.trim().split(/\s+/)[0]?.toLowerCase();
+      const escolhido =
+        (primeiroNome &&
+          livres.find((l) => l.historico.toLowerCase().includes(primeiroNome))) ||
+        livres[0];
+
+      await this.prisma.conferenciaCaixa.upsert({
+        where: {
+          caixaId_idLancamentoIxc: {
+            caixaId: dados.caixaId,
+            idLancamentoIxc: escolhido.id,
+          },
+        },
+        create: {
+          caixaId: dados.caixaId,
+          idLancamentoIxc: escolhido.id,
+          conferido: true,
+          conferidoEm: new Date(),
+          conferidoPor: dados.usuarioId ?? null,
+          notaFoto: dados.notaFoto,
+        },
+        update: {
+          conferido: true,
+          conferidoEm: new Date(),
+          conferidoPor: dados.usuarioId ?? null,
+          // A foto só se escreve quando veio uma: um acerto sem foto não apaga
+          // a que alguém já tinha anexado pela lista.
+          ...(dados.notaFoto ? { notaFoto: dados.notaFoto } : {}),
+        },
+      });
+      this.logger.log(
+        `Saída #${escolhido.id} do caixa #${dados.caixaId} dada por conferida ` +
+          'pelo acerto da rua' +
+          (dados.notaFoto ? ', com a foto da nota' : ''),
+      );
+    } catch (err) {
+      this.logger.warn(
+        'Não deu para dar por conferida a saída criada no IXC: ' +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
   }
 
   /**

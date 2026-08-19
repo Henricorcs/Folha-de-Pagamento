@@ -520,6 +520,92 @@ describe('a conta de quem levou dinheiro', () => {
     expect(prisma.movimentoDaRua.create).not.toHaveBeenCalled();
   });
 
+  /*
+   * A saída nasce da prestação já revisada: pedir que alguém a marque de novo,
+   * e fotografe de novo a mesma nota, é trabalho repetido por um detalhe de
+   * arquitetura — a foto do acerto mora num lugar e a da conferência noutro.
+   */
+  it('a saída criada no IXC já nasce conferida, com a foto do acerto', async () => {
+    const { service, prisma } = montarServico({
+      entrega: conta,
+      lancamentos: [saida(77, 100)],
+    });
+
+    await service.lancarMovimento(
+      'r1',
+      {
+        tipo: 'NOTA',
+        valor: 100,
+        notaFoto: 'data:image/png;base64,AAAA',
+        despesa: { ...despesa, pagoEm: '2026-08-19' },
+      },
+      'u1',
+    );
+
+    const [chamada] = prisma.conferenciaCaixa.upsert.mock.calls[0] as Array<{
+      create: Record<string, unknown>;
+    }>;
+    expect(chamada.create.idLancamentoIxc).toBe(77);
+    expect(chamada.create.conferido).toBe(true);
+    expect(chamada.create.notaFoto).toBe('data:image/png;base64,AAAA');
+  });
+
+  /*
+   * Duas saídas iguais no mesmo dia: a segunda tem de achar a segunda. Sem
+   * isto, o segundo acerto marcaria de novo o lançamento do primeiro e deixaria
+   * um por conferir para sempre.
+   */
+  it('não toma uma saída que já foi conferida', async () => {
+    const { service, prisma } = montarServico({
+      entrega: conta,
+      lancamentos: [saida(77, 100), saida(78, 100)],
+      conferencias: [{ idLancamentoIxc: 77, conferido: true }],
+    });
+
+    await service.lancarMovimento('r1', {
+      tipo: 'NOTA',
+      valor: 100,
+      despesa: { ...despesa, pagoEm: '2026-08-19' },
+    });
+
+    const [chamada] = prisma.conferenciaCaixa.upsert.mock.calls[0] as Array<{
+      create: Record<string, unknown>;
+    }>;
+    expect(chamada.create.idLancamentoIxc).toBe(78);
+  });
+
+  it('acerto sem despesa não mexe na conferência', async () => {
+    const { service, prisma } = montarServico({
+      entrega: conta,
+      lancamentos: [saida(77, 100)],
+    });
+
+    await service.lancarMovimento('r1', { tipo: 'TROCO', valor: 100 });
+
+    expect(prisma.conferenciaCaixa.upsert).not.toHaveBeenCalled();
+  });
+
+  /*
+   * Isto é conveniência — poupar a segunda foto da mesma nota. Derrubar por
+   * causa dela um acerto que já escreveu no IXC seria trocar um incômodo por
+   * um estrago.
+   */
+  it('não achando a saída no IXC, o acerto passa assim mesmo', async () => {
+    const { service, prisma } = montarServico({
+      entrega: conta,
+      lancamentos: [],
+    });
+
+    const r = await service.lancarMovimento('r1', {
+      tipo: 'NOTA',
+      valor: 100,
+      despesa: { ...despesa, pagoEm: '2026-08-19' },
+    });
+
+    expect(r.saldo).toBe(104);
+    expect(prisma.conferenciaCaixa.upsert).not.toHaveBeenCalled();
+  });
+
   // --- Desfazer ---
 
   it('desfaz um lançamento e reabre a conta', async () => {
