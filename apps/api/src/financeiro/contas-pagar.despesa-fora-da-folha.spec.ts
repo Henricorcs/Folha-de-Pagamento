@@ -76,6 +76,10 @@ function montarServico(
     config as never,
     fornecedores as never,
     { acertosDaCompetencia: jest.fn() } as never,
+    // Sem falta nenhuma: este arquivo prova a despesa fora da folha.
+    {
+      descontoDaCompetencia: jest.fn().mockResolvedValue(new Map<string, number>()),
+    } as never,
   );
 
   return { service, prisma, ixc, criados, contas };

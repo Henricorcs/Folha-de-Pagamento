@@ -113,6 +113,7 @@ model Funcionario {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   adiantamentos Adiantamento[]
+  faltas        FaltaFuncionario[]
   lancamentos   Lancamento[]
   contasPagar   ContaPagar[]
   variaveisMes  VariavelMes[]
@@ -125,6 +126,36 @@ model Funcionario {
   @@index([apelido])
   @@index([isentoIcms])
   @@map("funcionarios")
+}
+
+/// Um dia em que o funcionário faltou.
+///
+/// Falta injustificada custa o dia **e** o descanso da semana: pela CLT, quem
+/// falta sem justificativa perde o DSR daquela semana. São dois descontos por
+/// uma ausência, e o segundo é o que sempre escapava de quem calculava à mão.
+///
+/// Só para quem não tem carteira assinada. Com carteira, quem desconta falta é
+/// a contabilidade, na folha oficial — descontar de novo aqui tiraria o mesmo
+/// dia duas vezes da mesma pessoa.
+model FaltaFuncionario {
+  id String @id @default(uuid())
+
+  funcionario   Funcionario @relation(fields: [funcionarioId], references: [id], onDelete: Cascade)
+  funcionarioId String      @map("funcionario_id")
+
+  /// O dia da falta, à meia-noite local
+  data DateTime
+  /// "AAAA-MM" do mês trabalhado. Guardado, e não derivado na leitura, para a
+  /// folha achar as faltas do mês sem varrer datas.
+  competencia String
+  observacao  String?
+
+  criadoPor String?  @map("criado_por")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([funcionarioId, data])
+  @@index([funcionarioId, competencia])
+  @@map("faltas_funcionario")
 }
 
 // ---------------------------------------------------------------------------

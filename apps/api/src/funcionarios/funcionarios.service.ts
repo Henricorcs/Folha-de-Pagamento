@@ -60,7 +60,46 @@ export class FuncionariosService {
       },
     });
     if (!func) throw new NotFoundException('Funcionário não encontrado');
-    return func;
+
+    /*
+     * O avulso já descontado sai da tela.
+     *
+     * Um lançamento avulso vale por uma competência só: entra no saldo daquela
+     * folha e acabou. Continuar na lista depois disso faz a tela mentir de duas
+     * maneiras ao mesmo tempo — parece que ainda vai descontar, e a lista vira
+     * um arquivo morto que cresce todo mês e esconde o que está para acontecer.
+     *
+     * "Já descontado" é ter folha de salário gerada naquela competência: é o
+     * que de fato consumiu o lançamento. O fixo (sem competência) nunca sai —
+     * ele vale todo mês, por definição.
+     */
+    const avulsos = func.lancamentos.filter((l) => l.competencia);
+    const consumidas =
+      avulsos.length === 0
+        ? new Set<string>()
+        : new Set(
+            (
+              await this.prisma.contaPagar.findMany({
+                where: {
+                  funcionarioId: id,
+                  tipo: TipoLancamento.SALARIO,
+                  competencia: {
+                    in: [...new Set(avulsos.map((l) => l.competencia!))],
+                  },
+                },
+                select: { competencia: true },
+              })
+            )
+              .map((c) => c.competencia)
+              .filter((c): c is string => !!c),
+          );
+
+    return {
+      ...func,
+      lancamentos: func.lancamentos.filter(
+        (l) => !l.competencia || !consumidas.has(l.competencia),
+      ),
+    };
   }
 
   async atualizar(id: string, dto: UpdateFuncionarioDto) {

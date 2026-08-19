@@ -1,6 +1,12 @@
 import { StatusContaPagar, TipoLancamento } from '@prisma/client';
 import { ContasPagarService } from './contas-pagar.service';
 
+/* A folha sem falta nenhuma: cada arquivo destes prova outra coisa. */
+const semFaltas = {
+  descontoDaCompetencia: jest.fn().mockResolvedValue(new Map<string, number>()),
+} as never;
+
+
 /**
  * Ações em massa: o ponto delicado é uma conta que falha não levar as outras
  * junto — o lote é uma ida ao IXC por conta, e a tela precisa saber quem ficou
@@ -84,7 +90,14 @@ function montarServico() {
   } as any;
 
   return {
-    service: new ContasPagarService(prisma, ixc, config, fornecedores, vales),
+    service: new ContasPagarService(
+      prisma,
+      ixc,
+      config,
+      fornecedores,
+      vales,
+      semFaltas,
+    ),
     prisma,
     ixc,
     vales,

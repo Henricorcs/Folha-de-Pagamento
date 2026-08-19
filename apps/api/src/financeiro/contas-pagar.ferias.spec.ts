@@ -7,6 +7,13 @@ import {
 } from './contas-pagar.service';
 import { baseParaFerias, type ComposicaoSalario } from './folha.calc';
 
+/* A folha sem falta nenhuma: cada arquivo destes prova outra coisa. */
+const semFaltas = {
+  descontoDaCompetencia: jest.fn().mockResolvedValue(new Map<string, number>()),
+} as never;
+
+
+
 /**
  * Quem entra de férias não recebe o salário do mês: recebe o que a
  * contabilidade apurou das férias. E não recebe o adiantamento do dia 25 —
@@ -23,6 +30,7 @@ import { baseParaFerias, type ComposicaoSalario } from './folha.calc';
 const dia = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 
 const COMPOSICAO: ComposicaoSalario = {
+  faltas: 0,
   salarioBase: 2000,
   usouValorAReceber: false,
   vendas: 3,
@@ -226,7 +234,14 @@ function montarServico(opcoes: {
     acertosDaCompetencia: jest.fn().mockResolvedValue(new Map()),
   } as any;
 
-  return new ContasPagarService(prisma, {} as any, config, {} as any, vales);
+  return new ContasPagarService(
+    prisma,
+    {} as any,
+    config,
+    {} as any,
+    vales,
+    semFaltas,
+  );
 }
 
 describe('prepararFolha: férias', () => {

@@ -1,6 +1,12 @@
 import { StatusContaPagar, TipoLancamento } from '@prisma/client';
 import { ContasPagarService } from './contas-pagar.service';
 
+/* A folha sem falta nenhuma: cada arquivo destes prova outra coisa. */
+const semFaltas = {
+  descontoDaCompetencia: jest.fn().mockResolvedValue(new Map<string, number>()),
+} as never;
+
+
 /**
  * A prévia da folha precisa dizer, lançamento por lançamento, o que já saiu
  * nesta competência — é isso que faz a tela marcar só quem ainda não recebeu.
@@ -77,7 +83,14 @@ function montarServico(contas: ContaFake[]) {
     acertosDaCompetencia: jest.fn().mockResolvedValue(new Map()),
   } as any;
 
-  return new ContasPagarService(prisma, {} as any, config, {} as any, vales);
+  return new ContasPagarService(
+    prisma,
+    {} as any,
+    config,
+    {} as any,
+    vales,
+    semFaltas,
+  );
 }
 
 const PAGO_EM = new Date('2026-08-05T12:00:00Z');

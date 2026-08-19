@@ -68,6 +68,14 @@ export interface DadosFolhaFuncionario {
   descontoVales?: number;
   /** parcelas de acerto a pagar a mais nesta competência (empresa deve) */
   creditoVales?: number;
+  /**
+   * Faltas do mês, em dinheiro: os dias mais o descanso semanal perdido.
+   *
+   * Só para quem NÃO tem carteira assinada. Com carteira, quem desconta falta é
+   * a contabilidade na folha oficial, e descontar de novo aqui tiraria o mesmo
+   * dia duas vezes da mesma pessoa.
+   */
+  descontoFaltas?: number;
 }
 
 /** Saldo salarial aberto em cada parcela, para mostrar e conferir. */
@@ -85,6 +93,8 @@ export interface ComposicaoSalario {
   vales: number;
   /** acertos somados (a empresa devia ao funcionário) */
   valesCredito: number;
+  /** faltas do mês, já com o descanso semanal perdido dentro */
+  faltas: number;
   /** valor apurado para o dia 25 (mesmo quando não é abatido aqui) */
   adiantamento: number;
   /** o que de fato saiu do saldo: 0 para quem tem carteira assinada */
@@ -195,6 +205,8 @@ export function detalharSalario(
   const descontos = arredondar(d.descontosFixos);
   const vales = arredondar(d.descontoVales ?? 0);
   const valesCredito = arredondar(d.creditoVales ?? 0);
+  // Carteira assinada não desconta falta aqui: a contabilidade já o fez.
+  const faltas = d.carteiraAssinada ? 0 : arredondar(d.descontoFaltas ?? 0);
   const base = baseDaFolha(d);
 
   return {
@@ -207,6 +219,7 @@ export function detalharSalario(
     descontos,
     vales,
     valesCredito,
+    faltas,
     adiantamento,
     adiantamentoDescontado,
     saldo: arredondar(
@@ -216,6 +229,7 @@ export function detalharSalario(
         valesCredito -
         descontos -
         vales -
+        faltas -
         adiantamentoDescontado,
     ),
   };
@@ -234,6 +248,11 @@ export function detalharSalario(
  * continua em aberto para a folha seguinte — este pagamento não a baixa.
  */
 export function baseParaFerias(c: ComposicaoSalario): number {
+  /*
+   * A falta continua descontada: quem faltou faltou, e as férias que a
+   * contabilidade apura já partem do mês trabalhado como ele foi. Só o vale e o
+   * adiantamento voltam, porque nenhum dos dois é abatido de férias.
+   */
   return arredondar(
     c.saldo + c.adiantamentoDescontado + c.vales - c.valesCredito,
   );

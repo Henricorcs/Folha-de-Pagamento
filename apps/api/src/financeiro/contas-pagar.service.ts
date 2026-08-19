@@ -29,6 +29,7 @@ import {
   type StatusAuditoriaIxc,
   type TipoChavePix,
 } from '../ixc/ixc.financeiro';
+import { FaltasService } from '../funcionarios/faltas.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConfigFinanceiraService } from './config-financeira.service';
 import { FornecedorService } from './fornecedor.service';
@@ -184,6 +185,7 @@ export class ContasPagarService {
     private readonly config: ConfigFinanceiraService,
     private readonly fornecedores: FornecedorService,
     private readonly vales: ValesService,
+    private readonly faltas: FaltasService,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -269,6 +271,23 @@ export class ContasPagarService {
         ? await this.vales.acertosDaCompetencia(dto.competencia, ids)
         : new Map();
 
+    /*
+     * As faltas do mês trabalhado, pelo mesmo motivo: elas descontam do saldo
+     * salarial, e o adiantamento do dia 25 é percentual do salário base — não
+     * do que sobrou dele.
+     *
+     * A busca é do mês **trabalhado**, e não da competência de pagamento: a
+     * falta aconteceu no mês em que a pessoa não veio.
+     */
+    const descontoFaltas: Map<string, number> = (dto.incluirSalario ?? true)
+      ? await this.faltas.descontoDaCompetencia(
+          mesTrabalhado,
+          funcionarios
+            .filter((f) => !f.carteiraAssinada)
+            .map((f) => ({ id: f.id, salarioBase: Number(f.salarioBase) })),
+        )
+      : new Map();
+
     return funcionarios.map((f) => {
       const somaTipo = (tipo: TipoLancamento) =>
         f.lancamentos
@@ -298,6 +317,7 @@ export class ContasPagarService {
         horasExtras: Number(variaveis?.horasExtras ?? 0),
         descontoVales: vale?.desconto ?? 0,
         creditoVales: vale?.credito ?? 0,
+        descontoFaltas: descontoFaltas.get(f.id) ?? 0,
       };
 
       const lancamentos = montarLancamentosFolha(dados, params, {

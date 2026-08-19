@@ -1,3 +1,4 @@
+import { CalendarioDeFaltas } from '../../components/CalendarioDeFaltas';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -145,6 +146,13 @@ export function FuncionarioDetalhe() {
             valorPorVendaPadrao={data.valorPorVenda ?? null}
             carteiraAssinada={!!data.carteiraAssinada}
           />
+
+          {/* Só sem carteira assinada: com carteira, quem desconta falta é a
+              contabilidade na folha oficial, e marcar aqui tiraria o mesmo dia
+              duas vezes da mesma pessoa. */}
+          {!data.carteiraAssinada && (
+            <CalendarioDeFaltas funcionarioId={id!} nome={data.nome} />
+          )}
 
           <ValesBloco funcionarioId={id!} />
 

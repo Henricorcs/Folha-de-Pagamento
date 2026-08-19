@@ -1,6 +1,12 @@
 import { StatusContaPagar, TipoLancamento } from '@prisma/client';
 import { ContasPagarService } from './contas-pagar.service';
 
+/* A folha sem falta nenhuma: cada arquivo destes prova outra coisa. */
+const semFaltas = {
+  descontoDaCompetencia: jest.fn().mockResolvedValue(new Map<string, number>()),
+} as never;
+
+
 /**
  * O rádio "Tipo da chave Pix" em branco trava o pagamento no banco, e o código
  * de cada tipo muda de um IXC para outro. O app aprende olhando as contas
@@ -94,7 +100,14 @@ function montarServico(
   const vales = { estornarBaixa: jest.fn() } as any;
 
   return {
-    service: new ContasPagarService(prisma, ixc, config, fornecedores, vales),
+    service: new ContasPagarService(
+      prisma,
+      ixc,
+      config,
+      fornecedores,
+      vales,
+      semFaltas,
+    ),
     ixc,
     guardarAprendizadoPix,
   };
