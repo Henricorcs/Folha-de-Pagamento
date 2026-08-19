@@ -303,7 +303,12 @@ function Conferencia({
           saldoContado: dados.saldoContado,
         })
       ).data,
-    onSuccess: recarregar,
+    onSuccess: () => {
+      recarregar();
+      // Fechado, o período deixa de ser trabalho e vira registro: a tela leva
+      // para onde ele passa a viver.
+      setAba('historico');
+    },
     onError: (e) => setErro(mensagemErro(e)),
   });
 
@@ -449,23 +454,6 @@ function Conferencia({
             onMudou={recarregar}
           />
 
-          {/* Fechar o período mora aqui, com os números que ele congela — e
-              não no fim da lista de revisados, onde ficava longe deles. */}
-          <Bloco titulo="Fechar o período" className="surgir mt-5" semPadding>
-            <Fechar
-              faltam={faltam}
-              naRua={resumo.naRua}
-              semSaidas={qtdSaidas === 0}
-              precisaSaldoInicial={resumo.saldoInicial === null}
-              invadeFechado={invadeFechado}
-              buracoDesde={buracoDesde}
-              deDoPeriodo={de}
-              saldoEsperado={resumo.saldoEsperado}
-              pendente={fechar.isPending}
-              onFechar={(dados) => fechar.mutate(dados)}
-            />
-          </Bloco>
-
           {fechamentos.length > 0 && (
             <Bloco titulo="Fechamentos deste período" className="surgir mt-5">
               <ul className="lista-dividida">
@@ -559,6 +547,29 @@ function Conferencia({
               Dê OK nas saídas da aba anterior; elas passam para cá.
             </Vazio>
           )}
+
+          {/*
+            É aqui que termina.
+            
+            Fechar mora no fim dos revisados porque é o gesto seguinte ao
+            último OK: a lista acabou, o saldo esperado está na frente, conta-se
+            a gaveta e compara-se. Na aba do resumo ele ficava longe do trabalho
+            que o habilita, e dava para clicar sem ter olhado nada.
+          */}
+          {(revisados.length > 0 || qtdSaidas === 0) && (
+            <Fechar
+              faltam={faltam}
+              naRua={resumo.naRua}
+              semSaidas={qtdSaidas === 0}
+              precisaSaldoInicial={resumo.saldoInicial === null}
+              invadeFechado={invadeFechado}
+              buracoDesde={buracoDesde}
+              deDoPeriodo={de}
+              saldoEsperado={resumo.saldoEsperado}
+              pendente={fechar.isPending}
+              onFechar={(dados) => fechar.mutate(dados)}
+            />
+          )}
         </Bloco>
       )}
 
@@ -604,13 +615,20 @@ function Abas<T extends string>({
 }
 
 /**
- * O histórico do que já foi conferido, com busca.
+ * O histórico: o que já foi fechado por aqui, período a período.
  *
- * Lê só o que esta casa guardou — o retrato que a conferência copiou do
- * lançamento —, e nunca o IXC: achar um pagamento de três meses atrás varrendo
- * lá seria mês a mês de leitura, que é o que derruba esta página. O preço é que
- * só aparece aqui o que passou pela conferência, e é exatamente esse o
- * histórico que se quer consultar.
+ * Sem procura, ele mostra os fechamentos — que é como o caixa é lembrado
+ * depois ("o de julho", "o da semana passada"), e não como uma lista corrida de
+ * pagamentos sem começo nem fim. Cada um abre e mostra os números com que
+ * fechou e o que foi conferido dentro dele.
+ *
+ * Com procura, o recorte some: quem digita o nome de um fornecedor está
+ * procurando um pagamento, não um período, e sabe menos ainda em qual deles
+ * ele caiu. Aí a busca varre tudo o que já passou pela conferência.
+ *
+ * Os dois lados leem só o que esta casa guardou — o retrato que a conferência
+ * copiou do lançamento. Varrer o IXC mês a mês para achar um pagamento antigo é
+ * a leitura que já derrubou esta página com 502.
  */
 function Historico({ caixaId }: { caixaId: number }) {
   const [termo, setTermo] = useState('');
@@ -624,7 +642,9 @@ function Historico({ caixaId }: { caixaId: number }) {
     return () => clearTimeout(id);
   }, [termo]);
 
-  const historico = useQuery({
+  const procurando = !!(busca || de || ate);
+
+  const achados = useQuery({
     queryKey: ['caixa', 'historico', caixaId, busca, de, ate],
     queryFn: async () =>
       (
@@ -636,6 +656,7 @@ function Historico({ caixaId }: { caixaId: number }) {
           },
         })
       ).data,
+    enabled: procurando,
   });
 
   const fechamentos = useQuery({
@@ -687,56 +708,212 @@ function Historico({ caixaId }: { caixaId: number }) {
           </div>
         </div>
         <p className="ajuda mt-2">
-          Aqui está o que já passou pela conferência, de qualquer período — não
-          só o que está aberto na tela. Cada linha abre a nota que foi
-          fotografada.
+          A procura varre <strong>todos os períodos</strong>, fechados ou não —
+          não só o que está aberto na tela. Em branco, os fechamentos aparecem
+          um a um logo abaixo.
         </p>
-      </Bloco>
-
-      <Bloco titulo="Pagamentos conferidos" semPadding className="surgir mb-5">
-        {historico.isLoading && <Carregando texto="Procurando…" />}
-        {historico.isError && (
-          <div className="p-4">
-            <Aviso tom="erro">{mensagemErro(historico.error)}</Aviso>
-          </div>
-        )}
-        {historico.data?.length === 0 && (
-          <Vazio titulo="Nada encontrado">
-            {busca || de || ate
-              ? 'Nenhum pagamento conferido bate com esta procura.'
-              : 'Assim que houver saídas conferidas, elas aparecem aqui.'}
-          </Vazio>
-        )}
-        {!!historico.data?.length && (
-          <ul className="lista-dividida px-5">
-            {historico.data.map((h) => (
-              <LinhaDoHistorico key={h.id} item={h} caixaId={caixaId} />
-            ))}
-          </ul>
+        {procurando && (
+          <button
+            type="button"
+            onClick={() => {
+              setTermo('');
+              setBusca('');
+              setDe('');
+              setAte('');
+            }}
+            className="btn btn-p btn-sutil mt-3"
+          >
+            Limpar a procura e voltar aos períodos
+          </button>
         )}
       </Bloco>
 
-      <Bloco titulo="Fechamentos deste caixa" className="surgir">
-        {fechamentos.isLoading && <Carregando texto="Lendo…" />}
-        {fechamentos.data?.length === 0 && (
-          <Vazio titulo="Nenhum fechamento ainda">
-            O primeiro período dado por conferido aparece aqui.
-          </Vazio>
-        )}
-        {!!fechamentos.data?.length && (
-          <ul className="lista-dividida">
-            {fechamentos.data.map((f) => (
-              <LinhaDoFechamento
-                key={f.id}
-                fechamento={f}
-                podeCorrigir={false}
-                onCorrigido={() => undefined}
-              />
-            ))}
-          </ul>
-        )}
-      </Bloco>
+      {procurando ? (
+        <Bloco
+          titulo="Achados em todos os períodos"
+          semPadding
+          className="surgir"
+          acao={
+            achados.data ? (
+              <Selo tom="neutro">
+                {achados.data.length === 1
+                  ? '1 pagamento'
+                  : `${achados.data.length} pagamentos`}
+              </Selo>
+            ) : undefined
+          }
+        >
+          {achados.isLoading && <Carregando texto="Procurando…" />}
+          {achados.isError && (
+            <div className="p-4">
+              <Aviso tom="erro">{mensagemErro(achados.error)}</Aviso>
+            </div>
+          )}
+          {achados.data?.length === 0 && (
+            <Vazio titulo="Nada encontrado">
+              Nenhum pagamento conferido bate com esta procura.
+            </Vazio>
+          )}
+          {!!achados.data?.length && (
+            <ul className="lista-dividida px-5">
+              {achados.data.map((h) => (
+                <LinhaDoHistorico key={h.id} item={h} caixaId={caixaId} />
+              ))}
+            </ul>
+          )}
+        </Bloco>
+      ) : (
+        <Bloco titulo="Períodos fechados" className="surgir" semPadding>
+          {fechamentos.isLoading && <Carregando texto="Lendo…" />}
+          {fechamentos.data?.length === 0 && (
+            <Vazio titulo="Nenhum período fechado ainda">
+              Termine a conferência na aba <strong>Revisados</strong> e dê o
+              período por conferido: ele passa a viver aqui.
+            </Vazio>
+          )}
+          {!!fechamentos.data?.length && (
+            <ul className="lista-dividida px-5">
+              {fechamentos.data.map((f) => (
+                <PeriodoFechado key={f.id} fechamento={f} caixaId={caixaId} />
+              ))}
+            </ul>
+          )}
+        </Bloco>
+      )}
     </>
+  );
+}
+
+/**
+ * Um período fechado, com os números com que fechou e o que teve dentro.
+ *
+ * Os números são os do dia em que foi assinado — copiados, não recalculados: um
+ * fechamento é o que se viu naquele dia, e lançamento que apareça no IXC
+ * depois, com data de período já fechado, não reescreve o que foi assinado.
+ */
+function PeriodoFechado({
+  fechamento: f,
+  caixaId,
+}: {
+  fechamento: FechamentoDoPeriodo;
+  caixaId: number;
+}) {
+  const [aberto, setAberto] = useState(false);
+
+  const itens = useQuery({
+    queryKey: ['caixa', 'historico', caixaId, 'periodo', f.id],
+    queryFn: async () =>
+      (
+        await api.get<ItemDoHistorico[]>(`/caixa/${caixaId}/historico`, {
+          params: { de: diaDoISO(f.de), ate: diaDoISO(f.ate) },
+        })
+      ).data,
+    // Só quando abre: são vários períodos na lista, e ninguém olha todos.
+    enabled: aberto,
+  });
+
+  const calculado = Number(f.saldoFinal);
+  const contado = f.saldoContado === null ? null : Number(f.saldoContado);
+  const diferenca =
+    contado === null ? null : Math.round((contado - calculado) * 100) / 100;
+
+  return (
+    <li className="py-3">
+      <button
+        type="button"
+        onClick={() => setAberto((v) => !v)}
+        className="flex w-full flex-wrap items-center justify-between gap-3 text-left"
+      >
+        <div className="min-w-0">
+          <span className="font-medium text-tinta-800">
+            {formatData(f.de)} a {formatData(f.ate)}
+          </span>
+          <div className="text-xs text-tinta-400">
+            {f.conferidos} saída(s) conferida(s)
+            {f.observacao ? ` · ${f.observacao}` : ''}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="valor">{formatBRL(contado ?? calculado)}</span>
+          <span className="text-xs text-tinta-400">
+            {contado === null ? 'calculados' : 'contados'} na gaveta
+          </span>
+          <span className="text-xs text-tinta-400">{aberto ? '▾' : '▸'}</span>
+        </div>
+      </button>
+
+      {diferenca !== null && Math.abs(diferenca) >= 0.005 && (
+        <div className="mt-1 text-xs text-amber-600">
+          {diferenca > 0 ? 'Sobra' : 'Falta'} de {formatBRL(Math.abs(diferenca))}{' '}
+          sobre os {formatBRL(calculado)} calculados.
+        </div>
+      )}
+
+      {aberto && (
+        <div className="mt-3">
+          {/* Os números com que o período fechou. */}
+          <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+            <NumeroDoFechamento
+              rotulo="Abriu com"
+              valor={Number(f.saldoInicial)}
+            />
+            <NumeroDoFechamento
+              rotulo="Entradas"
+              valor={Number(f.totalEntradas)}
+            />
+            <NumeroDoFechamento rotulo="Saídas" valor={Number(f.totalSaidas)} />
+            <NumeroDoFechamento rotulo="Na rua" valor={Number(f.totalNaRua)} />
+            <NumeroDoFechamento rotulo="Calculado" valor={calculado} />
+            <NumeroDoFechamento
+              rotulo="Contado"
+              valor={contado}
+              vazio="não contou"
+            />
+          </div>
+
+          {itens.isLoading && <Carregando texto="Lendo o período…" />}
+          {itens.data?.length === 0 && (
+            <p className="ajuda">
+              Nenhum pagamento conferido caiu neste recorte. O que foi conferido
+              antes de o histórico existir não guardou data — ele aparece na
+              procura, mas não sabe a que período pertence.
+            </p>
+          )}
+          {!!itens.data?.length && (
+            <ul className="lista-dividida">
+              {itens.data.map((h) => (
+                <LinhaDoHistorico key={h.id} item={h} caixaId={caixaId} />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
+function NumeroDoFechamento({
+  rotulo,
+  valor,
+  vazio = '—',
+}: {
+  rotulo: string;
+  valor: number | null;
+  vazio?: string;
+}) {
+  return (
+    <div className="rounded-xl border border-tinta-200 px-3 py-2">
+      <div className="text-[0.7rem] uppercase tracking-wide text-tinta-400">
+        {rotulo}
+      </div>
+      <div className="valor text-sm">
+        {valor === null ? (
+          <span className="text-tinta-400">{vazio}</span>
+        ) : (
+          formatBRL(valor)
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -754,7 +931,7 @@ function LinhaDoHistorico({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <span className="num text-tinta-400">
-            {formatData(item.dataLancamento)}
+            {item.dataLancamento ? formatData(item.dataLancamento) : '—'}
           </span>{' '}
           <span className="text-tinta-800">
             {item.historico || 'sem histórico'}
@@ -764,7 +941,9 @@ function LinhaDoHistorico({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-3">
-          <span className="valor">{formatBRL(Number(item.valor ?? 0))}</span>
+          <span className="valor">
+            {item.valor === null ? '—' : formatBRL(Number(item.valor))}
+          </span>
           {item.qtdNotas > 0 ? (
             <button
               type="button"
@@ -1941,6 +2120,25 @@ function Fechar({
        cartão dentro do outro só empurraria o botão para longe da lista que o
        habilita. */
     <div className="border-t border-tinta-200 px-5 py-4">
+      {/*
+        O número que a contagem tem de encontrar, na frente de quem vai contar.
+        
+        É a conta inteira desta tela resumida numa linha: se a gaveta tiver isto,
+        o período fecha limpo. Escondê-lo obrigaria a voltar à aba do resumo com
+        o dinheiro na mão.
+      */}
+      <div className="mb-3 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="rotulo mb-0">A gaveta deve ter</span>
+        <span className="valor text-lg">
+          {saldoEsperado === null ? '—' : formatBRL(saldoEsperado)}
+        </span>
+        <span className="text-sm text-tinta-400">
+          {saldoEsperado === null
+            ? 'enquanto faltar de onde partir, a conta não fecha'
+            : 'conte o dinheiro e compare com este número'}
+        </span>
+      </div>
+
       {/* Recontar dias já conferidos somaria as mesmas saídas duas vezes, e o
           novo fechamento passaria a disputar com o antigo o posto de
           "anterior" do seguinte. O servidor recusa; a tela diz antes. */}
