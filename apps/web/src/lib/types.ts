@@ -1371,8 +1371,14 @@ export interface ExtratoDoCaixa {
     saidasConferidas: number;
     naRua: number;
     pessoasNaRua: number;
-    /** Null = este caixa nunca foi fechado por aqui. */
+    /** Null = não há de onde partir; `fechadoAte` diz por qual dos dois motivos. */
     saldoInicial: number | null;
+    /**
+     * Até que dia este caixa já está conferido, ou null se nunca foi fechado.
+     * Com `saldoInicial` nulo e este preenchido, o período pedido começa dentro
+     * de um fechamento que já existe.
+     */
+    fechadoAte: string | null;
     entregueNoPeriodo: number;
     trocoNoPeriodo: number;
     /**

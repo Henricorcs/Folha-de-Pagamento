@@ -18,6 +18,16 @@ import { FechamentoCaixaService } from './fechamento-caixa.service';
 
 const HOJE = new Date('2026-08-18T12:00:00Z');
 
+/**
+ * As duas perguntas que o serviço faz à tabela de fechamentos: o anterior ao
+ * período (com recorte de data) e o último do caixa (sem). O `where.ate` é o
+ * que as separa.
+ */
+interface ConsultaDeFechamento {
+  where?: { caixaId?: number; ate?: { lt?: Date } };
+  orderBy?: unknown;
+}
+
 function montarServico(
   opts: {
     lancamentos?: Array<{
@@ -78,13 +88,16 @@ function montarServico(
     },
     fechamentoCaixa: {
       findMany: jest.fn().mockResolvedValue([]),
-      // O `extrato` procura o anterior; `corrigirContagem` procura o último.
-      // Nenhum teste faz os dois, então uma resposta por cenário basta.
-      findFirst: jest
-        .fn()
-        .mockResolvedValue(
-          opts.ultimo !== undefined ? opts.ultimo : (opts.anterior ?? null),
-        ),
+      /*
+       * Duas perguntas diferentes à mesma tabela: o fechamento anterior ao
+       * período (filtrado por data) e o último do caixa (sem filtro). O filtro
+       * é o que as distingue.
+       */
+      findFirst: jest.fn(async (args: Record<string, never> | ConsultaDeFechamento) =>
+        (args as ConsultaDeFechamento).where?.ate
+          ? (opts.anterior ?? null)
+          : (opts.ultimo ?? null),
+      ),
       findUnique: jest.fn().mockResolvedValue(opts.fechamento ?? null),
       create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
         criados.push(data);
@@ -189,6 +202,34 @@ describe('extrato do caixa', () => {
     // A consulta é pelo que está aberto agora, e não pelas datas do período.
     const [{ where }] = prisma.dinheiroNaRua.findMany.mock.calls[0];
     expect(where).toEqual({ caixaId: 7, baixadoEm: null });
+  });
+
+  /*
+   * "Não achei o anterior" tinha duas causas e uma frase só, e a tela dizia a
+   * errada: com 04/07 a 18/08 já assinado, pedir de 01/08 fazia-a anunciar que
+   * o caixa nunca fora fechado — e pedir o saldo inicial como se fosse o
+   * primeiro de todos.
+   */
+  it('período que invade um fechamento existente diz até onde está fechado', async () => {
+    const { service } = montarServico({
+      // Nenhum fechamento terminou antes de 01/08, mas o caixa está conferido
+      // até 18/08: o período pedido começa no meio dele.
+      anterior: null,
+      ultimo: { ate: new Date(2026, 7, 18) },
+    });
+
+    const e = await service.extrato(7, '2026-08-01', '2026-08-19');
+
+    expect(e.resumo.saldoInicial).toBeNull();
+    expect(e.resumo.fechadoAte).toBe('2026-08-18');
+  });
+
+  it('caixa virgem não tem até onde: fechadoAte fica nulo', async () => {
+    const { service } = montarServico();
+
+    const e = await service.extrato(7, '2026-08-01', '2026-08-31');
+
+    expect(e.resumo.fechadoAte).toBeNull();
   });
 
   it('recusa período de trás para frente', async () => {
@@ -428,10 +469,11 @@ describe('o saldo que deve estar na gaveta', () => {
 
     await service.extrato(7, '2026-08-01', '2026-08-31');
 
-    const [{ where, orderBy }] = prisma.fechamentoCaixa.findFirst.mock.calls[0];
-    expect(where.caixaId).toBe(7);
-    expect(where.ate.lt).toEqual(new Date(2026, 7, 1));
-    expect(orderBy).toEqual({ ate: 'desc' });
+    const [consulta] = prisma.fechamentoCaixa.findFirst.mock
+      .calls[0] as ConsultaDeFechamento[];
+    expect(consulta.where?.caixaId).toBe(7);
+    expect(consulta.where?.ate?.lt).toEqual(new Date(2026, 7, 1));
+    expect(consulta.orderBy).toEqual({ ate: 'desc' });
   });
 
   it('parte do saldo final do fechamento anterior', async () => {
@@ -689,6 +731,43 @@ describe('fechar o período', () => {
 
     // 1000 - 100 de saída - 200 que saiu com alguém
     expect(Number(criados[0].saldoFinal)).toBe(700);
+  });
+
+  /*
+   * O estrago de um período sobreposto é silencioso: as saídas dos dias
+   * repetidos entram duas vezes num saldo assinado, e o novo fechamento passa a
+   * disputar com o antigo o posto de "anterior" do seguinte. Os números saem
+   * plausíveis e errados.
+   */
+  it('recusa período que recomeça dentro do que já foi fechado', async () => {
+    const { service } = montarServico({
+      ultimo: { ate: new Date(2026, 7, 18) },
+      lancamentos: [saida(1, 100)],
+      conferencias: [{ idLancamentoIxc: 1, conferido: true }],
+    });
+
+    await expect(
+      service.fechar({
+        caixaId: 7,
+        de: '2026-08-01',
+        ate: '2026-08-31',
+        saldoInicial: 3368,
+      }),
+    ).rejects.toThrow(/já está fechado até 18\/08\/2026.*19\/08\/2026/s);
+  });
+
+  it('começando no dia seguinte ao último, fecha normalmente', async () => {
+    const { service, criados } = montarServico({
+      anterior: { saldoFinal: 0, saldoContado: 3368 },
+      ultimo: { ate: new Date(2026, 7, 18) },
+      lancamentos: [saida(1, 100)],
+      conferencias: [{ idLancamentoIxc: 1, conferido: true }],
+    });
+
+    await service.fechar({ caixaId: 7, de: '2026-08-19', ate: '2026-08-31' });
+
+    expect(Number(criados[0].saldoInicial)).toBe(3368);
+    expect(Number(criados[0].saldoFinal)).toBe(3268);
   });
 
   it('guarda a contagem da gaveta ao lado do que calculou', async () => {

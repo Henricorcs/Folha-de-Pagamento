@@ -160,6 +160,23 @@ export class FechamentoCaixaService {
     const saldoInicial = anterior ? Number(saldoQueSegue(anterior)) : null;
 
     /*
+     * Até onde este caixa já está conferido, seja qual for o recorte na tela.
+     *
+     * Sem isto, "não achei o anterior" tem duas causas e uma frase só: o caixa
+     * nunca foi fechado, ou o período pedido **começa dentro** de um que já foi
+     * — 04/07 a 18/08 já assinado, e alguém pede de 01/08. A segunda é a comum
+     * (o mês corrente é o recorte que a tela abre sozinha) e a mais cara: a
+     * tela pedia o saldo inicial como se fosse o primeiro fechamento, e fechar
+     * assim contaria de novo dezoito dias de saídas já conferidas.
+     */
+    const ultimo = await this.prisma.fechamentoCaixa.findFirst({
+      where: { caixaId },
+      orderBy: [{ ate: 'desc' }, { createdAt: 'desc' }],
+      select: { ate: true },
+    });
+    const fechadoAte = ultimo ? diaISO(ultimo.ate) : null;
+
+    /*
      * O dinheiro na rua mexe na gaveta sem passar pelo IXC.
      *
      * O que sai com alguém sai fisicamente e não vira saída lá; o troco volta
@@ -242,8 +259,14 @@ export class FechamentoCaixaService {
         ).length,
         naRua: arredondar(naRua.reduce((s, d) => s + Number(d.valor), 0)),
         pessoasNaRua: new Set(naRua.map((d) => d.pessoa.toLowerCase())).size,
-        /** Null = este caixa nunca foi fechado, e ninguém disse por onde começa. */
+        /** Null = não há de onde partir; `fechadoAte` diz por qual dos dois motivos. */
         saldoInicial,
+        /**
+         * Até que dia este caixa já está conferido (AAAA-MM-DD), ou null se
+         * nunca foi fechado. Com `saldoInicial` nulo e este preenchido, o
+         * período pedido invade um fechamento que já existe.
+         */
+        fechadoAte,
         entregueNoPeriodo,
         trocoNoPeriodo,
         /** O que as saídas do IXC já descontam por conta da prestação. */
@@ -561,6 +584,24 @@ export class FechamentoCaixaService {
     usuarioId?: string,
   ) {
     const extrato = await this.extrato(dados.caixaId, dados.de, dados.ate);
+
+    /*
+     * Período que começa dentro de outro já fechado é recusado.
+     *
+     * As saídas daqueles dias já foram conferidas e já entraram num saldo
+     * assinado; contá-las de novo somaria as mesmas duas vezes, e o segundo
+     * fechamento passaria a disputar com o primeiro o posto de "anterior" do
+     * seguinte. Barrar aqui, e não só avisar na tela, porque o estrago é
+     * silencioso: os números saem plausíveis e errados.
+     */
+    if (extrato.resumo.fechadoAte && dados.de <= extrato.resumo.fechadoAte) {
+      throw new BadRequestException(
+        `Este caixa já está fechado até ${formatarDia(extrato.resumo.fechadoAte)}. ` +
+          `Comece o período em ${formatarDia(diaSeguinte(extrato.resumo.fechadoAte))} — ` +
+          'recontar dias já conferidos somaria as mesmas saídas duas vezes.',
+      );
+    }
+
     const faltam = extrato.resumo.qtdSaidas - extrato.resumo.saidasConferidas;
     if (faltam > 0) {
       throw new BadRequestException(
@@ -722,6 +763,18 @@ function dataDoDia(valor: string, qual: string): Date {
     throw new BadRequestException(`A data ${qual} não existe no calendário.`);
   }
   return d;
+}
+
+/** "AAAA-MM-DD" para o dia seguinte, também em "AAAA-MM-DD". */
+function diaSeguinte(dia: string): string {
+  const [a, m, d] = dia.split('-').map(Number);
+  return diaISO(new Date(a, m - 1, d + 1));
+}
+
+/** "AAAA-MM-DD" para "DD/MM/AAAA", que é como a frase de erro o mostra. */
+function formatarDia(dia: string): string {
+  const [a, m, d] = dia.split('-');
+  return `${d}/${m}/${a}`;
 }
 
 /** Date para "AAAA-MM-DD", no fuso de quem está batendo o caixa. */

@@ -35,6 +35,14 @@ interface FornecedorIxc {
 /** Um fechamento já assinado, do jeito que o extrato o entrega. */
 type FechamentoDoPeriodo = ExtratoDoCaixa['fechamentos'][number];
 
+/** O dia seguinte a um "AAAA-MM-DD", também em "AAAA-MM-DD". */
+function diaSeguinte(dia: string): string {
+  const [a, m, d] = dia.split('-').map(Number);
+  const p = (n: number) => String(n).padStart(2, '0');
+  const s = new Date(a, m - 1, d + 1);
+  return `${s.getFullYear()}-${p(s.getMonth() + 1)}-${p(s.getDate())}`;
+}
+
 /** "AAAA-MM-DD" do dia local de um instante vindo do servidor. */
 function diaDoISO(iso: string): string {
   const d = new Date(iso);
@@ -291,6 +299,17 @@ function Conferencia({
   const aConferir = visiveis.filter((l) => !l.conferido);
   const revisados = visiveis.filter((l) => l.conferido);
 
+  /*
+   * O período pedido começa dentro de um que já foi fechado.
+   *
+   * É o estado em que a tela mais erra sozinha: ela abre no mês corrente, e um
+   * fechamento que terminou no meio do mês faz o recorte padrão invadi-lo. Sem
+   * distinguir isto de "nunca foi fechado", ela pedia o saldo inicial como se
+   * fosse o primeiro de todos — e fechar assim recontaria dias já conferidos.
+   */
+  const invadeFechado =
+    resumo.fechadoAte && de <= resumo.fechadoAte ? resumo.fechadoAte : null;
+
   return (
     <>
       <div className="surgir surgir-1 mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -321,14 +340,18 @@ function Conferencia({
               : formatBRL(resumo.saldoEsperado)
           }
           detalhe={
-            resumo.saldoEsperado === null
-              ? 'informe o saldo inicial ao fechar'
-              : `de ${formatBRL(resumo.saldoInicial ?? 0)} no início do período`
+            resumo.saldoEsperado !== null
+              ? `de ${formatBRL(resumo.saldoInicial ?? 0)} no início do período`
+              : invadeFechado
+                ? `comece o período em ${formatData(diaSeguinte(invadeFechado))}`
+                : 'informe o saldo inicial ao fechar'
           }
           alerta={
-            resumo.saldoEsperado === null
-              ? 'Este caixa nunca foi fechado aqui'
-              : undefined
+            resumo.saldoEsperado !== null
+              ? undefined
+              : invadeFechado
+                ? `Já conferido até ${formatData(invadeFechado)}`
+                : 'Este caixa nunca foi fechado aqui'
           }
         />
         <Indicador
@@ -451,6 +474,7 @@ function Conferencia({
             naRua={resumo.naRua}
             semSaidas={qtdSaidas === 0}
             precisaSaldoInicial={resumo.saldoInicial === null}
+            invadeFechado={invadeFechado}
             saldoEsperado={resumo.saldoEsperado}
             pendente={fechar.isPending}
             onFechar={(dados) => fechar.mutate(dados)}
@@ -1306,6 +1330,7 @@ function Fechar({
   naRua,
   semSaidas,
   precisaSaldoInicial,
+  invadeFechado,
   saldoEsperado,
   pendente,
   onFechar,
@@ -1316,6 +1341,8 @@ function Fechar({
   semSaidas: boolean;
   /** Primeiro fechamento deste caixa: alguém tem de dizer de onde parte. */
   precisaSaldoInicial: boolean;
+  /** Até quando já está fechado, quando o período pedido invade esse trecho. */
+  invadeFechado: string | null;
   /** O que a soma diz que deve haver na gaveta, para comparar com a contagem. */
   saldoEsperado: number | null;
   pendente: boolean;
@@ -1328,7 +1355,8 @@ function Fechar({
   const [observacao, setObservacao] = useState('');
   const [saldoInicial, setSaldoInicial] = useState('');
   const [saldoContado, setSaldoContado] = useState('');
-  const faltaOSaldo = precisaSaldoInicial && saldoInicial.trim() === '';
+  const faltaOSaldo =
+    precisaSaldoInicial && !invadeFechado && saldoInicial.trim() === '';
 
   const contou = saldoContado.trim() !== '';
   /** Sobra (positiva) ou falta (negativa) entre o que existe e o que a soma diz. */
@@ -1342,9 +1370,24 @@ function Fechar({
        cartão dentro do outro só empurraria o botão para longe da lista que o
        habilita. */
     <div className="border-t border-tinta-200 px-5 py-4">
+      {/* Recontar dias já conferidos somaria as mesmas saídas duas vezes, e o
+          novo fechamento passaria a disputar com o antigo o posto de
+          "anterior" do seguinte. O servidor recusa; a tela diz antes. */}
+      {invadeFechado && (
+        <div className="mb-3">
+          <Aviso tom="atencao">
+            Este caixa já está fechado até{' '}
+            <strong>{formatData(invadeFechado)}</strong>. Mude o{' '}
+            <strong>De</strong> para{' '}
+            <strong>{formatData(diaSeguinte(invadeFechado))}</strong> — daí o
+            saldo aparece sozinho, vindo do fechamento anterior.
+          </Aviso>
+        </div>
+      )}
+
       {/* Só no primeiro fechamento deste caixa: do segundo em diante, o
           anterior diz de onde a gaveta parte. */}
-      {precisaSaldoInicial && (
+      {precisaSaldoInicial && !invadeFechado && (
         <div className="mb-3">
           <label className="rotulo" htmlFor="saldo-inicial">
             Quanto havia na gaveta em {' '}
@@ -1415,14 +1458,16 @@ function Fechar({
               saldoContado: contou ? Number(saldoContado) || 0 : undefined,
             })
           }
-          disabled={faltam > 0 || faltaOSaldo || pendente}
+          disabled={faltam > 0 || faltaOSaldo || !!invadeFechado || pendente}
           className="btn btn-acao shrink-0"
           title={
-            faltam > 0
-              ? 'Confira todas as saídas antes de fechar'
-              : faltaOSaldo
-                ? 'Informe quanto havia na gaveta no início'
-                : 'Guarda os números deste período'
+            invadeFechado
+              ? `Este período recomeça dentro do que já foi fechado até ${formatData(invadeFechado)}`
+              : faltam > 0
+                ? 'Confira todas as saídas antes de fechar'
+                : faltaOSaldo
+                  ? 'Informe quanto havia na gaveta no início'
+                  : 'Guarda os números deste período'
           }
         >
           {pendente ? 'Fechando…' : 'Dar o período por conferido'}
