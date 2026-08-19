@@ -126,12 +126,19 @@ export class FechamentoCaixaController {
     return this.service.notaDoMovimento(id);
   }
 
-  /** Desfaz o último lançamento de uma conta — o que ainda não virou título. */
+  /** Desfaz um lançamento da conta, apagando junto o título que ele gerou. */
   @Delete('movimentos-da-rua/:id')
   @HttpCode(200)
   async desfazerMovimento(@Param('id') id: string) {
     await this.service.desfazerMovimento(id);
     return { ok: true };
+  }
+
+  /** Desfaz o acerto inteiro: a conta volta a ser só a entrega. */
+  @Delete('dinheiro-na-rua/:id/acertos')
+  @HttpCode(200)
+  desfazerAcertos(@Param('id') id: string) {
+    return this.service.desfazerAcertos(id);
   }
 
   @Delete('dinheiro-na-rua/:id')

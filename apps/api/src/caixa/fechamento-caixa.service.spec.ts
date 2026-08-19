@@ -136,6 +136,11 @@ function montarServico(
     },
   };
 
+  const pagamentos = {
+    // O IXC recusa apagar título já pago; quem chama trata a recusa.
+    excluir: jest.fn().mockResolvedValue({ idFnApagar: 4242 }),
+  };
+
   const despesas = {
     lancar: jest.fn().mockResolvedValue(
       opts.despesaLancada ?? {
@@ -169,8 +174,9 @@ function montarServico(
     caixa as never,
     config as never,
     despesas as never,
+    pagamentos as never,
   );
-  return { service, prisma, caixa, criados, despesas };
+  return { service, prisma, caixa, criados, despesas, pagamentos };
 }
 
 const saida = (id: number, valor: number) => ({
@@ -483,12 +489,9 @@ describe('a conta de quem levou dinheiro', () => {
 
   // --- Desfazer ---
 
-  it('desfaz o último lançamento e reabre a conta', async () => {
+  it('desfaz um lançamento e reabre a conta', async () => {
     const m = { id: 'm1', entregaId: 'r1', idFnApagarIxc: null };
-    const { service, prisma } = montarServico({
-      movimento: m,
-      ultimoMovimento: m,
-    });
+    const { service, prisma } = montarServico({ movimento: m });
 
     await service.desfazerMovimento('m1');
 
@@ -498,23 +501,85 @@ describe('a conta de quem levou dinheiro', () => {
   });
 
   /*
-   * Apagar aqui o que continua existindo no IXC deixaria o título órfão, sem
-   * nada nesta tela apontando para ele.
+   * O saldo é uma soma: some qualquer parcela que se tire. Obrigar a desfazer
+   * de trás para frente era burocracia — quem digita 100 no lugar de 10 percebe
+   * depois de já ter lançado o troco.
    */
-  it('não desfaz lançamento que já virou título no IXC', async () => {
-    const m = { id: 'm1', entregaId: 'r1', idFnApagarIxc: 4242 };
-    const { service } = montarServico({ movimento: m, ultimoMovimento: m });
-
-    await expect(service.desfazerMovimento('m1')).rejects.toThrow(/#4242/);
-  });
-
-  it('só o último se desfaz — os de trás já foram contados pelos seguintes', async () => {
-    const { service } = montarServico({
+  it('desfaz qualquer lançamento, e não só o último', async () => {
+    const { service, prisma } = montarServico({
       movimento: { id: 'm1', entregaId: 'r1', idFnApagarIxc: null },
       ultimoMovimento: { id: 'm2', entregaId: 'r1', idFnApagarIxc: null },
     });
 
-    await expect(service.desfazerMovimento('m1')).rejects.toThrow(/só o último/i);
+    await service.desfazerMovimento('m1');
+
+    expect(prisma.movimentoDaRua.delete).toHaveBeenCalled();
+  });
+
+  /*
+   * Apagar só deste lado deixaria a saída viva no IXC: o caixa passaria a
+   * descontar um dinheiro que ninguém compensa, e a gaveta apareceria menor.
+   */
+  it('lançamento com título leva o título junto', async () => {
+    const { service, pagamentos, prisma } = montarServico({
+      movimento: { id: 'm1', entregaId: 'r1', idFnApagarIxc: 4242 },
+    });
+
+    await service.desfazerMovimento('m1');
+
+    expect(pagamentos.excluir).toHaveBeenCalledWith(4242);
+    expect(prisma.movimentoDaRua.delete).toHaveBeenCalled();
+  });
+
+  it('título que o IXC não deixa apagar segura o desfazer, e diz o número', async () => {
+    const { service, prisma, pagamentos } = montarServico({
+      movimento: { id: 'm1', entregaId: 'r1', idFnApagarIxc: 4242 },
+    });
+    pagamentos.excluir.mockRejectedValueOnce(
+      new Error('O título 4242 já foi pago.'),
+    );
+
+    await expect(service.desfazerMovimento('m1')).rejects.toThrow(/#4242/);
+    expect(prisma.movimentoDaRua.delete).not.toHaveBeenCalled();
+  });
+
+  it('desfazer tudo volta a conta ao valor entregue', async () => {
+    const { service, prisma } = montarServico({
+      entrega: {
+        ...conta,
+        movimentos: [
+          { id: 'm1', entregaId: 'r1', idFnApagarIxc: null, tipo: 'NOTA', valor: 100 },
+          { id: 'm2', entregaId: 'r1', idFnApagarIxc: null, tipo: 'TROCO', valor: 4 },
+        ],
+      },
+      movimento: { id: 'm1', entregaId: 'r1', idFnApagarIxc: null },
+    });
+
+    const r = await service.desfazerAcertos('r1');
+
+    expect(r.desfeitos).toBe(2);
+    expect(r.mantidos).toEqual([]);
+    expect(prisma.movimentoDaRua.delete).toHaveBeenCalledTimes(2);
+  });
+
+  /* Desfazer pela metade em silêncio seria pior que não desfazer. */
+  it('desfazer tudo devolve nomeado o que não deu para desfazer', async () => {
+    const { service, pagamentos } = montarServico({
+      entrega: {
+        ...conta,
+        movimentos: [
+          { id: 'm1', entregaId: 'r1', idFnApagarIxc: 4242, tipo: 'NOTA', valor: 100 },
+        ],
+      },
+      movimento: { id: 'm1', entregaId: 'r1', idFnApagarIxc: 4242 },
+    });
+    pagamentos.excluir.mockRejectedValue(new Error('O título 4242 já foi pago.'));
+
+    const r = await service.desfazerAcertos('r1');
+
+    expect(r.desfeitos).toBe(0);
+    expect(r.mantidos).toHaveLength(1);
+    expect(r.mantidos[0]).toMatch(/#4242/);
   });
 
   it('não apaga conta que já tem acerto lançado', async () => {

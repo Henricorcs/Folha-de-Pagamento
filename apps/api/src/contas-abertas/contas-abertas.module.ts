@@ -48,6 +48,9 @@ import { RecorrentesService } from './recorrentes.service';
   // mesmo caminho desta tela: mesma auditoria, mesma baixa, mesmo titulo no
   // IXC. Um segundo caminho para criar conta a pagar seria um segundo lugar
   // para ele quebrar.
-  exports: [DespesasService],
+  // `PagamentosService` vai junto porque desfazer um acerto da rua apaga no
+  // IXC o título que ele criou: sem isso a saída ficaria viva lá, descontando
+  // um dinheiro que ninguém compensa deste lado.
+  exports: [DespesasService, PagamentosService],
 })
 export class ContasAbertasModule {}

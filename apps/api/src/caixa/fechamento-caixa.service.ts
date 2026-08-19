@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma, TipoMovimentoDaRua } from '@prisma/client';
 import { DespesasService } from '../contas-abertas/despesas.service';
+import { PagamentosService } from '../contas-abertas/pagamentos.service';
 import { ConfigFinanceiraService } from '../financeiro/config-financeira.service';
 import { CaixaService, type LancamentoDoCaixa } from '../ixc/caixa.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -61,6 +62,7 @@ export class FechamentoCaixaService {
     private readonly caixa: CaixaService,
     private readonly config: ConfigFinanceiraService,
     private readonly despesas: DespesasService,
+    private readonly pagamentos: PagamentosService,
   ) {}
 
   /** Os caixas do IXC, para escolher qual bater. */
@@ -604,40 +606,79 @@ export class FechamentoCaixaService {
   }
 
   /**
-   * Desfaz o último lançamento de uma conta, para quem digitou o valor errado.
+   * Desfaz um lançamento — qualquer um da conta, e não só o último.
    *
-   * Só o último, e nunca um que já virou conta a pagar no IXC: apagar aqui o
-   * que lá continua existindo deixaria o título órfão, sem nada nesta tela
-   * apontando para ele. Nesse caso o caminho é a lista de contas em aberto, que
-   * é onde o título se cancela.
+   * Quem digita 100 no lugar de 10 percebe depois de já ter lançado o troco, e
+   * obrigar a desfazer de trás para frente era só burocracia: o saldo é uma
+   * soma, e some qualquer parcela que se tire.
+   *
+   * O que não dá para desfazer sozinho é o que virou título no IXC. Apagar só
+   * deste lado deixaria a saída viva lá — o caixa passaria a descontar um
+   * dinheiro que ninguém compensa, e a gaveta apareceria menor do que é. Então
+   * o app tenta apagar o título junto; não conseguindo, recusa e diz o número,
+   * para o acerto se resolver onde ele existe.
    */
   async desfazerMovimento(id: string) {
     const m = await this.prisma.movimentoDaRua.findUnique({ where: { id } });
     if (!m) throw new BadRequestException('Este lançamento não existe.');
-    if (m.idFnApagarIxc) {
-      throw new BadRequestException(
-        `Este lançamento virou a conta a pagar #${m.idFnApagarIxc} no IXC. ` +
-          'Cancele-a por lá primeiro, senão o título fica sem dono.',
-      );
-    }
 
-    const ultimo = await this.prisma.movimentoDaRua.findFirst({
-      where: { entregaId: m.entregaId },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (ultimo && ultimo.id !== id) {
-      throw new BadRequestException(
-        'Só o último lançamento da conta se desfaz — os de trás já foram ' +
-          'levados em conta pelos seguintes.',
+    if (m.idFnApagarIxc) {
+      try {
+        await this.pagamentos.excluir(m.idFnApagarIxc);
+      } catch (err) {
+        const motivo = err instanceof Error ? err.message : String(err);
+        throw new BadRequestException(
+          `Este lançamento virou a conta a pagar #${m.idFnApagarIxc} no IXC, e ` +
+            `ela não pôde ser apagada de lá: ${motivo} Estorne o pagamento ` +
+            'dela no IXC (Pagar > Estornar pagamento recebido) e desfaça aqui ' +
+            'de novo — senão a saída continua contando lá e a gaveta aparece ' +
+            'menor do que está.',
+        );
+      }
+      this.logger.log(
+        `Título #${m.idFnApagarIxc} apagado no IXC ao desfazer o lançamento ${id}`,
       );
     }
 
     await this.prisma.movimentoDaRua.delete({ where: { id } });
-    // A conta reabre: ela só estava fechada porque este lançamento a zerou.
+    // A conta reabre: ela só estava fechada porque o saldo tinha zerado.
     await this.prisma.dinheiroNaRua.update({
       where: { id: m.entregaId },
       data: { baixadoEm: null, baixadoPor: null },
     });
+  }
+
+  /**
+   * Desfaz o acerto inteiro: a conta volta a ser só a entrega.
+   *
+   * É o botão de quem se perdeu no meio e prefere recomeçar a caçar qual das
+   * três linhas está errada. Os que não puderem ser desfeitos — os que viraram
+   * título pago no IXC — ficam, e voltam nomeados: desfazer pela metade em
+   * silêncio seria pior que não desfazer.
+   */
+  async desfazerAcertos(entregaId: string) {
+    const conta = await this.prisma.dinheiroNaRua.findUnique({
+      where: { id: entregaId },
+      include: { movimentos: { orderBy: { createdAt: 'desc' } } },
+    });
+    if (!conta) throw new BadRequestException('Esta entrega não existe.');
+
+    const mantidos: string[] = [];
+    let desfeitos = 0;
+    for (const m of conta.movimentos) {
+      try {
+        await this.desfazerMovimento(m.id);
+        desfeitos += 1;
+      } catch (err) {
+        mantidos.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    const atual = await this.prisma.dinheiroNaRua.findUnique({
+      where: { id: entregaId },
+      include: { movimentos: { orderBy: { data: 'asc' } } },
+    });
+    return { desfeitos, mantidos, conta: atual ? comSaldo(atual) : null };
   }
 
   async apagarEntrega(id: string) {

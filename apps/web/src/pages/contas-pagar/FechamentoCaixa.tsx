@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
-import { SeletorDeCategoria } from '../../components/SeletorDeCategoria';
 import {
   Aviso,
   Bloco,
@@ -17,7 +16,6 @@ import { reduzirFoto } from '../../lib/foto';
 import { formatBRL, formatData } from '../../lib/format';
 import type {
   CaixasDoFechamento,
-  CategoriaDespesa,
   ContaDaRua,
   ExtratoDoCaixa,
   LancamentoDoCaixa,
@@ -36,6 +34,13 @@ interface FornecedorIxc {
 /** Um fechamento já assinado, do jeito que o extrato o entrega. */
 type FechamentoDoPeriodo = ExtratoDoCaixa['fechamentos'][number];
 
+/** Hoje, em "AAAA-MM-DD". */
+function diaDeHoje(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 /** O dia anterior a um "AAAA-MM-DD", também em "AAAA-MM-DD". */
 function diaAnterior(dia: string): string {
   const [a, m, d] = dia.split('-').map(Number);
@@ -50,13 +55,6 @@ function diaSeguinte(dia: string): string {
   const p = (n: number) => String(n).padStart(2, '0');
   const s = new Date(a, m - 1, d + 1);
   return `${s.getFullYear()}-${p(s.getMonth() + 1)}-${p(s.getDate())}`;
-}
-
-/** "AAAA-MM-DD" do dia local de um instante vindo do servidor. */
-function diaDoISO(iso: string): string {
-  const d = new Date(iso);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 /**
@@ -982,7 +980,13 @@ function DinheiroNaRuaBloco({
   );
 }
 
-/** Como cada tipo de acerto se chama e o que ele faz com o saldo. */
+/**
+ * Como cada acerto se chama e o que ele faz com os dois saldos.
+ *
+ * A ajuda diz o efeito na gaveta porque é o que confunde: a nota não mexe nela
+ * — o dinheiro já saiu quando foi entregue —, enquanto troco e reforço mexem na
+ * hora. Sem isso dito, o número da gaveta parece não responder ao lançamento.
+ */
 const TIPOS_DE_ACERTO: Array<{
   tipo: TipoMovimentoDaRua;
   rotulo: string;
@@ -990,18 +994,19 @@ const TIPOS_DE_ACERTO: Array<{
 }> = [
   {
     tipo: 'NOTA',
-    rotulo: 'Nota',
-    ajuda: 'Comprovou um gasto. É esta que vira conta a pagar no IXC.',
+    rotulo: 'Trouxe nota',
+    ajuda:
+      'Comprovou um gasto: vira conta a pagar no IXC. A gaveta não muda — este dinheiro já saiu dela quando foi entregue.',
   },
   {
     tipo: 'TROCO',
-    rotulo: 'Troco',
-    ajuda: 'Devolveu dinheiro para a gaveta.',
+    rotulo: 'Devolveu dinheiro',
+    ajuda: 'O dinheiro volta para a gaveta agora.',
   },
   {
     tipo: 'REFORCO',
-    rotulo: 'Mais dinheiro',
-    ajuda: 'Saiu mais da gaveta porque a compra passou do que ela tinha.',
+    rotulo: 'Levou mais',
+    ajuda: 'Sai mais dinheiro da gaveta agora, para completar a compra.',
   },
 ];
 
@@ -1024,9 +1029,16 @@ function AcertarConta({
 }) {
   const [tipo, setTipo] = useState<TipoMovimentoDaRua>('NOTA');
   const [valor, setValor] = useState('');
-  const [data, setData] = useState(() => diaDoISO(conta.entregueEm));
+  /*
+   * Hoje, e não o dia da entrega.
+   *
+   * O padrão era a data da entrega, e ele jogava o lançamento para trás — quase
+   * sempre para dentro de um período já fechado, onde ele não mexia no saldo
+   * desta tela. Quem devolve dinheiro devolve agora; a data só se muda quando a
+   * compra de fato aconteceu noutro dia.
+   */
+  const [data, setData] = useState(diaDeHoje);
   const [foto, setFoto] = useState<string | null>(null);
-  const [observacao, setObservacao] = useState('');
   const [erro, setErro] = useState<string | null>(null);
 
   // A despesa que a nota vira no IXC.
@@ -1035,7 +1047,6 @@ function AcertarConta({
   const [fornecedor, setFornecedor] = useState<FornecedorIxc | null>(null);
   /* O motivo da entrega já é a descrição da despesa nove vezes em dez. */
   const [descricao, setDescricao] = useState(conta.motivo ?? '');
-  const [categoriaId, setCategoriaId] = useState('');
 
   const ehNota = tipo === 'NOTA';
   const comDespesa = ehNota && lancarDespesa;
@@ -1080,13 +1091,6 @@ function AcertarConta({
     retry: 0,
   });
 
-  const categorias = useQuery({
-    queryKey: ['categorias-despesa'],
-    queryFn: async () =>
-      (await api.get<CategoriaDespesa[]>('/categorias-despesa')).data,
-    enabled: comDespesa,
-  });
-
   const lancar = useMutation({
     mutationFn: async () =>
       (
@@ -1097,14 +1101,12 @@ function AcertarConta({
             valor: quanto,
             data,
             notaFoto: foto ?? undefined,
-            observacao: observacao || undefined,
             despesa: comDespesa
               ? {
                   idFornecedorIxc: fornecedor!.idFornecedor,
                   fornecedorNome: fornecedor!.nome,
                   descricao: descricao.trim(),
                   pagoEm: data,
-                  categoriaId: categoriaId || undefined,
                 }
               : undefined,
           },
@@ -1115,7 +1117,7 @@ function AcertarConta({
       // enquanto sobrar saldo, e some da lista quando ele zera.
       setValor('');
       setFoto(null);
-      setObservacao('');
+      setData(diaDeHoje());
       setFornecedor(null);
       setTermo('');
       setErro(null);
@@ -1133,7 +1135,21 @@ function AcertarConta({
     onError: (e) => setErro(mensagemErro(e)),
   });
 
-  const ultimo = conta.movimentos[conta.movimentos.length - 1];
+  const desfazerTudo = useMutation({
+    mutationFn: async () =>
+      (
+        await api.delete<{ desfeitos: number; mantidos: string[] }>(
+          `/caixa/dinheiro-na-rua/${conta.id}/acertos`,
+        )
+      ).data,
+    onSuccess: (r) => {
+      // O que não deu para desfazer volta nomeado: desfazer pela metade em
+      // silêncio seria pior que não desfazer.
+      setErro(r.mantidos.length ? r.mantidos.join(' ') : null);
+      onLancado([]);
+    },
+    onError: (e) => setErro(mensagemErro(e)),
+  });
 
   return (
     <div className="mt-4 rounded-2xl border border-brand-500/30 bg-brand-500/5 p-4">
@@ -1146,9 +1162,26 @@ function AcertarConta({
             {formatData(conta.entregueEm)}
           </span>
         </p>
-        <button type="button" onClick={onFechar} className="btn btn-p btn-sutil">
-          Fechar
-        </button>
+        <div className="flex gap-2">
+          {conta.movimentos.length > 0 && (
+            <button
+              type="button"
+              onClick={() => desfazerTudo.mutate()}
+              disabled={desfazerTudo.isPending}
+              className="btn btn-p btn-sutil"
+              title="Apaga todos os lançamentos e volta a conta ao valor entregue"
+            >
+              {desfazerTudo.isPending ? 'Desfazendo…' : 'Desfazer tudo'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onFechar}
+            className="btn btn-p btn-sutil"
+          >
+            Fechar
+          </button>
+        </div>
       </div>
 
       {/* O que já foi lançado nesta conta. Sem isto, quem acerta em três
@@ -1186,18 +1219,22 @@ function AcertarConta({
                   <div className="text-xs text-tinta-400">{m.observacao}</div>
                 )}
               </div>
-              {/* Só o último, e só o que não virou título: apagar aqui o que
-                  continua no IXC deixaria o título sem dono. */}
-              {ultimo?.id === m.id && !m.idFnApagarIxc && (
-                <button
-                  type="button"
-                  onClick={() => desfazer.mutate(m.id)}
-                  disabled={desfazer.isPending}
-                  className="btn btn-p btn-sutil"
-                >
-                  Desfazer
-                </button>
-              )}
+              {/* Qualquer um, e não só o último: o saldo é uma soma, e some
+                  qualquer parcela que se tire. O que virou título no IXC leva
+                  o título junto — quando lá deixa. */}
+              <button
+                type="button"
+                onClick={() => desfazer.mutate(m.id)}
+                disabled={desfazer.isPending}
+                className="btn btn-p btn-sutil"
+                title={
+                  m.idFnApagarIxc
+                    ? `Apaga também a conta #${m.idFnApagarIxc} no IXC`
+                    : 'Apaga este lançamento'
+                }
+              >
+                Desfazer
+              </button>
             </li>
           ))}
         </ul>
@@ -1227,22 +1264,25 @@ function AcertarConta({
           <label className="rotulo">Valor</label>
           <CampoDinheiro valor={valor} onChange={setValor} />
         </div>
-        <div>
-          <label className="rotulo" htmlFor="data-acerto">
-            Dia em que aconteceu
-          </label>
-          <input
-            id="data-acerto"
-            type="date"
-            value={data}
-            onChange={(e) => setData(e.target.value)}
-            className="campo"
-          />
-          <p className="ajuda">
-            Pode ser uma data já passada — é ela que decide em que caixa este
-            lançamento cai.
-          </p>
-        </div>
+        {/* Troco e reforço são de agora: o dinheiro está mudando de mão
+            enquanto se digita. A nota pode ser de outro dia, porque a compra
+            pode ter sido antes — e é a data dela que decide em que período a
+            saída cai no IXC. */}
+        {ehNota && (
+          <div>
+            <label className="rotulo" htmlFor="data-acerto">
+              Dia da compra
+            </label>
+            <input
+              id="data-acerto"
+              type="date"
+              value={data}
+              onChange={(e) => setData(e.target.value)}
+              className="campo"
+            />
+            <p className="ajuda">Pode ser uma data já passada.</p>
+          </div>
+        )}
         {ehNota && (
           <div>
             <label className="rotulo">Foto da nota</label>
@@ -1406,37 +1446,10 @@ function AcertarConta({
                 <p className="ajuda">É o que aparece na conta a pagar do IXC.</p>
               </div>
 
-              <div>
-                <label className="rotulo" htmlFor="categoria-acerto">
-                  Classificação
-                </label>
-                <SeletorDeCategoria
-                  id="categoria-acerto"
-                  categorias={categorias.data}
-                  value={categoriaId}
-                  vazio="Sem classificação"
-                  carregando={categorias.isLoading}
-                  onChange={setCategoriaId}
-                  ajuda="É por ela que o dashboard separa os gastos."
-                />
-              </div>
             </div>
           )}
         </div>
       )}
-
-      <div className="mt-3">
-        <label className="rotulo" htmlFor="obs-acerto">
-          Observação
-        </label>
-        <input
-          id="obs-acerto"
-          value={observacao}
-          onChange={(e) => setObservacao(e.target.value)}
-          className="campo"
-          placeholder="opcional"
-        />
-      </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
