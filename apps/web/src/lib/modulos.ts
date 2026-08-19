@@ -1,4 +1,5 @@
 import {
+  IconeBanco,
   IconeCaixa,
   IconeCalculo,
   IconeCalendarioVolta,
@@ -95,11 +96,12 @@ const contasPagar: Modulo = {
     // Bater o caixa do dinheiro em mãos: conferir as saídas do período,
     // fotografar a nota e declarar o que ainda está na rua com alguém.
     { to: 'fechamento-caixa', label: 'Fechamento de Caixa', icone: IconeCaixa },
-    // Conserto de uma vez so: some da lista quando nao houver mais nada torto.
+    // O extrato do banco contra a movimentacao do IXC. Só ADMIN: a tela abre a
+    // conta inteira da empresa e dá baixa em título de verdade.
     {
       to: 'conciliacao',
       label: 'Conciliação',
-      icone: IconeMoeda,
+      icone: IconeBanco,
       somenteAdmin: true,
     },
   ],

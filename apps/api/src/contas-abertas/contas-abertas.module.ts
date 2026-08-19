@@ -30,7 +30,7 @@ import { RecorrentesService } from './recorrentes.service';
     // As duas metades da mesma tabela do IXC: o que a empresa deve, e o
     // histórico do que ela já pagou.
     HistoricoPagamentosController,
-    // O conserto dos pagamentos antigos que nao chegaram a conciliacao.
+    // A conciliacao bancaria: o extrato do banco contra a movimentacao do IXC.
     ConciliacaoController,
   ],
   providers: [

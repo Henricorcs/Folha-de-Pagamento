@@ -6,11 +6,13 @@ import { AppModule } from './app.module';
 import type { AppConfig } from './config/configuration';
 
 /**
- * Teto do corpo em JSON. O padrão do express é 100 KB, e a assinatura do
- * recibo da diária é uma imagem em base64 que passa disso — sem este ajuste
- * ela morre com 413 no caminho, depois de a pessoa já ter assinado.
+ * Teto do corpo em JSON. O padrão do express é 100 KB, e duas coisas passam
+ * disso: a assinatura do recibo da diária, que é uma imagem em base64 — sem
+ * este ajuste ela morre com 413 depois de a pessoa já ter assinado —, e o
+ * extrato OFX que a conciliação bancária importa, que num mês de conta
+ * movimentada chega a alguns megabytes.
  */
-const LIMITE_CORPO = '1mb';
+const LIMITE_CORPO = '8mb';
 
 async function bootstrap() {
   // O parser vem desligado para entrar de novo logo abaixo com o teto maior:

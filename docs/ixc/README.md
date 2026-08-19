@@ -31,6 +31,8 @@ Troque `BUSCA` pelo que procura (`baixa`, `fornecedor`, `auditoria`…).
 | Adiantamento de salário | `fl_adto_salario` | documentado |
 | Contas de pagamento (banco/caixa) | `contas` | documentado |
 | Dados bancários e PIX do fornecedor | `dados_bancarios` | **não documentado**, confirmado na base |
+| Movimento de uma conta (a conciliação bancária) | `fn_movim_finan` (GET) | documentado como "Contabilidade"; é daqui que a tela de conciliação lê |
+| Marcar uma linha como conciliada | — | **não dá** (ver abaixo) |
 | Lançamento na movimentação financeira | — | **não existe** (ver abaixo) |
 
 ### `data_pagamento` não é o dia em que o dinheiro saiu
@@ -54,6 +56,48 @@ nome: testa `fn_apagar_baixas` e `fn_movim_finan`, nos dois formatos de data, e
 guarda o que responder com linhas reconhecíveis — linha que não aponte um título
 não serve, mesmo vindo sem erro. Não achando caminho, o histórico mostra a data
 do registro e diz na tela que é ela.
+
+### A conciliação bancária: dá para ler, não dá para marcar
+
+O IXC guarda a marca de conciliado em **`fn_movim_finan.conciliado`**, com `S`
+ou `N` — 154 mil linhas conciliadas nesta base. Duas coisas sobre ela:
+
+**Ela não vem na listagem, mas dá para filtrar por ela.** O `GET` de
+`fn_movim_finan` devolve 25 colunas e `conciliado` não é uma delas; `id_pagar` e
+`id_receber` também não. Mesmo assim os três existem e funcionam como filtro
+(`qtype` ou `grid_param`) — é assim que a tela de conciliação sabe o que já foi
+conciliado: uma consulta traz as linhas do período, outra traz as mesmas com
+`conciliado = 'S'`, e o cruzamento é feito por `id`. Coluna que não existe faz o
+webservice devolver uma página de erro em HTML, o que também serve de sonda.
+
+**Escrever nela pelo webservice não funciona — e estraga a linha.** Testado numa
+linha de teste, criada e apagada em seguida:
+
+```
+PUT /fn_movim_finan/{id}  { conciliado: 'S', id_conta, data, historico }
+  → "Registro atualizado com sucesso!"
+  → conciliado:  N → N          (o campo é ignorado)
+  → documento:   "TESTEAPI" → ""
+  → debito:      0.01 → 0.00
+  → tipo_lanc:   "M" → ""
+```
+
+Ou seja: o PUT ignora justamente o campo que interessa **e** apaga toda coluna
+que não for no corpo. Como a listagem não devolve `id_pagar`, `id_receber` nem
+`data2`, não há como devolvê-las no corpo — a linha do dinheiro perderia a
+ligação com o título. É a mesma família de estrago do commit `b3d9780`.
+
+Não existe endpoint próprio de conciliação: `fn_conciliacao`,
+`fn_conciliacao_bancaria`, `fn_arquivo_importado`, `fn_extrato`,
+`fn_layout_conciliacao` e mais uma dúzia de nomes prováveis respondem "não está
+disponível". O `id_arquivo_importado` da tabela existe e vale `0` em **todas** as
+1,6 milhão de linhas, e nenhuma das 17 contas tem `layout_conciliacao`
+preenchido: a importação de extrato do IXC nunca foi usada aqui.
+
+Por isso a conciliação deste app **lê** o que o IXC conciliou e **grava aqui** o
+que for conferido por ela (tabela `conciliacao_linhas`). Uma linha conferida
+neste app continua aparecendo como não conciliada na tela do IXC, e a tela diz
+isso com todas as letras.
 
 ### Duas armadilhas que já morderam
 
@@ -85,3 +129,17 @@ equivalente — o que ela tem de "caixa" é caixa de fibra, do mapa da rede.
 Por isso o pagamento em mãos não lança a saída do caixa sozinho: ele marca o
 pagamento como "lançar no IXC à mão". Não é bug, é o limite do webservice — e
 está assim documentado em `ixc.caixa.ts`.
+
+**Mas há uma pista aberta, achada no teste da conciliação.** `fn_movim_finan` —
+o recurso que a coleção chama de "Contabilidade" — **aceita `POST`**, e sem os
+`id_entrada`/`id_saida` que a documentação marca como obrigatórios: um corpo com
+`id_conta`, `data`, `historico`, `debito`, `tipo_lanc` e `filial_id` criou a
+linha, que voltou na listagem com `id_movim_finan` igual ao próprio id, e o
+`DELETE` a apagou em seguida.
+
+Isso não foi transformado em funcionalidade, e o motivo é o desenho do livro: um
+lançamento é um **par** de linhas com o mesmo `id_movim_finan` — o dinheiro
+saindo da conta e a despesa entrando. Escrever uma linha só é meio lançamento, e
+meio lançamento é pior que nenhum: foi assim que três títulos ficaram tortos
+(commit `b3d9780`). Quem for pegar esta ponta precisa gravar o par, e provar em
+base de teste que o IXC costura os dois.

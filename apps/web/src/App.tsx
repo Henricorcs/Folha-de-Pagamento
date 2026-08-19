@@ -113,7 +113,7 @@ export default function App() {
         {/* A outra metade da mesma tabela do IXC: o que já saiu. */}
         <Route path="pagos" element={<HistoricoDePagamentos />} />
         <Route path="dashboard" element={<ContasPagarDashboard />} />
-        {/* O conserto dos pagamentos que nao chegaram a conciliacao do IXC. */}
+        {/* O extrato do banco contra a movimentacao do IXC, conta por conta. */}
         <Route path="conciliacao" element={<Conciliacao />} />
         {/* O caminho antigo continua valendo: quem tem a tela no favorito ou
             aberta numa aba não pode cair num "não encontrado" por causa de uma

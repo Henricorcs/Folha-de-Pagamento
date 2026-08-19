@@ -1283,42 +1283,121 @@ export interface HistoricoPagamentos {
   avisos: string[];
 }
 
-// --- Conserto dos pagamentos que ficaram fora da conciliação bancária ---
-/**
- * Um pagamento cuja baixa foi lançada na conta da despesa em vez da conta de
- * onde o dinheiro saiu. A conciliação lê a segunda, e por isso não o via.
- */
-export interface PagamentoTorto {
-  idFnApagar: number;
-  beneficiario: string;
-  valor: number;
-  /** Dia em que o dinheiro saiu, como está na linha da baixa */
-  data: string;
-  contaPagamento: number;
-  contaPagamentoNome: string | null;
-  /** Onde a baixa está hoje */
-  contaAtual: number;
-  /** Onde ela deveria estar: o razão da conta de pagamento */
-  contaCerta: number;
-  idMovimFinan: number;
-  historico: string;
-  documento: string | null;
-  /** Dá para consertar daqui? Falso quando o dinheiro saiu de outra conta */
-  corrigivel: boolean;
-  /** Por que não dá, quando não dá */
-  motivo: string | null;
-  /** De onde o dinheiro realmente saiu, quando o título aponta outra conta */
-  contaRealNome: string | null;
+// --- Conciliação bancária ---
+
+/** Uma conta de banco ou caixa do IXC, do jeito que a conciliação a usa. */
+export interface ContaConciliavel {
+  /** `contas.id` */
+  id: number;
+  nome: string;
+  /** 'B' = banco, 'C' = caixa */
+  tipo: string | null;
+  /** A conta do razão, por onde o dinheiro passa no livro do IXC */
+  razao: number;
+  ativa: boolean;
+  /** Uma das que costumam pagar as contas da empresa — vem no topo */
+  usual: boolean;
+  codigoBanco: string | null;
 }
 
-export interface ResultadoDaCorrecao {
-  corrigidos: number[];
-  /** Ficou como estava; nada foi tocado */
-  pulados: Array<{ idFnApagar: number; motivo: string }>;
-  /** O estorno saiu e a nova baixa não: o título está em aberto no IXC */
-  emAberto: Array<{ idFnApagar: number; erro: string }>;
-  /** A fila parou por causa de um `emAberto` */
-  naoTentados: number[];
+/** Uma transação do extrato do banco. */
+export interface TransacaoExtrato {
+  /** O identificador que o banco dá à transação */
+  fitId: string;
+  data: string;
+  /** Positivo = entrou; negativo = saiu */
+  valor: number;
+  descricao: string;
+  documento: string | null;
+  tipo: string | null;
+}
+
+/** O título de contas a pagar por trás de uma linha do banco. */
+export interface TituloDaLinha {
+  idFnApagar: number;
+  /** Nome de quem recebeu, quando o título nasceu neste app */
+  beneficiario: string | null;
+  nossa: boolean;
+}
+
+/** A transação do extrato que bateu com uma linha do IXC. */
+export interface ParDoExtrato {
+  fitId: string;
+  data: string;
+  valor: number;
+  descricao: string;
+  /** Por onde bateu: documento é prova, data é indício */
+  como: 'documento' | 'exato' | 'proximo';
+  diasDeDiferenca: number;
+}
+
+/** Uma linha da movimentação da conta, com tudo o que se sabe dela. */
+export interface LinhaDaConciliacao {
+  /** `fn_movim_finan.id` */
+  id: number;
+  data: string;
+  historico: string;
+  documento: string | null;
+  /** Positivo = entrou na conta; negativo = saiu */
+  valor: number;
+  /** Já marcada como conciliada no próprio IXC */
+  conciliadoNoIxc: boolean;
+  /** Conferida por esta tela */
+  conferida: {
+    em: string;
+    por: string | null;
+    origem: 'MANUAL' | 'EXTRATO';
+    fitId: string | null;
+  } | null;
+  titulo: TituloDaLinha | null;
+  /** Preenchida quando um extrato foi importado e esta linha bateu com ele */
+  extrato: ParDoExtrato | null;
+}
+
+/** O extrato importado, resumido. */
+export interface ResumoDoExtrato {
+  banco: string | null;
+  agencia: string | null;
+  conta: string | null;
+  de: string | null;
+  ate: string | null;
+  /** O saldo que o banco declara, e o dia dele */
+  saldo: number | null;
+  saldoEm: string | null;
+  transacoes: number;
+  entradas: number;
+  saidas: number;
+  /** As transações do banco que não acharam par no IXC */
+  soNoBanco: TransacaoExtrato[];
+}
+
+/** O que a tela de conciliação recebe de uma vez. */
+export interface ConciliacaoDaConta {
+  conta: ContaConciliavel;
+  periodo: { de: string; ate: string };
+  linhas: LinhaDaConciliacao[];
+  resumo: {
+    linhas: number;
+    /** Conciliadas no IXC ou conferidas aqui */
+    fechadas: number;
+    pendentes: number;
+    entradas: number;
+    saidas: number;
+  };
+  extrato: ResumoDoExtrato | null;
+  lidoEm: string;
+  avisos: string[];
+}
+
+/** Um título em aberto que pode ser a saída que apareceu no extrato. */
+export interface TituloCandidato {
+  idFnApagar: number;
+  fornecedor: string;
+  documento: string | null;
+  valorAberto: number;
+  vencimento: string | null;
+  /** Dias entre o vencimento e o dia em que o dinheiro saiu */
+  diasDoExtrato: number | null;
 }
 
 // --- Fechamento de caixa ---

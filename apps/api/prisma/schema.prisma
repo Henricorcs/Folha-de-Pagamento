@@ -1271,3 +1271,59 @@ model FechamentoCaixa {
   @@index([caixaId, de])
   @@map("fechamentos_caixa")
 }
+
+// ---------------------------------------------------------------------------
+// Conciliação bancária: as linhas do extrato que já foram conferidas
+// ---------------------------------------------------------------------------
+
+/// Como a linha foi conferida.
+enum OrigemConciliacao {
+  /// Alguém marcou na tela, olhando o extrato.
+  MANUAL
+  /// Bateu com uma transação do extrato importado (OFX).
+  EXTRATO
+}
+
+/// Uma linha da movimentação financeira do IXC que já foi conferida contra o
+/// extrato do banco.
+///
+/// Mora deste lado por falta de lugar do outro. O IXC tem a marca —
+/// `fn_movim_finan.conciliado`, com 'S'/'N' — e ela até dá para **ler** pelo
+/// webservice (filtrando por ela; o campo não vem na listagem). Escrever é que
+/// não: o `PUT` da tabela ignora o `conciliado` e ainda apaga toda coluna que
+/// não for no corpo, e a listagem não devolve `id_pagar`, `id_receber` nem
+/// `data2` para poder devolvê-las. Está provado em `conciliacao.service.ts`.
+///
+/// Então a tela lê o que o IXC já conciliou e guarda aqui o que for conciliado
+/// daqui para frente. As duas origens aparecem separadas na tela: uma linha
+/// conferida aqui continua 'N' no IXC, e quem olhar de lá precisa saber disso.
+model ConciliacaoLinha {
+  id String @id @default(uuid())
+
+  /// `fn_movim_finan.id` — a linha do dinheiro no IXC. Única: conferir duas
+  /// vezes a mesma linha é a mesma conferência, não duas.
+  idMovimFinan Int @unique @map("id_movim_finan")
+
+  /// `contas.id` da conta bancária (o cadastro, não o razão): é por ela que a
+  /// tela filtra, e é o número que a pessoa escolhe.
+  contaIxc Int @map("conta_ixc")
+
+  /// Data e valor copiados da linha do IXC. Não é duplicação à toa: com eles a
+  /// tela sabe o que já foi conferido num período sem ter de ler o IXC inteiro
+  /// antes de desenhar a primeira linha.
+  data  DateTime
+  valor Decimal  @db.Decimal(14, 2)
+
+  origem OrigemConciliacao @default(MANUAL)
+
+  /// `FITID` da transação do extrato, quando a conferência veio de um arquivo.
+  /// É o identificador que o banco dá à transação e não se repete — serve para
+  /// reconhecer a mesma transação num extrato importado de novo.
+  fitId String? @map("fit_id")
+
+  conferidoPor String?  @map("conferido_por")
+  conferidoEm  DateTime @default(now()) @map("conferido_em")
+
+  @@index([contaIxc, data])
+  @@map("conciliacao_linhas")
+}
