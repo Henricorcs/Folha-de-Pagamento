@@ -25,6 +25,7 @@ const BASE: DadosFolhaFuncionario = {
   valorAdiantamento: null,
   adiantamentoFixo: 0,
   descontosFixos: 0,
+  descontoFaltas: 0,
   bonusFixo: 0,
   vendas: 0,
   valorPorVenda: 0,
@@ -93,5 +94,38 @@ describe('a comissão continua legível na observação', () => {
       'utf8',
     );
     expect(sql).toContain(PADRAO.source);
+  });
+});
+
+/*
+ * A falta é o desconto que a pessoa mais questiona, e o título no IXC é o único
+ * papel que sobra da folha: sem o nome dele lá, o valor a menos vira uma
+ * diferença que ninguém explica sem abrir a tela.
+ */
+describe('as faltas na observação', () => {
+  it('a falta vai nomeada', () => {
+    expect(sufixoObservacaoSalario({ ...BASE, descontoFaltas: 133.34 })).toBe(
+      ' (FALTAS: -R$ 133,34)',
+    );
+  });
+
+  it('carteira assinada não leva falta nenhuma: quem desconta é a contabilidade', () => {
+    expect(
+      sufixoObservacaoSalario({
+        ...BASE,
+        carteiraAssinada: true,
+        descontoFaltas: 133.34,
+      }),
+    ).toBe('');
+  });
+
+  it('vale e falta convivem, cada um com o seu nome', () => {
+    expect(
+      sufixoObservacaoSalario({
+        ...BASE,
+        descontoVales: 167,
+        descontoFaltas: 133.34,
+      }),
+    ).toBe(' (VALE: -R$ 167,00 · FALTAS: -R$ 133,34)');
   });
 });

@@ -242,6 +242,8 @@ export interface ComposicaoSalario {
   vales: number;
   /** acertos somados (a empresa devia ao funcionário) */
   valesCredito: number;
+  /** faltas do mês, já com o descanso semanal perdido dentro */
+  faltas: number;
   adiantamento: number;
   adiantamentoDescontado: number;
   saldo: number;

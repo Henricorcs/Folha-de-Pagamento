@@ -284,6 +284,12 @@ function Regua({ c, reparto }: { c: ComposicaoSalario; reparto: RepartoDia25 }) 
   if (c.vales > 0) {
     termos.push({ rotulo: 'Vale do mês', valor: c.vales, sinal: '−' });
   }
+  /* A falta tem chip próprio, e não some dentro dos descontos fixos: sem ele a
+     conta na tela não fecha — o salário menos os outros termos dava um número
+     diferente do "a pagar", e quem confere não achava a diferença. */
+  if (c.faltas > 0) {
+    termos.push({ rotulo: 'Faltas', valor: c.faltas, sinal: '−' });
+  }
   if (reparto.noSalario > 0) {
     termos.push({
       rotulo: 'Adiantamento dia 25',

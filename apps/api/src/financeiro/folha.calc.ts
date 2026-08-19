@@ -302,6 +302,16 @@ export function sufixoObservacaoSalario(d: DadosFolhaFuncionario): string {
   const vales = arredondar(d.descontoVales ?? 0);
   if (vales > 0) partes.push(`VALE: -${formatValorBR(vales)}`);
 
+  /*
+   * A falta vai nomeada na observação do IXC.
+   *
+   * É o desconto que a pessoa mais questiona, e o título lá é o único papel que
+   * sobra da folha: sem o nome dele, o valor a menos vira uma diferença que
+   * ninguém explica sem abrir esta tela.
+   */
+  const faltas = d.carteiraAssinada ? 0 : arredondar(d.descontoFaltas ?? 0);
+  if (faltas > 0) partes.push(`FALTAS: -${formatValorBR(faltas)}`);
+
   return partes.length > 0 ? ` (${partes.join(' · ')})` : '';
 }
 
