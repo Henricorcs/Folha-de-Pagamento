@@ -1211,23 +1211,60 @@ model DinheiroNaRua {
   /// Para que era
   motivo     String?
 
-  // --- A prestação de contas ---
-  /// Vazio enquanto está na rua
+  // --- O acerto ---
+  /// Vazio enquanto sobra saldo com a pessoa; preenchido quando ele zera.
   baixadoEm  DateTime? @map("baixado_em")
   baixadoPor String?   @map("baixado_por")
-  /// Quanto virou despesa de fato
-  valorGasto Decimal?  @map("valor_gasto") @db.Decimal(14, 2)
-  /// Quanto voltou para a gaveta
-  troco      Decimal?  @db.Decimal(14, 2)
-  /// Foto da nota que a pessoa trouxe
-  notaFoto   String?   @map("nota_foto")
   observacao String?
 
-  // --- A despesa que a prestação lançou ---
-  /// Título gerado no IXC para o que foi gasto, quando a prestação lançou um.
-  idFnApagarIxc Int?    @map("id_fn_apagar_ixc")
+  /// Os acertos desta conta: o que virou nota, o que voltou, o que saiu a mais.
+  movimentos MovimentoDaRua[]
+
+  criadoPor String?  @map("criado_por")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([caixaId, baixadoEm])
+  @@map("dinheiro_na_rua")
+}
+
+/// O que se faz com o dinheiro que está na rua.
+enum TipoMovimentoDaRua {
+  /// Comprovou um gasto. É este que vira conta a pagar no IXC.
+  NOTA
+  /// Devolveu dinheiro para a gaveta.
+  TROCO
+  /// Levou mais dinheiro, porque a compra passou do que tinha na mão.
+  REFORCO
+}
+
+/// Um acerto da conta de quem está com dinheiro da empresa.
+///
+/// A entrega raramente se resolve de uma vez: leva 100, traz nota de 50, fica
+/// com 50 para a próxima compra, e às vezes sai mais dinheiro da gaveta para
+/// completar. Cada um desses é um lançamento aqui, e o saldo da pessoa é a
+/// entrega mais os reforços, menos as notas e os trocos.
+model MovimentoDaRua {
+  id String @id @default(uuid())
+
+  entregaId String        @map("entrega_id")
+  entrega   DinheiroNaRua @relation(fields: [entregaId], references: [id], onDelete: Cascade)
+
+  tipo  TipoMovimentoDaRua
+  valor Decimal            @db.Decimal(14, 2)
+
+  /// Dia em que aconteceu — não o dia em que foi digitado. É ele que decide em
+  /// que período do caixa este movimento pesa.
+  data       DateTime
+  observacao String?
+  /// Foto da nota que a pessoa trouxe, quando é NOTA
+  notaFoto   String? @map("nota_foto")
+
+  // --- A despesa que a nota lançou no IXC ---
+  /// Título gerado lá, quando a nota virou conta a pagar
+  idFnApagarIxc  Int?    @map("id_fn_apagar_ixc")
   /// A conta a pagar daqui que virou aquele título
-  contaPagarId  String? @map("conta_pagar_id")
+  contaPagarId   String? @map("conta_pagar_id")
   /// Quem recebeu, como o cadastro do IXC o chama
   fornecedorNome String? @map("fornecedor_nome")
 
@@ -1241,11 +1278,11 @@ model DinheiroNaRua {
 
   criadoPor String?  @map("criado_por")
   createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
 
-  @@index([caixaId, baixadoEm])
-  @@index([caixaId, gastoPagoEm])
-  @@map("dinheiro_na_rua")
+  @@index([entregaId])
+  @@index([data])
+  @@index([gastoPagoEm])
+  @@map("movimentos_da_rua")
 }
 
 /// O período dado por conferido, com os números do momento em que fechou.

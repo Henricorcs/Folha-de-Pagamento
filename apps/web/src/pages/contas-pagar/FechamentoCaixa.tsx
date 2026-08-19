@@ -18,10 +18,11 @@ import { formatBRL, formatData } from '../../lib/format';
 import type {
   CaixasDoFechamento,
   CategoriaDespesa,
-  DinheiroNaRua,
+  ContaDaRua,
   ExtratoDoCaixa,
   LancamentoDoCaixa,
-  PrestacaoFeita,
+  MovimentoLancado,
+  TipoMovimentoDaRua,
 } from '../../lib/types';
 
 /** Um fornecedor do IXC, como a busca desta tela o devolve. */
@@ -34,6 +35,14 @@ interface FornecedorIxc {
 
 /** Um fechamento já assinado, do jeito que o extrato o entrega. */
 type FechamentoDoPeriodo = ExtratoDoCaixa['fechamentos'][number];
+
+/** O dia anterior a um "AAAA-MM-DD", também em "AAAA-MM-DD". */
+function diaAnterior(dia: string): string {
+  const [a, m, d] = dia.split('-').map(Number);
+  const p = (n: number) => String(n).padStart(2, '0');
+  const s = new Date(a, m - 1, d - 1);
+  return `${s.getFullYear()}-${p(s.getMonth() + 1)}-${p(s.getDate())}`;
+}
 
 /** O dia seguinte a um "AAAA-MM-DD", também em "AAAA-MM-DD". */
 function diaSeguinte(dia: string): string {
@@ -50,17 +59,18 @@ function diaDoISO(iso: string): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-/** Primeiro e último dia do mês corrente, que é o recorte mais pedido. */
-function mesCorrente(): { de: string; ate: string } {
-  const hoje = new Date();
-  const iso = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
-      d.getDate(),
-    ).padStart(2, '0')}`;
-  return {
-    de: iso(new Date(hoje.getFullYear(), hoje.getMonth(), 1)),
-    ate: iso(hoje),
-  };
+/**
+ * Hoje dos dois lados, que é o recorte de quem bate o caixa todo dia.
+ *
+ * Era o mês corrente, e o mês corrente atropela o último fechamento assim que
+ * ele termina no meio do mês — a tela abria pedindo um período que já estava
+ * conferido pela metade. Quem quiser olhar a semana muda a data à mão.
+ */
+function hojeAteHoje(): { de: string; ate: string } {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  const iso = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return { de: iso, ate: iso };
 }
 
 /**
@@ -73,7 +83,7 @@ function mesCorrente(): { de: string; ate: string } {
  */
 export function FechamentoCaixa() {
   const [caixaId, setCaixaId] = useState<number | null>(null);
-  const [periodo, setPeriodo] = useState(mesCorrente);
+  const [periodo, setPeriodo] = useState(hojeAteHoje);
 
   const caixas = useQuery({
     queryKey: ['caixa', 'caixas'],
@@ -310,6 +320,19 @@ function Conferencia({
   const invadeFechado =
     resumo.fechadoAte && de <= resumo.fechadoAte ? resumo.fechadoAte : null;
 
+  /*
+   * Dias entre o último fechamento e o início deste período.
+   *
+   * Não é erro — dá para olhar só uma sexta-feira sem querer fechá-la. Vira
+   * erro na hora de fechar: o saldo inicial vem do fechamento anterior, e ele
+   * não contém o movimento dos dias pulados. Fechar assim herdaria um saldo
+   * que já não valia.
+   */
+  const buracoDesde =
+    resumo.fechadoAte && de > diaSeguinte(resumo.fechadoAte)
+      ? diaSeguinte(resumo.fechadoAte)
+      : null;
+
   return (
     <>
       <div className="surgir surgir-1 mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -475,6 +498,8 @@ function Conferencia({
             semSaidas={qtdSaidas === 0}
             precisaSaldoInicial={resumo.saldoInicial === null}
             invadeFechado={invadeFechado}
+            buracoDesde={buracoDesde}
+            deDoPeriodo={de}
             saldoEsperado={resumo.saldoEsperado}
             pendente={fechar.isPending}
             onFechar={(dados) => fechar.mutate(dados)}
@@ -746,7 +771,7 @@ function VerNota({ url, onFechar }: { url: string; onFechar: () => void }) {
 }
 
 /**
- * O dinheiro que saiu com alguém.
+ * O dinheiro que está com as pessoas.
  *
  * Fica acima da lista de lançamentos de propósito: é o valor que explica a
  * diferença entre o que a soma diz e o que existe na gaveta, e quem bate o
@@ -758,20 +783,27 @@ function DinheiroNaRuaBloco({
   onMudou,
 }: {
   caixaId: number;
-  itens: DinheiroNaRua[];
+  itens: ContaDaRua[];
   onMudou: () => void;
 }) {
   const [pessoa, setPessoa] = useState('');
   const [valor, setValor] = useState('');
   const [motivo, setMotivo] = useState('');
   const [erro, setErro] = useState<string | null>(null);
-  const [prestando, setPrestando] = useState<DinheiroNaRua | null>(null);
+  /*
+   * Guarda o id, e não a conta.
+   *
+   * O acerto é aos poucos: lançada uma nota parcial, o painel continua aberto e
+   * precisa mostrar o saldo novo. Com o objeto guardado ele mostraria o saldo
+   * de antes, e a pessoa lançaria o resto contra um número velho.
+   */
+  const [acertando, setAcertando] = useState<string | null>(null);
   /**
    * O que a despesa lançada deixou pendente no IXC.
    *
-   * A prestação já foi registrada quando isto aparece — são recados sobre o
-   * título lá (não ficou pago, a etiqueta não colou). Enterrá-los no console
-   * deixaria uma conta em aberto no IXC que ninguém sabe que existe.
+   * O acerto já foi registrado quando isto aparece — são recados sobre o título
+   * lá (não ficou pago, a etiqueta não colou). Enterrá-los no console deixaria
+   * uma conta em aberto no IXC que ninguém sabe que existe.
    */
   const [avisos, setAvisos] = useState<string[]>([]);
 
@@ -799,11 +831,11 @@ function DinheiroNaRuaBloco({
     onError: (e) => setErro(mensagemErro(e)),
   });
 
-  const total = useMemo(
-    () => itens.reduce((s, i) => s + Number(i.valor), 0),
-    [itens],
-  );
+  // O que está fora é a soma dos saldos, e não das entregas: quem já devolveu
+  // metade não está com a metade.
+  const total = useMemo(() => itens.reduce((s, i) => s + i.saldo, 0), [itens]);
   const podeEntregar = pessoa.trim().length >= 2 && Number(valor) > 0;
+  const aConta = itens.find((i) => i.id === acertando) ?? null;
 
   return (
     <Bloco
@@ -816,9 +848,10 @@ function DinheiroNaRuaBloco({
       }
     >
       <p className="ajuda mb-3">
-        O que saiu com alguém para pagar algo na rua e ainda não voltou. Enquanto
-        estiver aqui, o valor não está na gaveta nem virou despesa — é ele que
-        faz a contagem bater.
+        O que está com alguém para pagar algo na rua. Enquanto estiver aqui, o
+        valor não está na gaveta nem virou despesa — é ele que faz a contagem
+        bater. A conta de cada um se acerta aos poucos: nota, troco, ou mais
+        dinheiro para completar a compra.
       </p>
 
       {itens.length > 0 && (
@@ -830,10 +863,19 @@ function DinheiroNaRuaBloco({
             >
               <div className="min-w-0">
                 <span className="font-medium text-tinta-800">{i.pessoa}</span>{' '}
-                <span className="valor">{formatBRL(Number(i.valor))}</span>
+                <span className="valor">{formatBRL(i.saldo)}</span>
                 <span className="ml-2 text-xs text-tinta-400">
                   desde {formatData(i.entregueEm)}
                 </span>
+                {/* Entregou 204 e já acertou parte: dizer só o saldo esconderia
+                    de onde ele veio. */}
+                {i.movimentos.length > 0 && (
+                  <span className="ml-2 text-xs text-tinta-400">
+                    de {formatBRL(Number(i.valor))} entregues,{' '}
+                    {i.movimentos.length}{' '}
+                    {i.movimentos.length === 1 ? 'acerto' : 'acertos'}
+                  </span>
+                )}
                 {i.motivo && (
                   <div className="text-xs text-tinta-400">{i.motivo}</div>
                 )}
@@ -841,18 +883,22 @@ function DinheiroNaRuaBloco({
               <div className="flex shrink-0 gap-2">
                 <button
                   type="button"
-                  onClick={() => setPrestando(i)}
+                  onClick={() => setAcertando(i.id)}
                   className="btn btn-p btn-primario"
-                  title="Registrar a nota que a pessoa trouxe e o troco"
+                  title="Lançar nota, troco ou mais dinheiro nesta conta"
                 >
-                  Prestar contas
+                  Acertar
                 </button>
                 <button
                   type="button"
                   onClick={() => apagar.mutate(i.id)}
-                  disabled={apagar.isPending}
+                  disabled={apagar.isPending || i.movimentos.length > 0}
                   className="btn btn-p btn-sutil"
-                  title="Lançado por engano"
+                  title={
+                    i.movimentos.length > 0
+                      ? 'Esta conta já tem acerto lançado'
+                      : 'Lançado por engano'
+                  }
                 >
                   Apagar
                 </button>
@@ -862,8 +908,8 @@ function DinheiroNaRuaBloco({
         </ul>
       )}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
-        <div className="sm:col-span-1">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div>
           <label className="rotulo" htmlFor="pessoa">
             Com quem está
           </label>
@@ -881,7 +927,7 @@ function DinheiroNaRuaBloco({
           </label>
           <CampoDinheiro valor={valor} onChange={setValor} />
         </div>
-        <div className="sm:col-span-2">
+        <div>
           <label className="rotulo" htmlFor="motivo">
             Para quê
           </label>
@@ -911,7 +957,7 @@ function DinheiroNaRuaBloco({
         <div className="mt-3">
           <Aviso tom="atencao">
             <p className="font-medium">
-              A prestação foi registrada, mas o IXC deixou pendências:
+              O acerto foi registrado, mas o IXC deixou pendências:
             </p>
             <ul className="mt-1 list-disc pl-5">
               {avisos.map((a) => (
@@ -922,72 +968,97 @@ function DinheiroNaRuaBloco({
         </div>
       )}
 
-      {prestando && (
-        <PrestarContas
-          entrega={prestando}
-          onPronto={(recados) => {
-            setPrestando(null);
+      {aConta && (
+        <AcertarConta
+          conta={aConta}
+          onLancado={(recados) => {
             setAvisos(recados);
             onMudou();
           }}
-          onFechar={() => setPrestando(null)}
+          onFechar={() => setAcertando(null)}
         />
       )}
     </Bloco>
   );
 }
 
+/** Como cada tipo de acerto se chama e o que ele faz com o saldo. */
+const TIPOS_DE_ACERTO: Array<{
+  tipo: TipoMovimentoDaRua;
+  rotulo: string;
+  ajuda: string;
+}> = [
+  {
+    tipo: 'NOTA',
+    rotulo: 'Nota',
+    ajuda: 'Comprovou um gasto. É esta que vira conta a pagar no IXC.',
+  },
+  {
+    tipo: 'TROCO',
+    rotulo: 'Troco',
+    ajuda: 'Devolveu dinheiro para a gaveta.',
+  },
+  {
+    tipo: 'REFORCO',
+    rotulo: 'Mais dinheiro',
+    ajuda: 'Saiu mais da gaveta porque a compra passou do que ela tinha.',
+  },
+];
+
 /**
- * A volta do dinheiro: quanto virou nota, quanto voltou de troco.
+ * Um acerto da conta de quem levou dinheiro.
  *
- * A soma dos dois tem de bater com o que saiu, e a tela diz a diferença
- * enquanto se digita — o servidor recusa de todo jeito, mas descobrir isso
- * depois de enviar é o que faz a pessoa desistir de usar.
+ * A conta raramente se resolve de uma vez: leva 204, traz nota de 100 e fica
+ * com os outros 104 para a próxima compra; às vezes a compra passa do que ela
+ * tem e mais dinheiro sai da gaveta. Cada um desses é um lançamento, e o painel
+ * continua aberto enquanto sobrar saldo — zerou, ele some sozinho.
  */
-function PrestarContas({
-  entrega,
-  onPronto,
+function AcertarConta({
+  conta,
+  onLancado,
   onFechar,
 }: {
-  entrega: DinheiroNaRua;
-  onPronto: (avisos: string[]) => void;
+  conta: ContaDaRua;
+  onLancado: (avisos: string[]) => void;
   onFechar: () => void;
 }) {
-  const [gasto, setGasto] = useState('');
-  const [troco, setTroco] = useState('');
+  const [tipo, setTipo] = useState<TipoMovimentoDaRua>('NOTA');
+  const [valor, setValor] = useState('');
+  const [data, setData] = useState(() => diaDoISO(conta.entregueEm));
   const [foto, setFoto] = useState<string | null>(null);
   const [observacao, setObservacao] = useState('');
   const [erro, setErro] = useState<string | null>(null);
 
-  // A despesa que este gasto vira no IXC.
+  // A despesa que a nota vira no IXC.
   const [lancarDespesa, setLancarDespesa] = useState(true);
   const [termo, setTermo] = useState('');
   const [fornecedor, setFornecedor] = useState<FornecedorIxc | null>(null);
-  /* O motivo da entrega já é a descrição da despesa nove vezes em dez — quem
-     anotou "peça do gerador" ao entregar não deveria digitá-lo de novo. */
-  const [descricao, setDescricao] = useState(entrega.motivo ?? '');
-  /* O dia do gasto, não o de hoje: quem levou dinheiro na segunda só presta
-     contas na sexta, e a saída no IXC tem de cair na segunda. */
-  const [pagoEm, setPagoEm] = useState(() => diaDoISO(entrega.entregueEm));
+  /* O motivo da entrega já é a descrição da despesa nove vezes em dez. */
+  const [descricao, setDescricao] = useState(conta.motivo ?? '');
   const [categoriaId, setCategoriaId] = useState('');
 
-  const saiu = Number(entrega.valor);
-  const soma = (Number(gasto) || 0) + (Number(troco) || 0);
-  const diferenca = Math.round((soma - saiu) * 100) / 100;
-  const fecha = Math.abs(diferenca) < 0.005 && Number(gasto) >= 0;
+  const ehNota = tipo === 'NOTA';
+  const comDespesa = ehNota && lancarDespesa;
+  const quanto = Number(valor) || 0;
+  /* Nota ou troco maior que o saldo deixaria a pessoa devendo negativo, e o
+     negativo entraria no total da rua abatendo o saldo de quem realmente está
+     com dinheiro. Reforço pode passar: ele é dinheiro saindo. */
+  const passaDoSaldo = tipo !== 'REFORCO' && quanto - conta.saldo > 0.005;
 
-  /** Voltando tudo como troco não há despesa nenhuma a lançar. */
-  const temGasto = Number(gasto) > 0;
-  const comDespesa = lancarDespesa && temGasto;
-  const faltaDaDespesa = !comDespesa
-    ? null
-    : !fornecedor
-      ? 'Escolha quem recebeu o dinheiro.'
-      : descricao.trim().length < 3
-        ? 'Diga em que o dinheiro foi gasto.'
-        : !pagoEm
-          ? 'Informe o dia em que o dinheiro saiu.'
-          : null;
+  const falta =
+    quanto <= 0
+      ? 'Informe o valor deste lançamento.'
+      : passaDoSaldo
+        ? `${conta.pessoa} está com ${formatBRL(conta.saldo)}. Se saiu mais dinheiro, lance o reforço antes.`
+        : !comDespesa
+          ? null
+          : !fornecedor
+            ? 'Escolha quem recebeu o dinheiro.'
+            : descricao.trim().length < 3
+              ? 'Diga em que o dinheiro foi gasto.'
+              : !data
+                ? 'Informe o dia em que aconteceu.'
+                : null;
 
   // A busca só sai depois que quem digita para: cada tecla aqui é uma consulta
   // ao IXC, que é lento e não é nosso.
@@ -1016,14 +1087,15 @@ function PrestarContas({
     enabled: comDespesa,
   });
 
-  const baixar = useMutation({
+  const lancar = useMutation({
     mutationFn: async () =>
       (
-        await api.post<PrestacaoFeita>(
-          `/caixa/dinheiro-na-rua/${entrega.id}/baixar`,
+        await api.post<MovimentoLancado>(
+          `/caixa/dinheiro-na-rua/${conta.id}/movimento`,
           {
-            valorGasto: Number(gasto) || 0,
-            troco: Number(troco) || 0,
+            tipo,
+            valor: quanto,
+            data,
             notaFoto: foto ?? undefined,
             observacao: observacao || undefined,
             despesa: comDespesa
@@ -1031,78 +1103,188 @@ function PrestarContas({
                   idFornecedorIxc: fornecedor!.idFornecedor,
                   fornecedorNome: fornecedor!.nome,
                   descricao: descricao.trim(),
-                  pagoEm,
+                  pagoEm: data,
                   categoriaId: categoriaId || undefined,
                 }
               : undefined,
           },
         )
       ).data,
-    onSuccess: (feita) => onPronto(feita.despesa?.avisos ?? []),
+    onSuccess: (feito) => {
+      // Os campos se limpam para o próximo acerto; a conta continua aberta
+      // enquanto sobrar saldo, e some da lista quando ele zera.
+      setValor('');
+      setFoto(null);
+      setObservacao('');
+      setFornecedor(null);
+      setTermo('');
+      setErro(null);
+      onLancado(feito.despesa?.avisos ?? []);
+    },
     onError: (e) => setErro(mensagemErro(e)),
   });
 
+  const desfazer = useMutation({
+    mutationFn: async (id: string) => api.delete(`/caixa/movimentos-da-rua/${id}`),
+    onSuccess: () => {
+      setErro(null);
+      onLancado([]);
+    },
+    onError: (e) => setErro(mensagemErro(e)),
+  });
+
+  const ultimo = conta.movimentos[conta.movimentos.length - 1];
+
   return (
     <div className="mt-4 rounded-2xl border border-brand-500/30 bg-brand-500/5 p-4">
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="font-semibold text-tinta-800">
-          Prestação de contas — {entrega.pessoa},{' '}
-          <span className="valor">{formatBRL(saiu)}</span>
+          {conta.pessoa} está com{' '}
+          <span className="valor">{formatBRL(conta.saldo)}</span>
+          <span className="ml-2 text-xs font-normal text-tinta-400">
+            de {formatBRL(Number(conta.valor))} entregues em{' '}
+            {formatData(conta.entregueEm)}
+          </span>
         </p>
         <button type="button" onClick={onFechar} className="btn btn-p btn-sutil">
           Fechar
         </button>
       </div>
 
+      {/* O que já foi lançado nesta conta. Sem isto, quem acerta em três
+          etapas perde a conta do que já disse. */}
+      {conta.movimentos.length > 0 && (
+        <ul className="lista-dividida mb-3">
+          {conta.movimentos.map((m) => (
+            <li
+              key={m.id}
+              className="flex flex-wrap items-center justify-between gap-2 py-1.5 text-sm"
+            >
+              <div>
+                <span className="font-medium text-tinta-800">
+                  {m.tipo === 'NOTA'
+                    ? 'Nota'
+                    : m.tipo === 'TROCO'
+                      ? 'Troco'
+                      : 'Mais dinheiro'}
+                </span>{' '}
+                <span className="valor">{formatBRL(Number(m.valor))}</span>
+                <span className="ml-2 text-xs text-tinta-400">
+                  {formatData(m.data)}
+                </span>
+                {m.fornecedorNome && (
+                  <span className="ml-2 text-xs text-tinta-400">
+                    {m.fornecedorNome}
+                  </span>
+                )}
+                {m.idFnApagarIxc && (
+                  <span className="ml-2 text-xs text-emerald-600">
+                    conta #{m.idFnApagarIxc} no IXC
+                  </span>
+                )}
+                {m.observacao && (
+                  <div className="text-xs text-tinta-400">{m.observacao}</div>
+                )}
+              </div>
+              {/* Só o último, e só o que não virou título: apagar aqui o que
+                  continua no IXC deixaria o título sem dono. */}
+              {ultimo?.id === m.id && !m.idFnApagarIxc && (
+                <button
+                  type="button"
+                  onClick={() => desfazer.mutate(m.id)}
+                  disabled={desfazer.isPending}
+                  className="btn btn-p btn-sutil"
+                >
+                  Desfazer
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="mb-3 flex flex-wrap gap-2">
+        {TIPOS_DE_ACERTO.map((t) => (
+          <button
+            key={t.tipo}
+            type="button"
+            onClick={() => setTipo(t.tipo)}
+            className={
+              t.tipo === tipo ? 'btn btn-p btn-primario' : 'btn btn-p btn-sutil'
+            }
+            title={t.ajuda}
+          >
+            {t.rotulo}
+          </button>
+        ))}
+      </div>
+      <p className="ajuda mb-3">
+        {TIPOS_DE_ACERTO.find((t) => t.tipo === tipo)?.ajuda}
+      </p>
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div>
-          <label className="rotulo">Valor da nota</label>
-          <CampoDinheiro valor={gasto} onChange={setGasto} />
+          <label className="rotulo">Valor</label>
+          <CampoDinheiro valor={valor} onChange={setValor} />
         </div>
         <div>
-          <label className="rotulo">Troco devolvido</label>
-          <CampoDinheiro valor={troco} onChange={setTroco} />
+          <label className="rotulo" htmlFor="data-acerto">
+            Dia em que aconteceu
+          </label>
+          <input
+            id="data-acerto"
+            type="date"
+            value={data}
+            onChange={(e) => setData(e.target.value)}
+            className="campo"
+          />
+          <p className="ajuda">
+            Pode ser uma data já passada — é ela que decide em que caixa este
+            lançamento cai.
+          </p>
         </div>
-        <div>
-          <label className="rotulo">Foto da nota</label>
-          {foto ? (
-            <div className="flex items-center gap-2">
-              <img
-                src={foto}
-                alt="Nota"
-                className="h-[42px] w-16 rounded-lg border border-tinta-200 object-cover"
-              />
-              <button
-                type="button"
-                onClick={() => setFoto(null)}
-                className="btn btn-p btn-sutil"
-              >
-                Trocar
-              </button>
-            </div>
-          ) : (
-            <label className="btn btn-neutro w-fit cursor-pointer">
-              Anexar foto
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={async (e) => {
-                  const arquivo = e.target.files?.[0];
-                  e.target.value = '';
-                  if (!arquivo) return;
-                  try {
-                    setFoto(await reduzirFoto(arquivo));
-                    setErro(null);
-                  } catch (err) {
-                    setErro(err instanceof Error ? err.message : String(err));
-                  }
-                }}
-              />
-            </label>
-          )}
-        </div>
+        {ehNota && (
+          <div>
+            <label className="rotulo">Foto da nota</label>
+            {foto ? (
+              <div className="flex items-center gap-2">
+                <img
+                  src={foto}
+                  alt="Nota"
+                  className="h-[42px] w-16 rounded-lg border border-tinta-200 object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => setFoto(null)}
+                  className="btn btn-p btn-sutil"
+                >
+                  Trocar
+                </button>
+              </div>
+            ) : (
+              <label className="btn btn-neutro w-fit cursor-pointer">
+                Anexar foto
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const arquivo = e.target.files?.[0];
+                    e.target.value = '';
+                    if (!arquivo) return;
+                    try {
+                      setFoto(await reduzirFoto(arquivo));
+                      setErro(null);
+                    } catch (err) {
+                      setErro(err instanceof Error ? err.message : String(err));
+                    }
+                  }}
+                />
+              </label>
+            )}
+          </div>
+        )}
       </div>
 
       {/*
@@ -1113,163 +1295,142 @@ function PrestarContas({
         nenhuma. Com ela, o gasto vira conta a pagar criada, aprovada e baixada
         no caixa de onde o dinheiro saiu — a saída que faltava no IXC.
       */}
-      <div className="mt-4 rounded-xl border border-tinta-200 p-3">
-        <label className="flex items-center gap-2 text-sm font-medium text-tinta-800">
-          <input
-            type="checkbox"
-            checked={lancarDespesa}
-            onChange={(e) => setLancarDespesa(e.target.checked)}
-            disabled={!temGasto}
-          />
-          Lançar a conta a pagar deste gasto
-        </label>
+      {ehNota && (
+        <div className="mt-4 rounded-xl border border-tinta-200 p-3">
+          <label className="flex items-center gap-2 text-sm font-medium text-tinta-800">
+            <input
+              type="checkbox"
+              checked={lancarDespesa}
+              onChange={(e) => setLancarDespesa(e.target.checked)}
+            />
+            Lançar a conta a pagar deste gasto
+          </label>
 
-        {!temGasto ? (
-          <p className="ajuda mt-1">
-            Sem valor de nota não há despesa a lançar — o dinheiro voltou
-            inteiro como troco.
-          </p>
-        ) : !lancarDespesa ? (
-          <p className="ajuda mt-1">
-            Desmarcado, a prestação fica registrada só aqui. Use assim quando a
-            despesa já tiver sido lançada no IXC por outro caminho; senão o
-            caixa de lá continua sem a saída.
-          </p>
-        ) : (
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="sm:col-span-2">
-              <label className="rotulo" htmlFor="fornecedor-prestacao">
-                Quem recebeu
-              </label>
-              {fornecedor ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-tinta-800">
-                    {fornecedor.nome}
-                  </span>
-                  {fornecedor.cpfCnpj && (
-                    <span className="text-xs text-tinta-400">
-                      {fornecedor.cpfCnpj}
+          {!lancarDespesa ? (
+            <p className="ajuda mt-1">
+              Desmarcado, a nota fica registrada só aqui. Use assim quando a
+              despesa já tiver sido lançada no IXC por outro caminho; senão o
+              caixa de lá continua sem a saída.
+            </p>
+          ) : (
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label className="rotulo" htmlFor="fornecedor-acerto">
+                  Quem recebeu
+                </label>
+                {fornecedor ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-tinta-800">
+                      {fornecedor.nome}
                     </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFornecedor(null);
-                      setTermo('');
-                    }}
-                    className="btn btn-p btn-sutil"
-                  >
-                    Trocar
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <input
-                    id="fornecedor-prestacao"
-                    value={termo}
-                    onChange={(e) => setTermo(e.target.value)}
-                    className="campo"
-                    placeholder="nome, nome fantasia ou CPF/CNPJ"
-                  />
-                  {fornecedores.isFetching && (
-                    <p className="ajuda">Procurando no IXC…</p>
-                  )}
-                  {fornecedores.data && fornecedores.data.length > 0 && (
-                    <ul className="mt-1 max-h-44 overflow-auto rounded-xl border border-tinta-200">
-                      {fornecedores.data.map((f) => (
-                        <li key={f.idFornecedor}>
-                          <button
-                            type="button"
-                            onClick={() => setFornecedor(f)}
-                            className="w-full px-3 py-2 text-left text-sm hover:bg-brand-500/10"
-                          >
-                            <span className="text-tinta-800">{f.nome}</span>
-                            {f.nomeFantasia && (
-                              <span className="text-tinta-400">
-                                {' '}
-                                — {f.nomeFantasia}
-                              </span>
-                            )}
-                            {f.cpfCnpj && (
-                              <span className="ml-2 text-xs text-tinta-400">
-                                {f.cpfCnpj}
-                              </span>
-                            )}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {/* O cadastro é do IXC e continua sendo: criar fornecedor
-                      daqui só para lançar uma nota encheria a base de lá de
-                      duplicados. */}
-                  {buscaEfetiva.length >= 2 &&
-                    !fornecedores.isFetching &&
-                    fornecedores.data?.length === 0 && (
-                      <p className="ajuda">
-                        Nenhum fornecedor com esse nome no IXC. Cadastre-o por
-                        lá e volte aqui.
-                      </p>
+                    {fornecedor.cpfCnpj && (
+                      <span className="text-xs text-tinta-400">
+                        {fornecedor.cpfCnpj}
+                      </span>
                     )}
-                </>
-              )}
-            </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFornecedor(null);
+                        setTermo('');
+                      }}
+                      className="btn btn-p btn-sutil"
+                    >
+                      Trocar
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <input
+                      id="fornecedor-acerto"
+                      value={termo}
+                      onChange={(e) => setTermo(e.target.value)}
+                      className="campo"
+                      placeholder="nome, nome fantasia ou CPF/CNPJ"
+                    />
+                    {fornecedores.isFetching && (
+                      <p className="ajuda">Procurando no IXC…</p>
+                    )}
+                    {fornecedores.data && fornecedores.data.length > 0 && (
+                      <ul className="mt-1 max-h-44 overflow-auto rounded-xl border border-tinta-200">
+                        {fornecedores.data.map((f) => (
+                          <li key={f.idFornecedor}>
+                            <button
+                              type="button"
+                              onClick={() => setFornecedor(f)}
+                              className="w-full px-3 py-2 text-left text-sm hover:bg-brand-500/10"
+                            >
+                              <span className="text-tinta-800">{f.nome}</span>
+                              {f.nomeFantasia && (
+                                <span className="text-tinta-400">
+                                  {' '}
+                                  — {f.nomeFantasia}
+                                </span>
+                              )}
+                              {f.cpfCnpj && (
+                                <span className="ml-2 text-xs text-tinta-400">
+                                  {f.cpfCnpj}
+                                </span>
+                              )}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {/* O cadastro é do IXC e continua sendo: criar fornecedor
+                        daqui só para lançar uma nota encheria a base de lá de
+                        duplicados. */}
+                    {buscaEfetiva.length >= 2 &&
+                      !fornecedores.isFetching &&
+                      fornecedores.data?.length === 0 && (
+                        <p className="ajuda">
+                          Nenhum fornecedor com esse nome no IXC. Cadastre-o por
+                          lá e volte aqui.
+                        </p>
+                      )}
+                  </>
+                )}
+              </div>
 
-            <div className="sm:col-span-2">
-              <label className="rotulo" htmlFor="descricao-prestacao">
-                Em que foi gasto
-              </label>
-              <input
-                id="descricao-prestacao"
-                value={descricao}
-                onChange={(e) => setDescricao(e.target.value)}
-                className="campo"
-                placeholder="correia do gerador, combustível da caminhonete…"
-              />
-              <p className="ajuda">É o que aparece na conta a pagar do IXC.</p>
-            </div>
+              <div className="sm:col-span-2">
+                <label className="rotulo" htmlFor="descricao-acerto">
+                  Em que foi gasto
+                </label>
+                <input
+                  id="descricao-acerto"
+                  value={descricao}
+                  onChange={(e) => setDescricao(e.target.value)}
+                  className="campo"
+                  placeholder="correia do gerador, combustível da caminhonete…"
+                />
+                <p className="ajuda">É o que aparece na conta a pagar do IXC.</p>
+              </div>
 
-            <div>
-              <label className="rotulo" htmlFor="pago-em-prestacao">
-                Dia em que o dinheiro saiu
-              </label>
-              <input
-                id="pago-em-prestacao"
-                type="date"
-                value={pagoEm}
-                onChange={(e) => setPagoEm(e.target.value)}
-                className="campo"
-              />
-              <p className="ajuda">
-                Pode ser uma data já passada — é o dia da baixa no IXC, e é ele
-                que decide em que caixa o gasto cai.
-              </p>
+              <div>
+                <label className="rotulo" htmlFor="categoria-acerto">
+                  Classificação
+                </label>
+                <SeletorDeCategoria
+                  id="categoria-acerto"
+                  categorias={categorias.data}
+                  value={categoriaId}
+                  vazio="Sem classificação"
+                  carregando={categorias.isLoading}
+                  onChange={setCategoriaId}
+                  ajuda="É por ela que o dashboard separa os gastos."
+                />
+              </div>
             </div>
-
-            <div>
-              <label className="rotulo" htmlFor="categoria-prestacao">
-                Classificação
-              </label>
-              <SeletorDeCategoria
-                id="categoria-prestacao"
-                categorias={categorias.data}
-                value={categoriaId}
-                vazio="Sem classificação"
-                carregando={categorias.isLoading}
-                onChange={setCategoriaId}
-                ajuda="É por ela que o dashboard separa os gastos."
-              />
-            </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       <div className="mt-3">
-        <label className="rotulo" htmlFor="obs-prestacao">
+        <label className="rotulo" htmlFor="obs-acerto">
           Observação
         </label>
         <input
-          id="obs-prestacao"
+          id="obs-acerto"
           value={observacao}
           onChange={(e) => setObservacao(e.target.value)}
           className="campo"
@@ -1280,42 +1441,35 @@ function PrestarContas({
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
           type="button"
-          onClick={() => baixar.mutate()}
-          disabled={!fecha || !!faltaDaDespesa || baixar.isPending}
+          onClick={() => lancar.mutate()}
+          disabled={!!falta || lancar.isPending}
           className="btn btn-primario"
           title={
-            faltaDaDespesa ??
+            falta ??
             (comDespesa
               ? 'Cria a conta a pagar, aprova e dá a baixa no caixa'
-              : 'Registra a prestação sem lançar despesa')
+              : 'Lança o acerto nesta conta')
           }
         >
-          {baixar.isPending
+          {lancar.isPending
             ? comDespesa
               ? 'Lançando no IXC…'
-              : 'Registrando…'
+              : 'Lançando…'
             : 'Finalizar'}
         </button>
-        {fecha && faltaDaDespesa ? (
-          <span className="text-sm text-amber-600">{faltaDaDespesa}</span>
-        ) : fecha ? (
-          <Selo tom="pago">
-            {comDespesa ? 'Pronto para lançar' : 'A conta fecha'}
-          </Selo>
+        {falta ? (
+          <span className="text-sm text-amber-600">{falta}</span>
         ) : (
           <span className="text-sm text-tinta-500">
-            Nota + troco somam{' '}
-            <span className="valor">{formatBRL(soma)}</span>;{' '}
-            {diferenca > 0 ? (
-              <>
-                é <span className="valor">{formatBRL(diferenca)}</span> a mais do
-                que saiu
-              </>
-            ) : (
-              <>
-                faltam <span className="valor">{formatBRL(-diferenca)}</span>
-              </>
-            )}
+            Sobram{' '}
+            <span className="valor">
+              {formatBRL(
+                Math.round(
+                  (conta.saldo + (tipo === 'REFORCO' ? quanto : -quanto)) * 100,
+                ) / 100,
+              )}
+            </span>{' '}
+            com {conta.pessoa} depois deste lançamento.
           </span>
         )}
       </div>
@@ -1331,6 +1485,8 @@ function Fechar({
   semSaidas,
   precisaSaldoInicial,
   invadeFechado,
+  buracoDesde,
+  deDoPeriodo,
   saldoEsperado,
   pendente,
   onFechar,
@@ -1343,6 +1499,10 @@ function Fechar({
   precisaSaldoInicial: boolean;
   /** Até quando já está fechado, quando o período pedido invade esse trecho. */
   invadeFechado: string | null;
+  /** Primeiro dia não conferido, quando o período começa depois dele. */
+  buracoDesde: string | null;
+  /** Início do período, para nomear o intervalo que ficou de fora. */
+  deDoPeriodo: string;
   /** O que a soma diz que deve haver na gaveta, para comparar com a contagem. */
   saldoEsperado: number | null;
   pendente: boolean;
@@ -1385,6 +1545,21 @@ function Fechar({
         </div>
       )}
 
+      {/* O saldo inicial vem do fechamento anterior, e ele não sabe o que
+          aconteceu nos dias pulados: fechar assim herdaria um número que já
+          não valia. */}
+      {buracoDesde && (
+        <div className="mb-3">
+          <Aviso tom="atencao">
+            Os dias de <strong>{formatData(buracoDesde)}</strong> a{' '}
+            <strong>{formatData(diaAnterior(deDoPeriodo))}</strong> não estão
+            neste período e nunca foram conferidos. Fechar assim deixaria o
+            movimento deles fora da conta — comece o período em{' '}
+            <strong>{formatData(buracoDesde)}</strong>.
+          </Aviso>
+        </div>
+      )}
+
       {/* Só no primeiro fechamento deste caixa: do segundo em diante, o
           anterior diz de onde a gaveta parte. */}
       {precisaSaldoInicial && !invadeFechado && (
@@ -1417,8 +1592,11 @@ function Fechar({
         </div>
         {diferenca === null ? (
           <p className="ajuda">
-            Opcional, mas é o número que o próximo período usa como ponto de
-            partida. Em branco, o fechamento parte do que a soma calculou.
+            Conte o dinheiro que está na gaveta e escreva aqui. É este número
+            que o próximo período usa como ponto de partida, e é comparando-o
+            com o calculado que se descobre sobra ou falta. Em branco, o
+            fechamento parte da soma — que foi o que fez o primeiro caixa fechar
+            com R$ 0,00 e a gaveta cheia.
           </p>
         ) : Math.abs(diferenca) < 0.005 ? (
           <p className="mt-1 text-sm text-emerald-600">
@@ -1458,16 +1636,24 @@ function Fechar({
               saldoContado: contou ? Number(saldoContado) || 0 : undefined,
             })
           }
-          disabled={faltam > 0 || faltaOSaldo || !!invadeFechado || pendente}
+          disabled={
+            faltam > 0 ||
+            faltaOSaldo ||
+            !!invadeFechado ||
+            !!buracoDesde ||
+            pendente
+          }
           className="btn btn-acao shrink-0"
           title={
             invadeFechado
               ? `Este período recomeça dentro do que já foi fechado até ${formatData(invadeFechado)}`
-              : faltam > 0
-                ? 'Confira todas as saídas antes de fechar'
-                : faltaOSaldo
-                  ? 'Informe quanto havia na gaveta no início'
-                  : 'Guarda os números deste período'
+              : buracoDesde
+                ? `Faltam os dias desde ${formatData(buracoDesde)}, que nunca foram conferidos`
+                : faltam > 0
+                  ? 'Confira todas as saídas antes de fechar'
+                  : faltaOSaldo
+                    ? 'Informe quanto havia na gaveta no início'
+                    : 'Guarda os números deste período'
           }
         >
           {pendente ? 'Fechando…' : 'Dar o período por conferido'}

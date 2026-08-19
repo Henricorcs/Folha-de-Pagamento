@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, TipoMovimentoDaRua } from '@prisma/client';
 import { DespesasService } from '../contas-abertas/despesas.service';
 import { ConfigFinanceiraService } from '../financeiro/config-financeira.service';
 import { CaixaService, type LancamentoDoCaixa } from '../ixc/caixa.service';
@@ -131,6 +131,7 @@ export class FechamentoCaixaService {
     const naRua = await this.prisma.dinheiroNaRua.findMany({
       where: { caixaId, baixadoEm: null },
       orderBy: { entregueEm: 'asc' },
+      include: { movimentos: { orderBy: { data: 'asc' } } },
     });
 
     const fechamentos = await this.prisma.fechamentoCaixa.findMany({
@@ -184,26 +185,47 @@ export class FechamentoCaixaService {
      * em que aconteceu — a entrega pela data em que saiu, o troco pela data da
      * prestação. Sem isso o número na tela não seria o que a pessoa tem na mão.
      */
-    const doPeriodo = await this.prisma.dinheiroNaRua.findMany({
+    const entregasDoPeriodo = await this.prisma.dinheiroNaRua.findMany({
+      where: { caixaId, entregueEm: { gte: inicio, lte: fim } },
+      select: { valor: true },
+    });
+
+    /*
+     * Os acertos entram pelo dia em que aconteceram, e não pelo dia em que
+     * foram digitados: quem leva dinheiro na segunda presta contas na sexta, e
+     * a semana em que a gaveta mudou foi a da segunda.
+     */
+    const movimentosDoPeriodo = await this.prisma.movimentoDaRua.findMany({
       where: {
-        caixaId,
+        entrega: { caixaId },
         OR: [
-          { entregueEm: { gte: inicio, lte: fim } },
-          { baixadoEm: { gte: inicio, lte: fim } },
+          { data: { gte: inicio, lte: fim } },
           { gastoPagoEm: { gte: inicio, lte: fim } },
         ],
       },
     });
+
+    const somaDosMovimentos = (
+      tipo: TipoMovimentoDaRua,
+      quando: (m: (typeof movimentosDoPeriodo)[number]) => Date | null,
+    ) =>
+      arredondar(
+        movimentosDoPeriodo
+          .filter((m) => {
+            if (m.tipo !== tipo) return false;
+            const d = quando(m);
+            return !!d && d >= inicio && d <= fim;
+          })
+          .reduce((s, m) => s + Number(m.valor), 0),
+      );
+
+    // O reforço sai da gaveta pelo mesmo motivo que a entrega: é dinheiro indo
+    // para a mão de alguém sem passar pelo IXC.
     const entregueNoPeriodo = arredondar(
-      doPeriodo
-        .filter((d) => d.entregueEm >= inicio && d.entregueEm <= fim)
-        .reduce((s, d) => s + Number(d.valor), 0),
+      entregasDoPeriodo.reduce((s, d) => s + Number(d.valor), 0) +
+        somaDosMovimentos('REFORCO', (m) => m.data),
     );
-    const trocoNoPeriodo = arredondar(
-      doPeriodo
-        .filter((d) => d.baixadoEm && d.baixadoEm >= inicio && d.baixadoEm <= fim)
-        .reduce((s, d) => s + Number(d.troco ?? 0), 0),
-    );
+    const trocoNoPeriodo = somaDosMovimentos('TROCO', (m) => m.data);
 
     /*
      * O gasto que a prestação lançou como conta a pagar volta para a conta.
@@ -217,12 +239,9 @@ export class FechamentoCaixaService {
      * decide em que período a saída aparece lá, e quem presta contas costuma
      * fazê-lo dias depois de o dinheiro ter saído.
      */
-    const gastoLancadoNoPeriodo = arredondar(
-      doPeriodo
-        .filter(
-          (d) => d.gastoPagoEm && d.gastoPagoEm >= inicio && d.gastoPagoEm <= fim,
-        )
-        .reduce((s, d) => s + Number(d.valorGasto ?? 0), 0),
+    const gastoLancadoNoPeriodo = somaDosMovimentos(
+      'NOTA',
+      (m) => m.gastoPagoEm,
     );
 
     const soma = (t: 'ENTRADA' | 'SAIDA') =>
@@ -237,7 +256,7 @@ export class FechamentoCaixaService {
       de,
       ate,
       lancamentos: comConferencia,
-      naRua: naRua.map(semFoto),
+      naRua: naRua.map(comSaldo),
       resumo: {
         entradas: soma('ENTRADA'),
         saidas: soma('SAIDA'),
@@ -257,7 +276,8 @@ export class FechamentoCaixaService {
         saidasConferidas: comConferencia.filter(
           (l) => l.tipo === 'SAIDA' && l.conferido,
         ).length,
-        naRua: arredondar(naRua.reduce((s, d) => s + Number(d.valor), 0)),
+        // O que ainda está com as pessoas — não o que um dia saiu com elas.
+        naRua: arredondar(naRua.reduce((s, d) => s + saldoDaConta(d), 0)),
         pessoasNaRua: new Set(naRua.map((d) => d.pessoa.toLowerCase())).size,
         /** Null = não há de onde partir; `fechadoAte` diz por qual dos dois motivos. */
         saldoInicial,
@@ -366,82 +386,104 @@ export class FechamentoCaixaService {
       `Dinheiro na rua: ${dados.valor} com ${criado.pessoa} ` +
         `(caixa #${dados.caixaId})`,
     );
-    return semFoto(criado);
+    return comSaldo({ ...criado, movimentos: [] });
   }
 
   /**
-   * A prestação de contas: o que virou despesa e o que voltou de troco.
+   * Um acerto da conta de quem está com dinheiro da empresa.
    *
-   * Os dois têm de somar o que saiu. Aceitar uma baixa que não fecha seria
-   * transformar o registro em enfeite — ele existe justamente para não deixar
-   * a diferença passar sem alguém olhar.
+   * A entrega raramente se resolve de uma vez. A pessoa leva R$ 100,00, traz
+   * nota de R$ 50,00 e fica com os outros R$ 50,00 para a próxima compra; às
+   * vezes a compra passa do que ela tem na mão e mais dinheiro sai da gaveta
+   * para completar. Exigir que nota e troco fechassem a entrega inteira de uma
+   * vez — que era a regra antiga — obrigava a mentir num dos dois campos para o
+   * botão liberar.
    *
-   * Vindo a despesa junto, o gasto vira conta a pagar no IXC: criada, aprovada
-   * e baixada no caixa de onde o dinheiro saiu, na data em que saiu. É o que
-   * transforma a nota que a pessoa trouxe numa saída de verdade — antes disto
-   * o dinheiro sumia da gaveta sem virar despesa em lugar nenhum.
+   * Então cada acerto é um lançamento, e o saldo da pessoa anda com eles:
+   *
+   *  - `NOTA` comprova um gasto e desce o saldo. É esta que vira conta a pagar
+   *    no IXC, quando vem com a despesa junto;
+   *  - `TROCO` devolve dinheiro para a gaveta e desce o saldo;
+   *  - `REFORCO` tira mais dinheiro da gaveta e sobe o saldo.
+   *
+   * Zerado o saldo, a conta se fecha sozinha.
    */
-  async baixar(
-    id: string,
+  async lancarMovimento(
+    entregaId: string,
     dados: {
-      valorGasto: number;
-      troco?: number;
+      tipo: TipoMovimentoDaRua;
+      valor: number;
+      /** Dia em que aconteceu (AAAA-MM-DD). Vazio = hoje. */
+      data?: string;
       notaFoto?: string | null;
       observacao?: string;
-      /** A conta a pagar a lançar pelo que foi gasto. */
+      /** Só para NOTA: a conta a pagar a lançar pelo que foi gasto. */
       despesa?: DespesaDaPrestacao;
     },
     usuarioId?: string,
     usuarioNome?: string,
   ) {
-    const atual = await this.prisma.dinheiroNaRua.findUnique({ where: { id } });
-    if (!atual) throw new BadRequestException('Esta entrega não existe.');
-    if (atual.baixadoEm) {
-      throw new BadRequestException('Esta entrega já prestou contas.');
+    const conta = await this.prisma.dinheiroNaRua.findUnique({
+      where: { id: entregaId },
+      include: { movimentos: true },
+    });
+    if (!conta) throw new BadRequestException('Esta entrega não existe.');
+    if (conta.baixadoEm) {
+      throw new BadRequestException(
+        'Esta conta já foi acertada — o saldo dela zerou.',
+      );
     }
 
-    const troco = dados.troco ?? 0;
-    const saiu = Number(atual.valor);
-    if (dados.valorGasto < 0 || troco < 0) {
-      throw new BadRequestException('Valor negativo não entra na prestação.');
+    if (!(dados.valor > 0)) {
+      throw new BadRequestException('O valor precisa ser maior que zero.');
     }
-    if (Math.abs(dados.valorGasto + troco - saiu) > 0.005) {
+
+    const saldo = saldoDaConta(conta);
+    /*
+     * Nota ou troco maior que o saldo é sempre engano de digitação, e um caro:
+     * ele deixaria a pessoa devendo negativo, e o negativo entraria no total da
+     * rua abatendo o saldo de quem realmente está com dinheiro. O reforço é o
+     * único que pode passar — ele é dinheiro saindo, não acerto.
+     */
+    if (dados.tipo !== 'REFORCO' && dados.valor - saldo > 0.005) {
       throw new BadRequestException(
-        `A conta não fecha: saíram ${formatar(saiu)} e a prestação soma ` +
-          `${formatar(dados.valorGasto + troco)} (${formatar(dados.valorGasto)} ` +
-          `de nota + ${formatar(troco)} de troco).`,
+        `${conta.pessoa} está com ${formatar(saldo)}, e este lançamento é de ` +
+          `${formatar(dados.valor)}. Se saiu mais dinheiro, registre o reforço ` +
+          'antes.',
       );
     }
-    if (dados.despesa && dados.valorGasto <= 0) {
+
+    if (dados.despesa && dados.tipo !== 'NOTA') {
       throw new BadRequestException(
-        'Não há despesa a lançar: o dinheiro voltou inteiro como troco.',
+        'Só a nota vira conta a pagar: troco e reforço não são despesa.',
       );
     }
+
+    const dia = dados.data ? dataDoDia(dados.data, 'do lançamento') : new Date();
 
     /*
-     * A despesa vai antes da baixa, de propósito.
+     * A despesa vai antes de gravar o movimento, de propósito.
      *
-     * Não dando para lançá-la, a entrega continua aberta e quem está prestando
-     * contas tenta de novo com tudo ainda na tela. Na ordem inversa, uma falha
-     * do IXC deixaria a entrega fechada aqui e a despesa em lugar nenhum — e
-     * entrega fechada não presta contas de novo.
+     * Não dando para lançá-la, nada é gravado e quem está prestando contas
+     * tenta de novo com tudo ainda na tela. Na ordem inversa, uma falha do IXC
+     * deixaria o saldo abatido aqui e a despesa em lugar nenhum.
      */
     const lancada = dados.despesa
-      ? await this.lancarADespesa(atual, dados.valorGasto, dados.despesa, {
+      ? await this.lancarADespesa(conta, dados.valor, dados.despesa, dia, {
           usuarioId,
           usuarioNome,
         })
       : null;
 
-    const salvo = await this.prisma.dinheiroNaRua.update({
-      where: { id },
+    const movimento = await this.prisma.movimentoDaRua.create({
       data: {
-        baixadoEm: new Date(),
-        baixadoPor: usuarioId ?? null,
-        valorGasto: new Prisma.Decimal(dados.valorGasto),
-        troco: new Prisma.Decimal(troco),
-        ...(dados.notaFoto === undefined ? {} : { notaFoto: dados.notaFoto }),
+        entregaId,
+        tipo: dados.tipo,
+        valor: new Prisma.Decimal(arredondar(dados.valor)),
+        data: dia,
         observacao: dados.observacao?.trim() || null,
+        notaFoto: dados.notaFoto ?? null,
+        criadoPor: usuarioId ?? null,
         ...(lancada
           ? {
               idFnApagarIxc: lancada.idFnApagarIxc,
@@ -452,12 +494,36 @@ export class FechamentoCaixaService {
           : {}),
       },
     });
-    this.logger.log(
-      `Prestação de contas de ${salvo.pessoa}: ${dados.valorGasto} em nota, ` +
-        `${troco} de troco` +
-        (lancada ? `, título #${lancada.idFnApagarIxc ?? '?'} no IXC` : ''),
+
+    /*
+     * Zerou, fecha. O acerto não é um botão à parte: quem acabou de devolver o
+     * último real já disse tudo o que havia para dizer, e pedir uma confirmação
+     * depois disso só deixaria contas zeradas abertas na tela por esquecimento.
+     */
+    const novoSaldo = arredondar(
+      saldo + (dados.tipo === 'REFORCO' ? dados.valor : -dados.valor),
     );
-    return { ...semFoto(salvo), despesa: lancada };
+    const fechou = Math.abs(novoSaldo) < 0.005;
+    if (fechou) {
+      await this.prisma.dinheiroNaRua.update({
+        where: { id: entregaId },
+        data: { baixadoEm: new Date(), baixadoPor: usuarioId ?? null },
+      });
+    }
+
+    this.logger.log(
+      `${dados.tipo} de ${dados.valor} na conta de ${conta.pessoa}: ` +
+        `saldo ${saldo} -> ${novoSaldo}` +
+        (lancada ? `, título #${lancada.idFnApagarIxc ?? '?'} no IXC` : '') +
+        (fechou ? ' (conta acertada)' : ''),
+    );
+
+    return {
+      movimento: semFoto(movimento),
+      saldo: novoSaldo,
+      acertada: fechou,
+      despesa: lancada,
+    };
   }
 
   /**
@@ -474,12 +540,13 @@ export class FechamentoCaixaService {
    * lista de contas em aberto.
    */
   private async lancarADespesa(
-    entrega: { caixaId: number; entregueEm: Date; pessoa: string },
+    entrega: { caixaId: number; pessoa: string },
     valorGasto: number,
     despesa: DespesaDaPrestacao,
+    quando: Date,
     quem: { usuarioId?: string; usuarioNome?: string },
   ) {
-    const dia = despesa.pagoEm?.trim() || diaISO(entrega.entregueEm);
+    const dia = despesa.pagoEm?.trim() || diaISO(quando);
     const fornecedorNome = despesa.fornecedorNome.trim();
 
     const lancamento = await this.despesas.lancar(
@@ -527,35 +594,76 @@ export class FechamentoCaixaService {
     };
   }
 
-  /** A foto da nota que a pessoa trouxe. */
-  async notaDaRua(id: string) {
-    const d = await this.prisma.dinheiroNaRua.findUnique({
+  /** A foto da nota de um lançamento da rua. */
+  async notaDoMovimento(id: string) {
+    const m = await this.prisma.movimentoDaRua.findUnique({
       where: { id },
       select: { notaFoto: true },
     });
-    return { notaFoto: d?.notaFoto ?? null };
+    return { notaFoto: m?.notaFoto ?? null };
+  }
+
+  /**
+   * Desfaz o último lançamento de uma conta, para quem digitou o valor errado.
+   *
+   * Só o último, e nunca um que já virou conta a pagar no IXC: apagar aqui o
+   * que lá continua existindo deixaria o título órfão, sem nada nesta tela
+   * apontando para ele. Nesse caso o caminho é a lista de contas em aberto, que
+   * é onde o título se cancela.
+   */
+  async desfazerMovimento(id: string) {
+    const m = await this.prisma.movimentoDaRua.findUnique({ where: { id } });
+    if (!m) throw new BadRequestException('Este lançamento não existe.');
+    if (m.idFnApagarIxc) {
+      throw new BadRequestException(
+        `Este lançamento virou a conta a pagar #${m.idFnApagarIxc} no IXC. ` +
+          'Cancele-a por lá primeiro, senão o título fica sem dono.',
+      );
+    }
+
+    const ultimo = await this.prisma.movimentoDaRua.findFirst({
+      where: { entregaId: m.entregaId },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (ultimo && ultimo.id !== id) {
+      throw new BadRequestException(
+        'Só o último lançamento da conta se desfaz — os de trás já foram ' +
+          'levados em conta pelos seguintes.',
+      );
+    }
+
+    await this.prisma.movimentoDaRua.delete({ where: { id } });
+    // A conta reabre: ela só estava fechada porque este lançamento a zerou.
+    await this.prisma.dinheiroNaRua.update({
+      where: { id: m.entregaId },
+      data: { baixadoEm: null, baixadoPor: null },
+    });
   }
 
   async apagarEntrega(id: string) {
-    const atual = await this.prisma.dinheiroNaRua.findUnique({ where: { id } });
+    const atual = await this.prisma.dinheiroNaRua.findUnique({
+      where: { id },
+      include: { movimentos: { select: { id: true } } },
+    });
     if (!atual) throw new BadRequestException('Esta entrega não existe.');
-    if (atual.baixadoEm) {
+    if (atual.movimentos.length > 0) {
       throw new BadRequestException(
-        'Esta entrega já prestou contas — apagá-la reescreveria um caixa que ' +
-          'já foi conferido.',
+        'Esta conta já tem acerto lançado — apagá-la reescreveria um caixa ' +
+          'que já foi conferido. Desfaça os lançamentos primeiro.',
       );
     }
     await this.prisma.dinheiroNaRua.delete({ where: { id } });
   }
 
-  /** O histórico de entregas de um caixa, as já baixadas inclusive. */
+  /** O histórico de contas de um caixa, as já acertadas inclusive. */
   async historicoDaRua(caixaId: number) {
     const itens = await this.prisma.dinheiroNaRua.findMany({
       where: { caixaId },
       orderBy: [{ entregueEm: 'desc' }],
       take: 200,
+      include: { movimentos: { orderBy: { data: 'asc' } } },
     });
-    return itens.map(semFoto);
+    return itens.map(comSaldo);
   }
 
   // -------------------------------------------------------------------------
@@ -739,6 +847,33 @@ function saldoQueSegue(f: {
   saldoContado: Prisma.Decimal | null;
 }): Prisma.Decimal {
   return f.saldoContado ?? f.saldoFinal;
+}
+
+/** Uma conta da rua com o que se precisa saber dela: quanto ainda está fora. */
+function comSaldo<
+  T extends { movimentos: Array<{ notaFoto?: string | null }> },
+>(conta: T) {
+  return {
+    ...conta,
+    saldo: saldoDaConta(conta as never),
+    movimentos: conta.movimentos.map(semFoto),
+  };
+}
+
+/**
+ * O que ainda está com a pessoa: a entrega, mais os reforços, menos o que ela
+ * já acertou em nota e em troco.
+ */
+function saldoDaConta(conta: {
+  valor: Prisma.Decimal;
+  movimentos: Array<{ tipo: TipoMovimentoDaRua; valor: Prisma.Decimal }>;
+}): number {
+  return arredondar(
+    conta.movimentos.reduce(
+      (s, m) => s + (m.tipo === 'REFORCO' ? Number(m.valor) : -Number(m.valor)),
+      Number(conta.valor),
+    ),
+  );
 }
 
 /**

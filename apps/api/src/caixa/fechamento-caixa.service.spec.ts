@@ -10,6 +10,8 @@ import { FechamentoCaixaService } from './fechamento-caixa.service';
  *    o único sentido que tem;
  *  - dinheiro na rua **não** impede fechar: ele é a explicação de por que a
  *    gaveta tem menos, e o fechamento guarda quanto era;
+ *  - a conta de quem levou dinheiro se acerta aos poucos, e o saldo dela nunca
+ *    fica negativo por engano de digitação;
  *  - a contagem da gaveta vence o cálculo, e é dela que o período seguinte
  *    parte — senão a diferença anda de fechamento em fechamento;
  *  - a despesa lançada pela prestação não desconta o dinheiro duas vezes;
@@ -38,12 +40,20 @@ function montarServico(
       tipo: 'ENTRADA' | 'SAIDA';
     }>;
     conferencias?: Array<{ idLancamentoIxc: number; conferido: boolean; notaFoto?: string }>;
+    /** Contas abertas agora, com os acertos que já tiveram. */
     naRua?: Array<Record<string, unknown>>;
+    /** A conta que `lancarMovimento` vai buscar pelo id. */
     entrega?: Record<string, unknown> | null;
     /** O fechamento anterior deste caixa, de onde o saldo parte. */
     anterior?: Record<string, unknown> | null;
-    /** Entregas e prestações com data dentro do período. */
-    movimentoDaRua?: Array<Record<string, unknown>>;
+    /** Entregas com data dentro do período. */
+    entregasDoPeriodo?: Array<Record<string, unknown>>;
+    /** Acertos com data (ou baixa no IXC) dentro do período. */
+    movimentosDoPeriodo?: Array<Record<string, unknown>>;
+    /** O último acerto de uma conta, para `desfazerMovimento`. */
+    ultimoMovimento?: Record<string, unknown> | null;
+    /** O acerto que `desfazerMovimento` vai buscar pelo id. */
+    movimento?: Record<string, unknown> | null;
     /** O fechamento que `corrigirContagem` vai buscar pelo id. */
     fechamento?: Record<string, unknown> | null;
     /** O último fechamento do caixa, para a correção saber se pode. */
@@ -66,22 +76,37 @@ function montarServico(
       findUnique: jest.fn().mockResolvedValue(null),
     },
     dinheiroNaRua: {
-      // Primeira chamada: o que está aberto. Segunda: o que se mexeu no
-      // período, para o saldo da gaveta.
+      // Primeira chamada: as contas abertas. Segunda: as entregas do período,
+      // para o saldo da gaveta.
       findMany: jest
         .fn()
-        .mockResolvedValueOnce(opts.naRua ?? [])
-        .mockResolvedValue(opts.movimentoDaRua ?? []),
-      findUnique: jest.fn().mockResolvedValue(opts.entrega ?? null),
+        .mockResolvedValueOnce(
+          (opts.naRua ?? []).map((d) => ({ movimentos: [], ...d })),
+        )
+        .mockResolvedValue(opts.entregasDoPeriodo ?? []),
+      findUnique: jest
+        .fn()
+        .mockResolvedValue(
+          opts.entrega ? { movimentos: [], ...opts.entrega } : null,
+        ),
       create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({
         id: 'r1',
-        notaFoto: null,
         ...data,
       })),
       update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({
         id: 'r1',
         pessoa: 'Jeferson',
-        notaFoto: 'data:image/png;base64,AAAA',
+        ...data,
+      })),
+      delete: jest.fn(),
+    },
+    movimentoDaRua: {
+      findMany: jest.fn().mockResolvedValue(opts.movimentosDoPeriodo ?? []),
+      findFirst: jest.fn().mockResolvedValue(opts.ultimoMovimento ?? null),
+      findUnique: jest.fn().mockResolvedValue(opts.movimento ?? null),
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        id: 'm1',
+        notaFoto: null,
         ...data,
       })),
       delete: jest.fn(),
@@ -240,70 +265,130 @@ describe('extrato do caixa', () => {
   });
 });
 
-describe('prestação de contas de quem levou dinheiro', () => {
-  const entrega = { id: 'r1', pessoa: 'Jeferson', valor: 100, baixadoEm: null };
+describe('a conta de quem levou dinheiro', () => {
+  /** R$ 204,00 com a Idelblane, nada acertado ainda. */
+  const conta = {
+    id: 'r1',
+    caixaId: 7,
+    pessoa: 'Idelblane',
+    valor: 204,
+    entregueEm: new Date(2026, 7, 14),
+    baixadoEm: null,
+    movimentos: [],
+  };
 
-  it('nota mais troco somando o que saiu é aceita', async () => {
-    const { service, prisma } = montarServico({ entrega });
+  const despesa = {
+    idFornecedorIxc: 55,
+    fornecedorNome: 'Auto Peças Silva',
+    descricao: 'Correia do gerador',
+  };
 
-    await service.baixar('r1', { valorGasto: 73.5, troco: 26.5 }, 'u1');
+  /*
+   * O caso que derrubou a regra antiga: leva 204, traz nota de 100 e fica com
+   * os outros 104 para a próxima compra. Exigir que nota e troco fechassem a
+   * entrega inteira obrigava a mentir num dos dois campos.
+   */
+  it('nota parcial desce o saldo e deixa a conta aberta', async () => {
+    const { service, prisma } = montarServico({ entrega: conta });
 
+    const r = await service.lancarMovimento('r1', {
+      tipo: 'NOTA',
+      valor: 100,
+      data: '2026-08-15',
+    });
+
+    expect(r.saldo).toBe(104);
+    expect(r.acertada).toBe(false);
+    expect(prisma.dinheiroNaRua.update).not.toHaveBeenCalled();
+  });
+
+  it('o reforço sobe o saldo: saiu mais dinheiro para completar a compra', async () => {
+    const { service } = montarServico({
+      entrega: {
+        ...conta,
+        movimentos: [{ tipo: 'NOTA', valor: 100 }],
+      },
+    });
+
+    const r = await service.lancarMovimento('r1', {
+      tipo: 'REFORCO',
+      valor: 50,
+    });
+
+    // 204 - 100 de nota + 50 que saiu agora
+    expect(r.saldo).toBe(154);
+  });
+
+  it('zerando o saldo, a conta se acerta sozinha', async () => {
+    const { service, prisma } = montarServico({
+      entrega: { ...conta, movimentos: [{ tipo: 'NOTA', valor: 200 }] },
+    });
+
+    const r = await service.lancarMovimento('r1', { tipo: 'TROCO', valor: 4 }, 'u1');
+
+    expect(r.saldo).toBe(0);
+    expect(r.acertada).toBe(true);
     const [{ data }] = prisma.dinheiroNaRua.update.mock.calls[0];
-    expect(Number(data.valorGasto)).toBe(73.5);
-    expect(Number(data.troco)).toBe(26.5);
     expect(data.baixadoEm).toBeInstanceOf(Date);
   });
 
-  it('gasto sem troco, tendo gasto tudo, também fecha', async () => {
-    const { service, prisma } = montarServico({ entrega });
-
-    await service.baixar('r1', { valorGasto: 100 });
-
-    expect(prisma.dinheiroNaRua.update).toHaveBeenCalled();
-  });
-
-  it('conta que não fecha é recusada, e diz por quanto', async () => {
-    const { service } = montarServico({ entrega });
+  /*
+   * Nota maior que o saldo é sempre engano de digitação, e deixaria a pessoa
+   * devendo negativo — um negativo que entraria no total da rua abatendo o
+   * saldo de quem realmente está com dinheiro.
+   */
+  it('recusa acerto maior que o saldo, e diz quanto está com a pessoa', async () => {
+    const { service } = montarServico({ entrega: conta });
 
     await expect(
-      service.baixar('r1', { valorGasto: 70, troco: 20 }),
-    ).rejects.toThrow(/não fecha/i);
+      service.lancarMovimento('r1', { tipo: 'NOTA', valor: 300 }),
+      // `\s` e não um espaço literal: o pt-BR separa o "R$" do número com
+      // espaço não separável, e um espaço comum aqui nunca casaria.
+    ).rejects.toThrow(/está com R\$\s204,00/);
   });
 
-  it('entrega que já prestou contas não presta de novo', async () => {
+  it('o reforço pode passar do saldo: ele é dinheiro saindo, não acerto', async () => {
+    const { service } = montarServico({ entrega: conta });
+
+    const r = await service.lancarMovimento('r1', { tipo: 'REFORCO', valor: 500 });
+
+    expect(r.saldo).toBe(704);
+  });
+
+  it('conta já acertada não recebe lançamento novo', async () => {
     const { service } = montarServico({
-      entrega: { ...entrega, baixadoEm: new Date('2026-08-15') },
+      entrega: { ...conta, baixadoEm: new Date(2026, 7, 15) },
     });
 
-    await expect(service.baixar('r1', { valorGasto: 100 })).rejects.toThrow(
-      /já prestou contas/i,
-    );
+    await expect(
+      service.lancarMovimento('r1', { tipo: 'NOTA', valor: 10 }),
+    ).rejects.toThrow(/já foi acertada/i);
   });
 
-  /*
-   * O motivo de a prestação existir: sem a conta a pagar, a nota que a pessoa
-   * trouxe fica sabida só aqui, e o caixa do IXC nunca vê aquele dinheiro sair.
-   */
-  it('a despesa é lançada no caixa da entrega, quitada na data em que saiu', async () => {
-    const { service, despesas } = montarServico({
-      entrega: {
-        ...entrega,
-        caixaId: 7,
-        entregueEm: new Date(2026, 7, 10),
-      },
-    });
+  it('valor zero ou negativo não é lançamento', async () => {
+    const { service } = montarServico({ entrega: conta });
 
-    await service.baixar(
+    await expect(
+      service.lancarMovimento('r1', { tipo: 'TROCO', valor: 0 }),
+    ).rejects.toThrow(/maior que zero/i);
+  });
+
+  it('só a nota vira despesa — troco e reforço não são gasto', async () => {
+    const { service } = montarServico({ entrega: conta });
+
+    await expect(
+      service.lancarMovimento('r1', { tipo: 'TROCO', valor: 10, despesa }),
+    ).rejects.toThrow(/só a nota vira conta a pagar/i);
+  });
+
+  // --- A despesa que a nota lança ---
+
+  it('a despesa é lançada no caixa da entrega, quitada na data em que saiu', async () => {
+    const { service, despesas } = montarServico({ entrega: conta });
+
+    await service.lancarMovimento(
       'r1',
-      {
-        valorGasto: 100,
-        despesa: {
-          idFornecedorIxc: 55,
-          fornecedorNome: 'Auto Peças Silva',
-          descricao: 'Correia do gerador',
-          pagoEm: '2026-08-10',
-        },
-      },
+      { tipo: 'NOTA', valor: 100, despesa: { ...despesa, pagoEm: '2026-08-10' } },
       'u1',
       'Henrico',
     );
@@ -319,39 +404,29 @@ describe('prestação de contas de quem levou dinheiro', () => {
     expect(dto.dataVencimento).toBe('2026-08-10');
   });
 
-  it('sem data informada, a despesa cai no dia da entrega', async () => {
-    const { service, despesas } = montarServico({
-      entrega: { ...entrega, caixaId: 7, entregueEm: new Date(2026, 7, 3) },
-    });
+  it('sem data na despesa, ela cai no dia do lançamento', async () => {
+    const { service, despesas } = montarServico({ entrega: conta });
 
-    await service.baixar('r1', {
-      valorGasto: 100,
-      despesa: {
-        idFornecedorIxc: 55,
-        fornecedorNome: 'Auto Peças Silva',
-        descricao: 'Correia do gerador',
-      },
+    await service.lancarMovimento('r1', {
+      tipo: 'NOTA',
+      valor: 100,
+      data: '2026-08-03',
+      despesa,
     });
 
     expect(despesas.lancar.mock.calls[0][0].dataPagamento).toBe('2026-08-03');
   });
 
   it('guarda o título e o dia da saída, que é o que evita o desconto em dobro', async () => {
-    const { service, prisma } = montarServico({
-      entrega: { ...entrega, caixaId: 7, entregueEm: new Date(2026, 7, 10) },
+    const { service, prisma } = montarServico({ entrega: conta });
+
+    await service.lancarMovimento('r1', {
+      tipo: 'NOTA',
+      valor: 100,
+      despesa: { ...despesa, pagoEm: '2026-08-10' },
     });
 
-    await service.baixar('r1', {
-      valorGasto: 100,
-      despesa: {
-        idFornecedorIxc: 55,
-        fornecedorNome: 'Auto Peças Silva',
-        descricao: 'Correia do gerador',
-        pagoEm: '2026-08-10',
-      },
-    });
-
-    const [{ data }] = prisma.dinheiroNaRua.update.mock.calls[0];
+    const [{ data }] = prisma.movimentoDaRua.create.mock.calls[0];
     expect(data.idFnApagarIxc).toBe(4242);
     expect(data.gastoPagoEm).toEqual(new Date(2026, 7, 10));
     expect(data.fornecedorNome).toBe('Auto Peças Silva');
@@ -364,7 +439,7 @@ describe('prestação de contas de quem levou dinheiro', () => {
    */
   it('despesa que não ficou paga no IXC não marca o dia da saída', async () => {
     const { service, prisma } = montarServico({
-      entrega: { ...entrega, caixaId: 7, entregueEm: new Date(2026, 7, 10) },
+      entrega: conta,
       despesaLancada: {
         conta: { id: 'cp1', idFnApagarIxc: 4242 },
         contas: [{ id: 'cp1', idFnApagarIxc: 4242 }],
@@ -379,68 +454,72 @@ describe('prestação de contas de quem levou dinheiro', () => {
       },
     });
 
-    const r = await service.baixar('r1', {
-      valorGasto: 100,
-      despesa: {
-        idFornecedorIxc: 55,
-        fornecedorNome: 'Auto Peças Silva',
-        descricao: 'Correia do gerador',
-        pagoEm: '2026-08-10',
-      },
+    const r = await service.lancarMovimento('r1', {
+      tipo: 'NOTA',
+      valor: 100,
+      despesa: { ...despesa, pagoEm: '2026-08-10' },
     });
 
-    const [{ data }] = prisma.dinheiroNaRua.update.mock.calls[0];
+    const [{ data }] = prisma.movimentoDaRua.create.mock.calls[0];
     expect(data.gastoPagoEm).toBeNull();
     expect(r.despesa?.paga).toBe(false);
     expect(r.despesa?.avisos.length).toBeGreaterThan(0);
   });
 
   /*
-   * A entrega fechada não presta contas de novo. Se a baixa viesse antes da
-   * despesa, uma falha do IXC deixaria a entrega quitada aqui e a despesa em
-   * lugar nenhum, sem caminho de volta pela tela.
+   * O lançamento fechado não se lança de novo. Se ele viesse antes da despesa,
+   * uma falha do IXC deixaria o saldo abatido aqui e a despesa em lugar nenhum.
    */
-  it('despesa que nem chegou a ser lançada deixa a entrega aberta', async () => {
-    const { service, prisma, despesas } = montarServico({
-      entrega: { ...entrega, caixaId: 7, entregueEm: new Date(2026, 7, 10) },
-    });
+  it('despesa que nem chegou a ser lançada não abate o saldo', async () => {
+    const { service, prisma, despesas } = montarServico({ entrega: conta });
     despesas.lancar.mockRejectedValueOnce(new Error('IXC fora do ar'));
 
     await expect(
-      service.baixar('r1', {
-        valorGasto: 100,
-        despesa: {
-          idFornecedorIxc: 55,
-          fornecedorNome: 'Auto Peças Silva',
-          descricao: 'Correia do gerador',
-        },
-      }),
+      service.lancarMovimento('r1', { tipo: 'NOTA', valor: 100, despesa }),
     ).rejects.toThrow(/IXC fora do ar/);
 
-    expect(prisma.dinheiroNaRua.update).not.toHaveBeenCalled();
+    expect(prisma.movimentoDaRua.create).not.toHaveBeenCalled();
   });
 
-  it('não lança despesa quando o dinheiro voltou inteiro como troco', async () => {
-    const { service } = montarServico({
-      entrega: { ...entrega, caixaId: 7, entregueEm: new Date(2026, 7, 10) },
+  // --- Desfazer ---
+
+  it('desfaz o último lançamento e reabre a conta', async () => {
+    const m = { id: 'm1', entregaId: 'r1', idFnApagarIxc: null };
+    const { service, prisma } = montarServico({
+      movimento: m,
+      ultimoMovimento: m,
     });
 
-    await expect(
-      service.baixar('r1', {
-        valorGasto: 0,
-        troco: 100,
-        despesa: {
-          idFornecedorIxc: 55,
-          fornecedorNome: 'Auto Peças Silva',
-          descricao: 'Correia do gerador',
-        },
-      }),
-    ).rejects.toThrow(/voltou inteiro como troco/i);
+    await service.desfazerMovimento('m1');
+
+    expect(prisma.movimentoDaRua.delete).toHaveBeenCalled();
+    const [{ data }] = prisma.dinheiroNaRua.update.mock.calls[0];
+    expect(data.baixadoEm).toBeNull();
   });
 
-  it('não apaga entrega já prestada — seria reescrever caixa conferido', async () => {
+  /*
+   * Apagar aqui o que continua existindo no IXC deixaria o título órfão, sem
+   * nada nesta tela apontando para ele.
+   */
+  it('não desfaz lançamento que já virou título no IXC', async () => {
+    const m = { id: 'm1', entregaId: 'r1', idFnApagarIxc: 4242 };
+    const { service } = montarServico({ movimento: m, ultimoMovimento: m });
+
+    await expect(service.desfazerMovimento('m1')).rejects.toThrow(/#4242/);
+  });
+
+  it('só o último se desfaz — os de trás já foram contados pelos seguintes', async () => {
     const { service } = montarServico({
-      entrega: { ...entrega, baixadoEm: new Date('2026-08-15') },
+      movimento: { id: 'm1', entregaId: 'r1', idFnApagarIxc: null },
+      ultimoMovimento: { id: 'm2', entregaId: 'r1', idFnApagarIxc: null },
+    });
+
+    await expect(service.desfazerMovimento('m1')).rejects.toThrow(/só o último/i);
+  });
+
+  it('não apaga conta que já tem acerto lançado', async () => {
+    const { service } = montarServico({
+      entrega: { ...conta, movimentos: [{ id: 'm1' }] },
     });
 
     await expect(service.apagarEntrega('r1')).rejects.toThrow(BadRequestException);
@@ -499,9 +578,7 @@ describe('o saldo que deve estar na gaveta', () => {
     const { service } = montarServico({
       anterior: { saldoFinal: 1000 },
       lancamentos: [],
-      movimentoDaRua: [
-        { valor: 200, entregueEm: DENTRO, baixadoEm: null, troco: null },
-      ],
+      entregasDoPeriodo: [{ valor: 200 }],
     });
 
     const e = await service.extrato(7, '2026-08-01', '2026-08-31');
@@ -510,14 +587,26 @@ describe('o saldo que deve estar na gaveta', () => {
     expect(e.resumo.saldoEsperado).toBe(800);
   });
 
+  /* O reforço é dinheiro saindo da gaveta pelo mesmo motivo que a entrega. */
+  it('o reforço pesa na gaveta como uma entrega', async () => {
+    const { service } = montarServico({
+      anterior: { saldoFinal: 1000 },
+      lancamentos: [],
+      movimentosDoPeriodo: [{ tipo: 'REFORCO', valor: 50, data: DENTRO }],
+    });
+
+    const e = await service.extrato(7, '2026-08-01', '2026-08-31');
+
+    expect(e.resumo.entregueNoPeriodo).toBe(50);
+    expect(e.resumo.saldoEsperado).toBe(950);
+  });
+
   it('o troco devolvido volta para a gaveta', async () => {
     const { service } = montarServico({
       anterior: { saldoFinal: 1000 },
       lancamentos: [],
-      movimentoDaRua: [
-        // Entregue no período anterior, prestou contas neste: só o troco entra.
-        { valor: 200, entregueEm: new Date(2026, 6, 20), baixadoEm: DENTRO, troco: 50 },
-      ],
+      // Entregue no período anterior, devolveu neste: só o troco entra.
+      movimentosDoPeriodo: [{ tipo: 'TROCO', valor: 50, data: DENTRO }],
     });
 
     const e = await service.extrato(7, '2026-08-01', '2026-08-31');
@@ -565,17 +654,12 @@ describe('o saldo que deve estar na gaveta', () => {
   it('o gasto que virou conta a pagar não desconta duas vezes', async () => {
     const { service } = montarServico({
       anterior: { saldoFinal: 1000 },
-      // A saída de 200 no IXC é a baixa da despesa que a prestação lançou.
+      // A saída de 200 no IXC é a baixa da despesa que a nota lançou.
       lancamentos: [saida(1, 200)],
-      movimentoDaRua: [
-        {
-          valor: 204,
-          entregueEm: DENTRO,
-          baixadoEm: DENTRO,
-          troco: 4,
-          valorGasto: 200,
-          gastoPagoEm: DENTRO,
-        },
+      entregasDoPeriodo: [{ valor: 204 }],
+      movimentosDoPeriodo: [
+        { tipo: 'NOTA', valor: 200, data: DENTRO, gastoPagoEm: DENTRO },
+        { tipo: 'TROCO', valor: 4, data: DENTRO, gastoPagoEm: null },
       ],
     });
 
@@ -590,15 +674,10 @@ describe('o saldo que deve estar na gaveta', () => {
   it('gasto sem conta a pagar não compensa nada', async () => {
     const { service } = montarServico({
       anterior: { saldoFinal: 1000 },
-      movimentoDaRua: [
-        {
-          valor: 204,
-          entregueEm: DENTRO,
-          baixadoEm: DENTRO,
-          troco: 4,
-          valorGasto: 200,
-          gastoPagoEm: null,
-        },
+      entregasDoPeriodo: [{ valor: 204 }],
+      movimentosDoPeriodo: [
+        { tipo: 'NOTA', valor: 200, data: DENTRO, gastoPagoEm: null },
+        { tipo: 'TROCO', valor: 4, data: DENTRO, gastoPagoEm: null },
       ],
     });
 
@@ -608,12 +687,14 @@ describe('o saldo que deve estar na gaveta', () => {
     expect(e.resumo.saldoEsperado).toBe(800);
   });
 
-  it('entregue e prestado no mesmo período: sobra o que virou nota', async () => {
+  it('entregue e acertado no mesmo período: sobra o que virou nota', async () => {
     const { service } = montarServico({
       anterior: { saldoFinal: 1000 },
       lancamentos: [],
-      movimentoDaRua: [
-        { valor: 200, entregueEm: DENTRO, baixadoEm: DENTRO, troco: 50 },
+      entregasDoPeriodo: [{ valor: 200 }],
+      movimentosDoPeriodo: [
+        { tipo: 'NOTA', valor: 150, data: DENTRO, gastoPagoEm: null },
+        { tipo: 'TROCO', valor: 50, data: DENTRO, gastoPagoEm: null },
       ],
     });
 
@@ -722,9 +803,7 @@ describe('fechar o período', () => {
       anterior: { saldoFinal: 1000 },
       lancamentos: [saida(1, 100)],
       conferencias: [{ idLancamentoIxc: 1, conferido: true }],
-      movimentoDaRua: [
-        { valor: 200, entregueEm: new Date(2026, 7, 10), baixadoEm: null, troco: null },
-      ],
+      entregasDoPeriodo: [{ valor: 200 }],
     });
 
     await service.fechar({ caixaId: 7, de: '2026-08-01', ate: '2026-08-31' });

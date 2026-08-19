@@ -1,6 +1,7 @@
 import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
+  IsIn,
   IsInt,
   IsISO8601,
   IsNumber,
@@ -149,22 +150,34 @@ export class DespesaDaPrestacaoDto {
 }
 
 /**
- * A prestação de contas de quem levou dinheiro.
+ * Um acerto da conta de quem levou dinheiro.
  *
- * Nota e troco vêm juntos porque é a soma dos dois que fecha com o que saiu —
- * receber um sem o outro deixaria a diferença passar sem ninguém olhar.
+ * A entrega raramente se resolve de uma vez: leva 100, traz nota de 50, fica
+ * com 50 para a próxima compra, e às vezes sai mais dinheiro da gaveta para
+ * completar. Cada um desses é um lançamento, e o saldo da pessoa anda com eles.
  */
-export class BaixarDinheiroDto {
-  @Transform(numeroOuIndefinido)
-  @IsNumber()
-  @Min(0, { message: 'O valor da nota não pode ser negativo.' })
-  valorGasto!: number;
+export class MovimentoDaRuaDto {
+  @IsIn(['NOTA', 'TROCO', 'REFORCO'], {
+    message: 'O lançamento é nota, troco ou reforço.',
+  })
+  tipo!: 'NOTA' | 'TROCO' | 'REFORCO';
 
-  @IsOptional()
   @Transform(numeroOuIndefinido)
   @IsNumber()
-  @Min(0, { message: 'O troco não pode ser negativo.' })
-  troco?: number;
+  @Min(0.01, { message: 'O valor precisa ser maior que zero.' })
+  valor!: number;
+
+  /**
+   * Dia em que aconteceu (AAAA-MM-DD). Vazio = hoje.
+   *
+   * É a data do acontecimento, e não a da digitação: ela decide em que período
+   * do caixa este lançamento pesa.
+   */
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'A data do lançamento precisa estar no formato AAAA-MM-DD.',
+  })
+  data?: string;
 
   @IsOptional()
   @IsString()
@@ -180,9 +193,8 @@ export class BaixarDinheiroDto {
   observacao?: string;
 
   /**
-   * A conta a pagar do que foi gasto. Vazio = prestação só registrada aqui,
-   * que é o que se faz quando a despesa já foi lançada no IXC por outro
-   * caminho.
+   * A conta a pagar desta nota. Vazio = lançamento só registrado aqui, que é o
+   * que se faz quando a despesa já foi lançada no IXC por outro caminho.
    */
   @IsOptional()
   @ValidateNested()

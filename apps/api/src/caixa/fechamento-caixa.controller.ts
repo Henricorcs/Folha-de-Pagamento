@@ -13,11 +13,11 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import {
-  BaixarDinheiroDto,
   ConferirLancamentoDto,
   ContagemDaGavetaDto,
   EntregarDinheiroDto,
   FecharCaixaDto,
+  MovimentoDaRuaDto,
   NotaDto,
   PeriodoDoCaixaDto,
 } from './dto/caixa.dto';
@@ -104,19 +104,34 @@ export class FechamentoCaixaController {
     return this.service.historicoDaRua(caixaId);
   }
 
-  @Post('dinheiro-na-rua/:id/baixar')
-  @HttpCode(200)
-  baixar(
+  /** Um acerto da conta: nota comprovada, troco devolvido ou mais dinheiro. */
+  @Post('dinheiro-na-rua/:id/movimento')
+  @HttpCode(201)
+  lancarMovimento(
     @Param('id') id: string,
-    @Body() dto: BaixarDinheiroDto,
+    @Body() dto: MovimentoDaRuaDto,
     @Req() req: Request,
   ) {
-    return this.service.baixar(id, dto, usuarioId(req), usuarioNome(req));
+    return this.service.lancarMovimento(
+      id,
+      dto,
+      usuarioId(req),
+      usuarioNome(req),
+    );
   }
 
-  @Get('dinheiro-na-rua/:id/nota')
-  notaDaRua(@Param('id') id: string) {
-    return this.service.notaDaRua(id);
+  /** A foto da nota de um lançamento, sob demanda. */
+  @Get('movimentos-da-rua/:id/nota')
+  notaDoMovimento(@Param('id') id: string) {
+    return this.service.notaDoMovimento(id);
+  }
+
+  /** Desfaz o último lançamento de uma conta — o que ainda não virou título. */
+  @Delete('movimentos-da-rua/:id')
+  @HttpCode(200)
+  async desfazerMovimento(@Param('id') id: string) {
+    await this.service.desfazerMovimento(id);
+    return { ok: true };
   }
 
   @Delete('dinheiro-na-rua/:id')

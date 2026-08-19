@@ -1297,28 +1297,52 @@ export interface LancamentoDoCaixa {
   observacao: string | null;
 }
 
-/** Dinheiro que saiu com alguém e ainda não prestou contas. */
-export interface DinheiroNaRua {
+/** O que se faz com o dinheiro que está na rua. */
+export type TipoMovimentoDaRua = 'NOTA' | 'TROCO' | 'REFORCO';
+
+/** Um acerto da conta de quem está com dinheiro da empresa. */
+export interface MovimentoDaRua {
   id: string;
-  caixaId: number;
-  pessoa: string;
+  entregaId: string;
+  tipo: TipoMovimentoDaRua;
   valor: string;
-  entregueEm: string;
-  motivo: string | null;
-  baixadoEm: string | null;
-  valorGasto: string | null;
-  troco: string | null;
+  /** Dia em que aconteceu — não o dia em que foi digitado. */
+  data: string;
   observacao: string | null;
   temNota: boolean;
-  /** Título gerado no IXC pela despesa que a prestação lançou. */
+  /** Título gerado no IXC pela despesa desta nota. */
   idFnApagarIxc: number | null;
+  contaPagarId: string | null;
   fornecedorNome: string | null;
   /** Dia em que o IXC deu a saída do gasto no caixa. */
   gastoPagoEm: string | null;
   createdAt: string;
 }
 
-/** O que aconteceu com a conta a pagar que a prestação lançou. */
+/**
+ * A conta de quem levou dinheiro da gaveta.
+ *
+ * Ela raramente se resolve de uma vez: leva 100, traz nota de 50, fica com 50
+ * para a próxima compra. O `saldo` é o que ainda está com a pessoa.
+ */
+export interface ContaDaRua {
+  id: string;
+  caixaId: number;
+  pessoa: string;
+  /** A entrega que abriu a conta. */
+  valor: string;
+  entregueEm: string;
+  motivo: string | null;
+  /** Preenchido quando o saldo zerou. */
+  baixadoEm: string | null;
+  observacao: string | null;
+  /** Quanto ainda está com a pessoa: entrega + reforços − notas − trocos. */
+  saldo: number;
+  movimentos: MovimentoDaRua[];
+  createdAt: string;
+}
+
+/** O que aconteceu com a conta a pagar que a nota lançou. */
 export interface DespesaDaPrestacao {
   contaPagarId: string;
   idFnApagarIxc: number | null;
@@ -1330,8 +1354,13 @@ export interface DespesaDaPrestacao {
   avisos: string[];
 }
 
-/** A prestação de contas como o servidor a devolve. */
-export interface PrestacaoFeita extends DinheiroNaRua {
+/** O acerto como o servidor o devolve. */
+export interface MovimentoLancado {
+  movimento: MovimentoDaRua;
+  /** Quanto sobrou com a pessoa depois deste lançamento. */
+  saldo: number;
+  /** O saldo zerou e a conta se fechou. */
+  acertada: boolean;
   despesa: DespesaDaPrestacao | null;
 }
 
@@ -1360,7 +1389,7 @@ export interface ExtratoDoCaixa {
   de: string;
   ate: string;
   lancamentos: LancamentoDoCaixa[];
-  naRua: DinheiroNaRua[];
+  naRua: ContaDaRua[];
   resumo: {
     entradas: number;
     saidas: number;
