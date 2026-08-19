@@ -91,7 +91,17 @@ export class FechamentoCaixaService {
 
   async extrato(caixaId: number, de: string, ate: string) {
     const inicio = dataDoDia(de, 'inicial');
-    const fim = dataDoDia(ate, 'final');
+    /*
+     * O período vai até o fim do último dia, e não até a meia-noite dele.
+     *
+     * `dataDoDia` devolve 00:00, que é o **começo** do dia. Usar isso como fim
+     * fazia o recorte de hoje ser o intervalo vazio [00:00, 00:00]: uma saída
+     * anotada às duas da tarde ficava de fora, e a gaveta não se mexia com ela
+     * — o dinheiro tinha saído e a tela dizia que não. Só o que nasce com hora
+     * zerada (os fechamentos, os acertos com data escolhida) escapava disso,
+     * que é por que o defeito demorou a aparecer.
+     */
+    const fim = fimDoDia(dataDoDia(ate, 'final'));
     if (inicio > fim) {
       throw new BadRequestException('A data inicial é depois da final.');
     }
@@ -796,7 +806,9 @@ export class FechamentoCaixaService {
         caixaId: dados.caixaId,
         caixaNome: extrato.caixa.nome,
         de: dataDoDia(dados.de, 'inicial'),
-        ate: dataDoDia(dados.ate, 'final'),
+        // Guardado como o fim do dia, pelo mesmo motivo: um fechamento "até
+        // 18/08" termina quando o dia 18 acaba, não quando ele começa.
+        ate: fimDoDia(dataDoDia(dados.ate, 'final')),
         totalEntradas: new Prisma.Decimal(extrato.resumo.entradas),
         totalSaidas: new Prisma.Decimal(extrato.resumo.saidas),
         lancamentos: extrato.resumo.qtdSaidas,
@@ -939,6 +951,13 @@ function dataDoDia(valor: string, qual: string): Date {
     throw new BadRequestException(`A data ${qual} não existe no calendário.`);
   }
   return d;
+}
+
+/** O último instante do dia de uma data. */
+function fimDoDia(d: Date): Date {
+  const f = new Date(d);
+  f.setHours(23, 59, 59, 999);
+  return f;
 }
 
 /** "AAAA-MM-DD" para o dia seguinte, também em "AAAA-MM-DD". */

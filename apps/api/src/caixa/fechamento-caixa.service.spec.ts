@@ -263,6 +263,39 @@ describe('extrato do caixa', () => {
     expect(e.resumo.fechadoAte).toBeNull();
   });
 
+  /*
+   * O recorte de um dia só era o intervalo vazio [00:00, 00:00]: uma saída
+   * anotada às duas da tarde ficava de fora, e a gaveta nao se mexia com ela.
+   * Só o que nasce com hora zerada escapava, que é por que demorou a aparecer.
+   */
+  it('o período vai até o fim do último dia, e não até a meia-noite dele', async () => {
+    const { service, prisma } = montarServico();
+
+    await service.extrato(7, '2026-08-19', '2026-08-19');
+
+    // A segunda chamada é a das entregas do período.
+    const [consulta] = prisma.dinheiroNaRua.findMany.mock.calls[1] as Array<{
+      where: { entregueEm: { gte: Date; lte: Date } };
+    }>;
+    expect(consulta.where.entregueEm.gte).toEqual(new Date(2026, 7, 19));
+    expect(consulta.where.entregueEm.lte).toEqual(
+      new Date(2026, 7, 19, 23, 59, 59, 999),
+    );
+  });
+
+  it('uma entrega da tarde de hoje entra no período de hoje', async () => {
+    const { service } = montarServico({
+      anterior: { saldoFinal: 1000 },
+      // É assim que ela nasce: `new Date()` na hora em que foi anotada.
+      entregasDoPeriodo: [{ valor: 50 }],
+    });
+
+    const e = await service.extrato(7, '2026-08-19', '2026-08-19');
+
+    expect(e.resumo.entregueNoPeriodo).toBe(50);
+    expect(e.resumo.saldoEsperado).toBe(950);
+  });
+
   it('recusa período de trás para frente', async () => {
     const { service } = montarServico();
     await expect(service.extrato(7, '2026-08-31', '2026-08-01')).rejects.toThrow(
