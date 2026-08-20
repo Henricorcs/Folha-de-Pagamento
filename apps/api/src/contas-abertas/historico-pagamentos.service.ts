@@ -176,6 +176,16 @@ export class HistoricoPagamentosService {
       if (!pagamento) continue;
       idsLidos.add(pagamento.idFnApagar);
 
+      /*
+       * O título que já traz o dia do débito não precisa da linha de baixa: o
+       * dia que alguém informou ao baixar está nele, e é esse. Poupa a leitura
+       * das baixas para quem realmente depende dela.
+       */
+      if (pagamento.fonteDaData === 'debito') {
+        this.guardar(pagamento, periodo, pagamentos, contagem);
+        continue;
+      }
+
       const baixa = baixas.porTitulo.get(pagamento.idFnApagar);
       if (baixa) {
         aplicarBaixa(pagamento, baixa);

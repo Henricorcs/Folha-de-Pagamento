@@ -117,7 +117,9 @@ export function DetalheDoPagamento({
                 ? `(informada na baixa${
                     pagamento.baixaNoIxc ? ` nº ${pagamento.baixaNoIxc}` : ''
                   })`
-                : `(${pagamento.campoDaBaixa} — o dia em que a baixa foi registrada)`}
+                : pagamento.fonteDaData === 'debito'
+                  ? `(${pagamento.campoDoDia} — o dia informado na baixa, que o IXC mostra como "Data pagamento")`
+                  : `(${pagamento.campoDoDia ?? pagamento.campoDaBaixa} — o dia em que a baixa foi registrada)`}
             </span>
           </Dado>
           {/* Só quando os dois dias diferem: repetir a mesma data em dois
@@ -333,25 +335,36 @@ export function PrazoDoPagamento({
     );
   }
   if (dias > 0) {
+    /*
+     * Só se acusa atraso com o dia do dinheiro na mão.
+     *
+     * Sem ele o que se tem é o dia em que a baixa foi registrada, e quem lança
+     * dias depois de pagar via um vermelho que não era dele — a tela dizia
+     * "pago 8 dias depois" de uma conta paga no vencimento. Nesse caso o selo
+     * continua aparecendo (o título pode ter atrasado mesmo), mas diz o que
+     * sabe: quem atrasou foi o lançamento.
+     */
+    const semODiaDoDinheiro = pagamento.fonteDaData === 'titulo';
     return (
       <Selo
         pequeno={pequeno}
-        tom="erro"
-        /*
-         * Sem a linha de baixa, o dia que se tem é o do registro — e quem lança
-         * dias depois de pagar vê atraso que não houve. O selo continua
-         * aparecendo (o título pode ter atrasado mesmo), mas diz em que dia ele
-         * está se baseando, para ninguém cobrar de fornecedor um atraso nosso.
-         */
+        tom={semODiaDoDinheiro ? 'neutro' : 'erro'}
         titulo={
-          pagamento.fonteDaData === 'titulo'
+          semODiaDoDinheiro
             ? 'Contado pelo dia em que a baixa foi registrada no IXC, que pode ' +
-              'ser depois do dia em que o dinheiro saiu — não achei a linha de ' +
-              'baixa deste título'
+              'ser depois do dia em que o dinheiro saiu — este título não traz ' +
+              'o dia do débito e não achei a linha de baixa dele. Pode ter sido ' +
+              'pago em dia'
             : undefined
         }
       >
-        {dias === 1 ? 'pago 1 dia depois' : `pago ${dias} dias depois`}
+        {semODiaDoDinheiro
+          ? dias === 1
+            ? 'lançado 1 dia depois'
+            : `lançado ${dias} dias depois`
+          : dias === 1
+            ? 'pago 1 dia depois'
+            : `pago ${dias} dias depois`}
       </Selo>
     );
   }

@@ -232,6 +232,67 @@ describe('ler um pagamento', () => {
 });
 
 /**
+ * O dia do dinheiro está no próprio título, e não era ele que se lia.
+ *
+ * `data_pagamento` é o dia em que a **baixa foi registrada** — a tela do IXC a
+ * mostra como "Data/hora baixa", com hora. O dia informado ao baixar fica em
+ * `debito_data`, na coluna que aquela tela chama de "Data pagamento".
+ *
+ * O caso real: título 37037, estacas de eucalipto, vencimento 10/08/2026, pago
+ * no dia e lançado aqui em 18/08 às 15:48. A tela dizia "pago 8 dias depois" de
+ * uma conta paga no vencimento — no IXC, ao lado, estava certo.
+ */
+describe('o dia do débito, que o título já traz', () => {
+  const lancadoOitoDiasDepois = pago({
+    data_vencimento: '10/08/2026',
+    data_pagamento: '18/08/2026 15:48:03',
+    debito_data: '10/08/2026',
+    valor: '19.500,00',
+    valor_total_pago: '19.500,00',
+  });
+
+  it('o pagamento é do dia do débito, não do dia do registro', () => {
+    const p = mapPagamento(lancadoOitoDiasDepois)!;
+
+    expect(p.pagoEm.toISOString().slice(0, 10)).toBe('2026-08-10');
+    expect(p.diasDeAtraso).toBe(0);
+    expect(p.fonteDaData).toBe('debito');
+    expect(p.campoDoDia).toBe('debito_data');
+  });
+
+  /* O dia do registro não se perde: é por ele que o título é achado na leitura
+     do IXC, e é ele que explica por que a conta apareceu naquele período. */
+  it('guarda à parte o dia em que a baixa foi registrada', () => {
+    const p = mapPagamento(lancadoOitoDiasDepois)!;
+    expect(p.registradoEm.toISOString().slice(0, 10)).toBe('2026-08-18');
+  });
+
+  it('sem o dia do débito, continua valendo o do registro', () => {
+    const p = mapPagamento(
+      pago({ data_vencimento: '10/08/2026', data_pagamento: '18/08/2026' }),
+    )!;
+
+    expect(p.pagoEm.toISOString().slice(0, 10)).toBe('2026-08-18');
+    expect(p.fonteDaData).toBe('titulo');
+    expect(p.campoDoDia).toBe('data_pagamento');
+    expect(p.diasDeAtraso).toBe(8);
+  });
+
+  /* Coluna vazia é coluna que não existe: `00/00/0000` é como o IXC escreve
+     "ainda não" na parcela que não foi paga. */
+  it('débito zerado não vira data de pagamento', () => {
+    const p = mapPagamento(
+      pago({ data_pagamento: '18/08/2026', debito_data: '00/00/0000' }),
+    )!;
+
+    expect(p.pagoEm.toISOString().slice(0, 10)).toBe('2026-08-18');
+    expect(p.fonteDaData).toBe('titulo');
+    // A ficha nomeia a coluna que respondeu, e não a que foi consultada.
+    expect(p.campoDoDia).toBe('data_pagamento');
+  });
+});
+
+/**
  * O caso que trouxe isto: uma compra vencida em 15/08 e paga no dia, lançada
  * aqui no dia 16. O IXC grava em `data_pagamento` o dia do registro, e a tela
  * dizia "pago 1 dia depois" de um pagamento feito no vencimento — cobrando de

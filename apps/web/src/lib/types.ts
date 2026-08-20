@@ -1222,16 +1222,19 @@ export interface PagamentoFeito {
   /** O dia em que a baixa foi registrada no IXC (a coluna `campoDaBaixa`) */
   registradoEm: string;
   /**
-   * De onde `pagoEm` saiu: `baixa` = o dia informado na linha de baixa, que é o
-   * que a aba "Pagamentos" do IXC mostra; `titulo` = o dia em que a baixa foi
-   * registrada, porque a linha dela não pôde ser lida. É o que separa "pagou
-   * atrasado" de "lançou atrasado".
+   * De onde `pagoEm` saiu: `debito` = o dia do débito, gravado no próprio
+   * título (o que a tela do IXC mostra como "Data pagamento"); `baixa` = o dia
+   * informado na linha de baixa, que é o que a aba "Pagamentos" do IXC mostra;
+   * `titulo` = o dia em que a baixa foi **registrada**, porque nenhum dos dois
+   * estava disponível. É o que separa "pagou atrasado" de "lançou atrasado".
    */
-  fonteDaData: 'baixa' | 'titulo';
+  fonteDaData: 'debito' | 'baixa' | 'titulo';
   /** O número da linha de baixa no IXC, quando ela foi lida */
   baixaNoIxc: number | null;
   /** A coluna do IXC de onde a data da baixa saiu — é por ela que se procura lá */
   campoDaBaixa: string;
+  /** A coluna que deu o dia do pagamento, quando ele veio do título */
+  campoDoDia: string | null;
   /** 0 = pagou no dia, positivo = atrasado, negativo = adiantado, null = sem vencimento */
   diasDeAtraso: number | null;
   formaPagamento: string | null;

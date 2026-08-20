@@ -66,12 +66,26 @@ export interface PagamentoFeito {
    */
   registradoEm: Date;
   /**
-   * De onde `pagoEm` saiu: `baixa` = o dia informado na linha de baixa;
-   * `titulo` = o dia em que a baixa foi registrada, porque a linha dela não
-   * pôde ser lida. A diferença é o que separa "pagou atrasado" de "lançou
-   * atrasado", e a tela precisa poder dizer qual das duas está mostrando.
+   * De onde `pagoEm` saiu:
+   *
+   * - `debito` = a coluna do próprio título com o dia do débito, que é o dia
+   *   informado na baixa (a tela do IXC a mostra como "Data pagamento");
+   * - `baixa` = o dia informado na linha de baixa, quando ela pôde ser lida;
+   * - `titulo` = o dia em que a baixa foi **registrada**, porque nenhum dos
+   *   dois estava disponível. Só neste caso o dia é uma aproximação.
+   *
+   * A diferença é o que separa "pagou atrasado" de "lançou atrasado", e a tela
+   * precisa poder dizer qual das duas está mostrando.
    */
-  fonteDaData: 'baixa' | 'titulo';
+  fonteDaData: 'debito' | 'baixa' | 'titulo';
+  /**
+   * A coluna do título de onde `pagoEm` saiu, quando saiu do título. Null
+   * quando veio da linha de baixa — ali quem identifica é o `baixaNoIxc`.
+   *
+   * Está na ficha do pagamento de propósito: é assim que quem discorda do que
+   * a tela mostra abre o título no IXC e compara coluna por coluna.
+   */
+  campoDoDia: string | null;
   /** O número da linha de baixa no IXC, quando ela foi lida */
   baixaNoIxc: number | null;
   /**
@@ -210,11 +224,28 @@ export function mapPagamento(
   if (motivoDeNaoSerPagamento(raw) !== null) return null;
 
   const campoDaBaixa = campoDeBaixa(raw)!;
-  const pagoEm = primeiraData(raw, [campoDaBaixa]);
+  const registradoEm = primeiraData(raw, [campoDaBaixa]);
   // A coluna tem conteúdo (foi ela que decidiu que há baixa), mas num formato
   // que não é data — "pago" gravado no lugar do dia, por exemplo. Sem dia não
   // dá para pôr o pagamento numa linha do tempo.
-  if (!pagoEm) return null;
+  if (!registradoEm) return null;
+
+  /*
+   * O dia em que o dinheiro saiu está no próprio título.
+   *
+   * `data_pagamento` guarda o dia em que a **baixa foi registrada** — a tela do
+   * IXC a mostra como "Data/hora baixa", com hora e tudo. O dia que alguém
+   * informou ao baixar fica em `debito_data`, que é o que aquela tela mostra na
+   * coluna "Data pagamento". No título 37037 desta base: baixa registrada em
+   * 18/08/2026 15:48, débito em 10/08/2026 — e era o 18 que chegava aqui,
+   * fazendo a tela dizer "pago 8 dias depois" de uma conta paga no vencimento.
+   *
+   * Vindo do título, não custa consulta nenhuma e não depende de achar a linha
+   * de baixa (que nem toda base devolve pelo webservice).
+   */
+  const campoDoDebito = campoDoDiaDoDebito(raw);
+  const doDebito = campoDoDebito ? primeiraData(raw, [campoDoDebito]) : null;
+  const pagoEm = doDebito ?? registradoEm;
 
   const vencimento = primeiraData(raw, [
     'data_vencimento',
@@ -260,14 +291,18 @@ export function mapPagamento(
     desconto,
     emissao: primeiraData(raw, ['data_emissao', 'data', 'emissao']),
     vencimento,
-    // O título só sabe quando a baixa foi registrada. Enquanto a linha de baixa
-    // não corrigir isto (`aplicarBaixa`), o dia do pagamento é esse — e a tela
-    // diz de onde ele veio, em vez de deixar parecer que é o dia do dinheiro.
+    // Sem o dia do débito, o que o título sabe é quando a baixa foi registrada.
+    // Enquanto a linha de baixa não corrigir isto (`aplicarBaixa`), o dia do
+    // pagamento é esse — e a tela diz de onde ele veio, em vez de deixar
+    // parecer que é o dia do dinheiro.
     pagoEm,
-    registradoEm: pagoEm,
-    fonteDaData: 'titulo',
+    registradoEm,
+    fonteDaData: doDebito ? 'debito' : 'titulo',
     baixaNoIxc: null,
     campoDaBaixa,
+    // A coluna que deu o dia, e não a que foi consultada: `debito_data` com
+    // conteúdo ilegível não pode aparecer na ficha como se tivesse respondido.
+    campoDoDia: doDebito ? campoDoDebito : campoDaBaixa,
     diasDeAtraso: vencimento === null ? null : diasEntre(vencimento, pagoEm),
     formaPagamento: primeiroTexto(raw, [
       'tipo_pagamento',
@@ -312,6 +347,23 @@ export function mapPagamento(
 }
 
 /**
+ * As colunas do título com o dia do débito — o dia em que o dinheiro saiu.
+ *
+ * Lista fechada, como as de baixa e cancelamento: aqui um campo escolhido de
+ * mais poria no pagamento uma data que não é a dele, e data errada num
+ * pagamento que existe é o defeito mais caro desta tela.
+ */
+const CAMPOS_DO_DIA_DO_DEBITO = ['debito_data'] as const;
+
+/** A coluna que traz o dia do débito, se alguma delas vier preenchida. */
+function campoDoDiaDoDebito(raw: Record<string, unknown>): string | null {
+  for (const campo of CAMPOS_DO_DIA_DO_DEBITO) {
+    if (temValorDeVerdade(raw[campo])) return campo;
+  }
+  return null;
+}
+
+/**
  * Põe no pagamento o dia que a baixa informa — o dia em que o dinheiro saiu.
  *
  * É a correção que dá nome a esta tela. O título guarda o dia em que a baixa foi
@@ -331,6 +383,7 @@ export function aplicarBaixa(
   pagamento.pagoEm = baixa.data;
   pagamento.fonteDaData = 'baixa';
   pagamento.baixaNoIxc = baixa.id;
+  pagamento.campoDoDia = null;
   pagamento.diasDeAtraso =
     pagamento.vencimento === null
       ? null
