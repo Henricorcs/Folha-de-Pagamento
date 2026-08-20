@@ -7,6 +7,7 @@ import {
   CabecalhoPagina,
   CampoDinheiro,
   Carregando,
+  FotoAmpliada,
   Indicador,
   Pagina,
   Selo,
@@ -1364,6 +1365,7 @@ function UmaFoto({
   total: number;
   onApagar?: () => void;
 }) {
+  const [ampliada, setAmpliada] = useState(false);
   const foto = useQuery({
     queryKey: ['caixa', 'foto', fotoId],
     queryFn: async () =>
@@ -1385,13 +1387,28 @@ function UmaFoto({
       {foto.isLoading ? (
         <div className="h-40 w-40 animate-pulse rounded-xl border border-tinta-200 bg-tinta-100" />
       ) : foto.data?.foto ? (
-        <a href={foto.data.foto} target="_blank" rel="noreferrer">
-          <img
-            src={foto.data.foto}
-            alt={`Nota ${numero} de ${total}`}
-            className="max-h-64 rounded-xl border border-tinta-200"
-          />
-        </a>
+        <>
+          {/* A miniatura é o atalho; o que vale é o que ela abre. */}
+          <button
+            type="button"
+            onClick={() => setAmpliada(true)}
+            title="Ver em tela cheia"
+            className="cursor-zoom-in"
+          >
+            <img
+              src={foto.data.foto}
+              alt={`Nota ${numero} de ${total}`}
+              className="max-h-64 rounded-xl border border-tinta-200"
+            />
+          </button>
+          {ampliada && (
+            <FotoAmpliada
+              src={foto.data.foto}
+              titulo={`Nota ${numero} de ${total}`}
+              onFechar={() => setAmpliada(false)}
+            />
+          )}
+        </>
       ) : (
         <p className="ajuda">A foto não está mais aqui.</p>
       )}
@@ -1672,6 +1689,8 @@ function AcertarConta({
   /* Várias: uma nota nem sempre cabe numa foto só — cupom comprido, verso
      escrito, a foto tremida que pede a segunda tentativa. */
   const [fotos, setFotos] = useState<string[]>([]);
+  /** Qual das fotos recém-tiradas está aberta em tela cheia. */
+  const [ampliada, setAmpliada] = useState<number | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
   // A despesa que a nota vira no IXC.
@@ -1931,11 +1950,20 @@ function AcertarConta({
             <div className="flex flex-wrap items-center gap-2">
               {fotos.map((f, i) => (
                 <div key={f.slice(-32) + i} className="relative">
-                  <img
-                    src={f}
-                    alt={`Nota ${i + 1}`}
-                    className="h-[42px] w-16 rounded-lg border border-tinta-200 object-cover"
-                  />
+                  {/* Antes de anexar, ver se a foto saiu legível — a
+                      miniatura é cortada e pequena demais para dizer. */}
+                  <button
+                    type="button"
+                    onClick={() => setAmpliada(i)}
+                    title="Ver em tela cheia"
+                    className="block cursor-zoom-in"
+                  >
+                    <img
+                      src={f}
+                      alt={`Nota ${i + 1}`}
+                      className="h-[42px] w-16 rounded-lg border border-tinta-200 object-cover"
+                    />
+                  </button>
                   <button
                     type="button"
                     onClick={() => setFotos((atual) => atual.filter((_, j) => j !== i))}
@@ -1944,6 +1972,13 @@ function AcertarConta({
                   >
                     ×
                   </button>
+                  {ampliada === i && (
+                    <FotoAmpliada
+                      src={f}
+                      titulo={`Nota ${i + 1} de ${fotos.length}`}
+                      onFechar={() => setAmpliada(null)}
+                    />
+                  )}
                 </div>
               ))}
               <label className="btn btn-p btn-neutro w-fit cursor-pointer">

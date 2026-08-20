@@ -5,6 +5,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { formatNumeroBR } from '../lib/format';
 
 /**
@@ -264,6 +265,107 @@ export function Janela({
         <div className="px-5 py-5 sm:px-6">{children}</div>
       </div>
     </div>
+  );
+}
+
+/**
+ * A foto de uma nota, do tamanho da tela.
+ *
+ * A miniatura não serve para o que ela é: um recibo escrito à mão, com valor
+ * e assinatura, que alguém precisa **ler** para dar a saída por conferida.
+ * Antes o caminho para vê-la inteira era um link para a própria imagem — e a
+ * imagem é um `data:` de meio megabyte, endereço que o Chrome recusa abrir na
+ * barra desde 2018. A aba abria em branco, com o base64 no lugar do endereço,
+ * e a nota continuava do tamanho de um selo.
+ *
+ * Aqui a imagem não vai a lugar nenhum: ela cresce dentro da página. Clicar
+ * alterna entre caber na tela e o tamanho de verdade — foto de celular tem
+ * mais pixels que o monitor, e é dessa sobra que sai a letra miúda do papel.
+ */
+export function FotoAmpliada({
+  src,
+  titulo,
+  onFechar,
+}: {
+  src: string;
+  titulo: string;
+  onFechar: () => void;
+}) {
+  const [inteira, setInteira] = useState(false);
+
+  useEffect(() => {
+    const aoTeclar = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onFechar();
+    };
+    window.addEventListener('keydown', aoTeclar);
+    // Rolar a página atrás tira do lugar a lista que se estava conferindo.
+    const overflowAnterior = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', aoTeclar);
+      document.body.style.overflow = overflowAnterior;
+    };
+  }, [onFechar]);
+
+  /*
+   * Vai pendurada no `body`, e não onde foi escrita.
+   *
+   * `position: fixed` mede a partir da tela — menos quando algum ancestral
+   * tem `transform`, que é o caso: o cartão da conferência entra com a
+   * animação `surgir`, e ela deixa lá uma matriz. Escrita no lugar, a tela
+   * cheia ficava do tamanho do cartão (974 x 535 numa tela de 1280 x 720) —
+   * a foto crescia um pouco e continuava ilegível.
+   */
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex flex-col bg-barra/95 p-3 sm:p-4">
+      <div className="flex items-center justify-between gap-3 pb-3">
+        <span className="text-sm font-semibold text-white">{titulo}</span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setInteira((v) => !v)}
+            className="rounded-lg border border-white/20 px-3 py-1.5 text-xs font-semibold text-white/80 transition hover:bg-white/10"
+          >
+            {inteira ? 'Caber na tela' : 'Tamanho real'}
+          </button>
+          <button
+            type="button"
+            onClick={onFechar}
+            className="rounded-lg border border-white/20 px-3 py-1.5 text-xs font-semibold text-white/80 transition hover:bg-white/10"
+          >
+            Fechar
+          </button>
+        </div>
+      </div>
+
+      {/*
+        Clicar no fundo fecha — ao contrário da `Janela`, aqui não há trabalho
+        a perder: é uma foto sendo olhada, e quem abriu para ler sai pelo
+        mesmo gesto com que entrou.
+      */}
+      <div
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onFechar();
+        }}
+        className={`flex-1 rounded-2xl bg-black/40 ${
+          inteira
+            ? 'overflow-auto rolagem-fina p-2'
+            : 'flex items-center justify-center overflow-hidden p-2'
+        }`}
+      >
+        <img
+          src={src}
+          alt={titulo}
+          onClick={() => setInteira((v) => !v)}
+          className={
+            inteira
+              ? 'max-w-none cursor-zoom-out rounded-lg'
+              : 'max-h-full max-w-full cursor-zoom-in rounded-lg object-contain'
+          }
+        />
+      </div>
+    </div>,
+    document.body,
   );
 }
 
