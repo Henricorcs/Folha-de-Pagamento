@@ -605,7 +605,6 @@ function Conferencia({
           */}
           {(revisados.length > 0 || qtdSaidas === 0) && (
             <Fechar
-              caixaId={caixaId}
               faltam={faltam}
               naRua={resumo.naRua}
               semSaidas={qtdSaidas === 0}
@@ -2331,7 +2330,6 @@ function AcertarConta({
 }
 
 function Fechar({
-  caixaId,
   faltam,
   naRua,
   semSaidas,
@@ -2343,7 +2341,6 @@ function Fechar({
   pendente,
   onFechar,
 }: {
-  caixaId: number;
   faltam: number;
   naRua: number;
   /** Período sem saída nenhuma: não há o que conferir, e ainda assim fecha. */
@@ -2365,7 +2362,6 @@ function Fechar({
     saldoContado?: number;
   }) => void;
 }) {
-  const [contando, setContando] = useState(false);
   const [observacao, setObservacao] = useState('');
   const [saldoInicial, setSaldoInicial] = useState('');
   const [saldoContado, setSaldoContado] = useState('');
@@ -2460,29 +2456,8 @@ function Fechar({
         <label className="rotulo" htmlFor="saldo-contado">
           Quanto há na gaveta agora, <span className="text-tinta-800">contado</span>
         </label>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="w-full max-w-xs">
-            <CampoDinheiro valor={saldoContado} onChange={setSaldoContado} />
-          </div>
-          {/* O mesmo contador da barra de cima, com a saída ligada neste
-              campo: quem está com o maço na mão não tem por que somar de
-              cabeça só para digitar o resultado. */}
-          <button
-            type="button"
-            onClick={() => setContando(true)}
-            className="btn btn-p btn-neutro gap-1.5"
-          >
-            <IconeCalculo className="h-4 w-4 text-amber-500" />
-            Contar cédula por cédula
-          </button>
-          {contando && (
-            <CalculadoraDaGaveta
-              caixaId={caixaId}
-              esperado={saldoEsperado}
-              onUsar={(total) => setSaldoContado(total.toFixed(2))}
-              onFechar={() => setContando(false)}
-            />
-          )}
+        <div className="max-w-xs">
+          <CampoDinheiro valor={saldoContado} onChange={setSaldoContado} />
         </div>
         {diferenca === null ? (
           <p className="ajuda">

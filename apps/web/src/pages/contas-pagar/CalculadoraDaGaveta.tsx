@@ -2,9 +2,15 @@ import { useEffect, useState } from 'react';
 import { Janela } from '../../components/ui';
 import { formatBRL } from '../../lib/format';
 
-/** O que circula: cédulas de 200 a 2, moedas de 1 real a 1 centavo. */
+/**
+ * O que circula: cédulas de 200 a 2, moedas de 1 real a 5 centavos.
+ *
+ * A de 1 centavo não entra. Ela ainda é moeda legal, mas não se cunha desde
+ * 2005 e não aparece numa gaveta de provedor — e uma linha que fica sempre em
+ * zero só atrapalha quem está descendo a lista com o dinheiro na mão.
+ */
 const CEDULAS = [200, 100, 50, 20, 10, 5, 2];
-const MOEDAS = [1, 0.5, 0.25, 0.1, 0.05, 0.01];
+const MOEDAS = [1, 0.5, 0.25, 0.1, 0.05];
 
 /** Quantas de cada valor, guardado pelo valor em centavos. */
 type Contagem = Record<string, string>;
@@ -25,14 +31,14 @@ type Contagem = Record<string, string>;
 export function CalculadoraDaGaveta({
   caixaId,
   esperado,
-  onUsar,
   onFechar,
 }: {
   caixaId: number;
-  /** O que a gaveta deveria ter. Null quando ainda não há de onde partir. */
+  /**
+   * O que a gaveta deveria ter, à vista de quem conta. Só isso: a conta daqui
+   * não vai para lugar nenhum, e nada aqui julga o que a pessoa contou.
+   */
   esperado: number | null;
-  /** Leva o total para o campo da contagem, no fechamento. */
-  onUsar?: (total: number) => void;
   onFechar: () => void;
 }) {
   const [contagem, setContagem] = useState<Contagem>(() =>
@@ -56,7 +62,6 @@ export function CalculadoraDaGaveta({
   const emCedulas = totalDe(CEDULAS);
   const emMoedas = totalDe(MOEDAS);
   const total = arredondar(emCedulas + emMoedas);
-  const diferenca = esperado === null ? null : arredondar(total - esperado);
   const contou = Object.values(contagem).some((q) => Number(q) > 0);
 
   return (
@@ -78,40 +83,26 @@ export function CalculadoraDaGaveta({
         />
       </div>
 
-      <div className="mt-6 rounded-xl border border-tinta-200 bg-tinta-50/60 px-4 py-3">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+      {/*
+        Os dois números, um ao lado do outro, e nenhuma opinião sobre eles.
+        
+        Isto é papel de rascunho: serve para contar o maço sem somar de cabeça
+        e para saber o que há de cada valor na hora de dar troco. O saldo
+        esperado aparece porque é o número que se quer ter em vista enquanto se
+        conta — não porque a contagem tenha de bater com ele aqui. Quem decide
+        se bate é o fechamento, no lugar dele, com a contagem que a pessoa
+        escrever lá.
+      */}
+      <div className="mt-6 flex flex-wrap items-end justify-between gap-x-6 gap-y-3 rounded-xl border border-tinta-200 bg-tinta-50/60 px-4 py-3">
+        <div>
           <span className="rotulo mb-0">Contado na gaveta</span>
-          <span className="valor text-xl">{formatBRL(total)}</span>
+          <p className="valor text-xl">{formatBRL(total)}</p>
         </div>
-
-        {/*
-          A distância até o esperado, na hora — e não só depois de fechar.
-          Quem está com o dinheiro na mão ainda pode recontar; quem já assinou
-          o fechamento, não.
-        */}
-        {esperado === null ? (
-          <p className="ajuda mt-1">
-            Este caixa ainda não tem saldo esperado — sem um fechamento
-            anterior, não há com o que comparar. O total acima vale como a
-            contagem de partida.
-          </p>
-        ) : !contou ? (
-          <p className="ajuda mt-1">
-            A gaveta deveria ter {formatBRL(esperado)}. Diga quantas de cada e o
-            resto sai daqui.
-          </p>
-        ) : Math.abs(diferenca ?? 0) < 0.005 ? (
-          <p className="mt-1 text-sm text-emerald-600">
-            Bate com o esperado, {formatBRL(esperado)}.
-          </p>
-        ) : (
-          <p className="mt-1 text-sm text-amber-600">
-            {(diferenca ?? 0) > 0 ? 'Sobra' : 'Falta'}{' '}
-            <span className="valor">
-              {formatBRL(Math.abs(diferenca ?? 0))}
-            </span>{' '}
-            em relação aos {formatBRL(esperado)} que a soma esperava.
-          </p>
+        {esperado !== null && (
+          <div className="text-right">
+            <span className="rotulo mb-0">A gaveta deve ter</span>
+            <p className="num text-lg text-tinta-500">{formatBRL(esperado)}</p>
+          </div>
         )}
       </div>
 
@@ -124,20 +115,6 @@ export function CalculadoraDaGaveta({
         >
           Limpar
         </button>
-        {onUsar && (
-          <button
-            type="button"
-            onClick={() => {
-              onUsar(total);
-              onFechar();
-            }}
-            disabled={!contou}
-            className="btn btn-acao"
-            title="Escreve este total no campo da contagem do fechamento"
-          >
-            Usar como contagem
-          </button>
-        )}
       </div>
     </Janela>
   );
@@ -167,6 +144,22 @@ function Grupo({
             valor={v}
             qtd={contagem[chave(v)] ?? ''}
             onQtd={(q) => onMudar((atual) => ({ ...atual, [chave(v)]: q }))}
+            /*
+             * O passo lê a quantidade de dentro do estado, e não a que a linha
+             * recebeu: dois cliques seguidos no "+" acontecem antes de a tela
+             * redesenhar, e os dois partiriam do mesmo número — contando um só.
+             */
+            onPasso={(quantos) =>
+              onMudar((atual) => ({
+                ...atual,
+                [chave(v)]: String(
+                  Math.min(
+                    MAX_POR_VALOR,
+                    Math.max(0, (Number(atual[chave(v)]) || 0) + quantos),
+                  ),
+                ),
+              }))
+            }
           />
         ))}
       </div>
@@ -178,23 +171,40 @@ function Grupo({
   );
 }
 
+/** Nunca menos que nenhuma, nunca mais que os quatro dígitos do campo. */
+const MAX_POR_VALOR = 9999;
+
 function Linha({
   valor,
   qtd,
   onQtd,
+  onPasso,
 }: {
   valor: number;
   qtd: string;
   onQtd: (q: string) => void;
+  onPasso: (quantos: number) => void;
 }) {
-  const subtotal = valor * (Number(qtd) || 0);
+  const quantas = Number(qtd) || 0;
+  const subtotal = valor * quantas;
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1.5">
       <span className="w-[74px] shrink-0 text-sm font-medium text-tinta-700">
         {formatBRL(valor)}
       </span>
-      <span className="text-tinta-400">×</span>
+      {/*
+        Contar é somar de um em um, e é assim que a mão faz: separa as notas de
+        cinquenta em maços e vai batendo. Digitar o número serve para quem já
+        contou o maço; o mais e o menos servem para quem está contando agora, e
+        para corrigir sem apagar o campo inteiro.
+      */}
+      <Passo
+        sinal="−"
+        rotulo={`Menos uma de ${formatBRL(valor)}`}
+        onClick={() => onPasso(-1)}
+        disabled={quantas === 0}
+      />
       <input
         // Só quantidade inteira entra, e o celular abre o teclado numérico.
         inputMode="numeric"
@@ -202,12 +212,44 @@ function Linha({
         onChange={(e) => onQtd(e.target.value.replace(/\D/g, '').slice(0, 4))}
         placeholder="0"
         aria-label={`Quantas de ${formatBRL(valor)}`}
-        className="campo w-16 py-1.5 text-right"
+        className="campo w-14 px-1 py-1.5 text-center"
+      />
+      <Passo
+        sinal="+"
+        rotulo={`Mais uma de ${formatBRL(valor)}`}
+        onClick={() => onPasso(1)}
+        disabled={quantas >= MAX_POR_VALOR}
       />
       <span className="num ml-auto text-sm text-tinta-500">
         {subtotal ? formatBRL(subtotal) : '—'}
       </span>
     </div>
+  );
+}
+
+/** Uma nota a mais ou a menos, do tamanho de um dedo. */
+function Passo({
+  sinal,
+  rotulo,
+  onClick,
+  disabled,
+}: {
+  sinal: '+' | '−';
+  rotulo: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={rotulo}
+      title={rotulo}
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-tinta-200 text-base leading-none text-tinta-600 transition hover:border-tinta-300 hover:bg-tinta-100 hover:text-tinta-900 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+    >
+      {sinal}
+    </button>
   );
 }
 
