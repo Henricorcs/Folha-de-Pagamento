@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { IconeCalculo } from '../../components/icones';
 import { SeletorDeCategoria } from '../../components/SeletorDeCategoria';
 import {
   Aviso,
@@ -13,6 +14,7 @@ import {
   Selo,
   Vazio,
 } from '../../components/ui';
+import { CalculadoraDaGaveta } from './CalculadoraDaGaveta';
 import { api, mensagemErro } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { reduzirFoto } from '../../lib/foto';
@@ -219,6 +221,8 @@ function Conferencia({
   const { usuario } = useAuth();
   const [erro, setErro] = useState<string | null>(null);
   const [aba, setAba] = useState<AbaDoCaixa>('caixa');
+  /** A calculadora da gaveta, aberta por cima de qualquer aba. */
+  const [contando, setContando] = useState(false);
   /*
    * Dar por conferido é de ADMIN.
    *
@@ -394,7 +398,33 @@ function Conferencia({
           { id: 'revisados', rotulo: 'Revisados', selo: revisados.length || undefined },
           { id: 'historico', rotulo: 'Histórico' },
         ]}
+        acao={
+          /*
+           * Fora das abas, e não dentro de uma delas: contar a gaveta e dar
+           * troco acontecem a qualquer hora do dia — no meio da conferência,
+           * antes de fechar, ou sem nada disso. O ícone vem em âmbar, que
+           * nesta tela não é usado em mais nada: é o botão que se procura com
+           * o dinheiro na mão.
+           */
+          <button
+            type="button"
+            onClick={() => setContando(true)}
+            className="btn btn-p btn-neutro gap-1.5"
+            title="Conta as cédulas e moedas e compara com o esperado"
+          >
+            <IconeCalculo className="h-4 w-4 text-amber-500" />
+            Contar a gaveta
+          </button>
+        }
       />
+
+      {contando && (
+        <CalculadoraDaGaveta
+          caixaId={caixaId}
+          esperado={resumo.saldoEsperado}
+          onFechar={() => setContando(false)}
+        />
+      )}
 
       {erro && (
         <div className="mb-4">
@@ -575,6 +605,7 @@ function Conferencia({
           */}
           {(revisados.length > 0 || qtdSaidas === 0) && (
             <Fechar
+              caixaId={caixaId}
               faltam={faltam}
               naRua={resumo.naRua}
               semSaidas={qtdSaidas === 0}
@@ -600,13 +631,16 @@ function Abas<T extends string>({
   atual,
   abas,
   onTrocar,
+  acao,
 }: {
   atual: T;
   abas: Array<{ id: T; rotulo: string; selo?: number }>;
   onTrocar: (id: T) => void;
+  /** O canto direito da barra, para o que serve à tela toda. */
+  acao?: ReactNode;
 }) {
   return (
-    <div className="surgir mb-5 flex flex-wrap gap-1 border-b border-tinta-200">
+    <div className="surgir mb-5 flex flex-wrap items-center gap-1 border-b border-tinta-200">
       {abas.map((a) => (
         <button
           key={a.id}
@@ -627,6 +661,7 @@ function Abas<T extends string>({
           )}
         </button>
       ))}
+      {acao && <div className="mb-1 ml-auto pl-2">{acao}</div>}
     </div>
   );
 }
@@ -2296,6 +2331,7 @@ function AcertarConta({
 }
 
 function Fechar({
+  caixaId,
   faltam,
   naRua,
   semSaidas,
@@ -2307,6 +2343,7 @@ function Fechar({
   pendente,
   onFechar,
 }: {
+  caixaId: number;
   faltam: number;
   naRua: number;
   /** Período sem saída nenhuma: não há o que conferir, e ainda assim fecha. */
@@ -2328,6 +2365,7 @@ function Fechar({
     saldoContado?: number;
   }) => void;
 }) {
+  const [contando, setContando] = useState(false);
   const [observacao, setObservacao] = useState('');
   const [saldoInicial, setSaldoInicial] = useState('');
   const [saldoContado, setSaldoContado] = useState('');
@@ -2422,8 +2460,29 @@ function Fechar({
         <label className="rotulo" htmlFor="saldo-contado">
           Quanto há na gaveta agora, <span className="text-tinta-800">contado</span>
         </label>
-        <div className="max-w-xs">
-          <CampoDinheiro valor={saldoContado} onChange={setSaldoContado} />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="w-full max-w-xs">
+            <CampoDinheiro valor={saldoContado} onChange={setSaldoContado} />
+          </div>
+          {/* O mesmo contador da barra de cima, com a saída ligada neste
+              campo: quem está com o maço na mão não tem por que somar de
+              cabeça só para digitar o resultado. */}
+          <button
+            type="button"
+            onClick={() => setContando(true)}
+            className="btn btn-p btn-neutro gap-1.5"
+          >
+            <IconeCalculo className="h-4 w-4 text-amber-500" />
+            Contar cédula por cédula
+          </button>
+          {contando && (
+            <CalculadoraDaGaveta
+              caixaId={caixaId}
+              esperado={saldoEsperado}
+              onUsar={(total) => setSaldoContado(total.toFixed(2))}
+              onFechar={() => setContando(false)}
+            />
+          )}
         </div>
         {diferenca === null ? (
           <p className="ajuda">
