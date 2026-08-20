@@ -8,7 +8,9 @@ import {
   IconeEtiqueta,
   IconeGuia,
   IconeMoeda,
+  IconeDocumento,
   IconePainel,
+  IconePasta,
   IconePessoas,
   IconeRecibo,
   IconeSaida,
@@ -16,6 +18,7 @@ import {
   IconeTransferencia,
   type Icone,
 } from '../components/icones';
+import type { PerfilUsuario } from './types';
 
 /**
  * O caminho é relativo à base do módulo: dentro de uma rota aninhada o
@@ -40,6 +43,14 @@ export interface Modulo {
   icone: Icone;
   /** Cor do quadrado do ícone no cartão: cada módulo tem a sua. */
   tom: string;
+  /**
+   * Quem enxerga o módulo. Vazio = todo mundo que está logado.
+   *
+   * Não é a proteção — quem recusa de verdade é a API, que exige o perfil em
+   * cada rota. Aqui o módulo some da tela para ninguém entrar num lugar onde
+   * cada clique vai devolver "seu perfil não tem acesso".
+   */
+  papeis?: PerfilUsuario[];
   menu: ItemMenu[];
 }
 
@@ -108,11 +119,40 @@ const contasPagar: Modulo = {
   ],
 };
 
+/**
+ * RH — a estante de documentos da casa.
+ *
+ * Contrato, exame, advertência, o recibo de pagamento de cada mês. Só ADMIN e
+ * RH: é o único módulo em que a leitura já é assunto de perfil, porque o que
+ * está guardado aqui é a vida funcional das pessoas.
+ */
+const rh: Modulo = {
+  id: 'rh',
+  nome: 'RH',
+  descricao:
+    'A estante de documentos: a pasta de cada funcionário e a da empresa',
+  base: '/rh',
+  inicio: 'pastas',
+  icone: IconePasta,
+  tom: 'bg-amber-500/15 text-amber-300',
+  papeis: ['ADMIN', 'RH'],
+  menu: [
+    { to: 'pastas', label: 'Pastas', icone: IconePasta },
+    { to: 'recibos', label: 'Recibos da folha', icone: IconeDocumento },
+  ],
+};
+
 /** A ordem daqui é a ordem dos cartões na tela de módulos. */
-export const MODULOS: Modulo[] = [folha, contasPagar];
+export const MODULOS: Modulo[] = [folha, contasPagar, rh];
 
 export const MODULO_FOLHA = folha;
 export const MODULO_CONTAS_PAGAR = contasPagar;
+export const MODULO_RH = rh;
+
+/** Os módulos que este perfil enxerga. */
+export function modulosDoPerfil(papel?: PerfilUsuario): Modulo[] {
+  return MODULOS.filter((m) => !m.papeis || (papel && m.papeis.includes(papel)));
+}
 
 export function caminhoInicial(modulo: Modulo): string {
   return `${modulo.base}/${modulo.inicio}`;

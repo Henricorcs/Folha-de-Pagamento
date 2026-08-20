@@ -106,6 +106,26 @@ export function IconeCalculo({ className }: IconeProps) {
   );
 }
 
+/** Uma pasta de arquivo: a estante de documentos do RH. */
+export function IconePasta({ className }: IconeProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M3.5 8a2 2 0 0 1 2-2h3.1l1.9 2.3h8a2 2 0 0 1 2 2v7.7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
+    </svg>
+  );
+}
+
+/** Uma folha de papel com a ponta dobrada: um documento guardado. */
+export function IconeDocumento({ className }: IconeProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M13.5 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5z" />
+      <path d="M13.5 3.5v5h5" />
+      <path d="M8.5 13.5h7M8.5 16.5h4.5" />
+    </svg>
+  );
+}
+
 export function IconeSaida({ className }: IconeProps) {
   return (
     <svg {...base} className={className}>

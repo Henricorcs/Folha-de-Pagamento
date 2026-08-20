@@ -1,7 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { useAuth } from './lib/auth';
-import { MODULO_CONTAS_PAGAR, MODULO_FOLHA } from './lib/modulos';
+import { MODULO_CONTAS_PAGAR, MODULO_FOLHA, MODULO_RH } from './lib/modulos';
 import { Assinar } from './pages/Assinar';
 import { Login } from './pages/Login';
 import { Modulos } from './pages/Modulos';
@@ -25,6 +25,9 @@ import { Impostos } from './pages/folha/Impostos';
 import { MinhaConta } from './pages/folha/MinhaConta';
 import { Usuarios } from './pages/folha/Usuarios';
 import { Vales } from './pages/folha/Vales';
+import { PastaRhAberta } from './pages/rh/Pasta';
+import { PastasRh } from './pages/rh/Pastas';
+import { RecibosDaFolha } from './pages/rh/RecibosDaFolha';
 import type { ReactNode } from 'react';
 
 function Protegida({ children }: { children: ReactNode }) {
@@ -135,6 +138,23 @@ export default function App() {
             contas sem haver nota nenhuma para conferir depois. O servidor é
             quem recusa de verdade — aqui a rota só some do menu. */}
         <Route path="transferencias" element={<Transferencias />} />
+      </Route>
+
+      {/* RH — a estante de documentos. Quem recusa de verdade é a API, que
+          exige ADMIN ou RH em cada rota; aqui o módulo só some do menu de quem
+          não tem perfil. */}
+      <Route
+        path="/rh"
+        element={
+          <Protegida>
+            <Layout modulo={MODULO_RH} />
+          </Protegida>
+        }
+      >
+        <Route index element={<Navigate to="pastas" replace />} />
+        <Route path="pastas" element={<PastasRh />} />
+        <Route path="pastas/:id" element={<PastaRhAberta />} />
+        <Route path="recibos" element={<RecibosDaFolha />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/modulos" replace />} />

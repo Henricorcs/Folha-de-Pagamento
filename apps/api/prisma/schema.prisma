@@ -120,6 +120,7 @@ model Funcionario {
   vales         Vale[]
   itensFerias   ItemPrevisaoFerias[]
   ferias        FeriasMarcada[]
+  pastaRh       PastaRh?
 
   @@index([ativo])
   @@index([nome])
@@ -144,7 +145,7 @@ model FaltaFuncionario {
   funcionarioId String      @map("funcionario_id")
 
   /// O dia da falta, à meia-noite local
-  data DateTime
+  data        DateTime
   /// "AAAA-MM" do mês trabalhado. Guardado, e não derivado na leitura, para a
   /// folha achar as faltas do mês sem varrer datas.
   competencia String
@@ -1460,4 +1461,107 @@ model FechamentoCaixa {
 
   @@index([caixaId, de])
   @@map("fechamentos_caixa")
+}
+
+// ---------------------------------------------------------------------------
+// RH — a pasta dos documentos
+// ---------------------------------------------------------------------------
+
+/// Uma pasta da estante: a de um funcionário, a da empresa, ou uma que alguém
+/// criou à mão.
+///
+/// A pasta existe antes do primeiro documento de propósito. É ela que a tela
+/// mostra vazia esperando o contrato, e é nela que o recibo do mês cai quando o
+/// PDF da contabilidade é separado — sem um lugar já existente, cada arquivo
+/// teria de inventar o seu.
+model PastaRh {
+  id String @id @default(uuid())
+
+  /// Como a pasta se chama na estante. Sendo de um funcionário, o nome dele
+  /// manda; este fica como o que ela era quando nasceu.
+  nome String
+
+  /// A prateleira da empresa — contrato social, alvará, certidão. Só uma.
+  daEmpresa Boolean @default(false) @map("da_empresa")
+
+  /// Quando a pasta é de alguém que o sistema já conhece.
+  funcionario   Funcionario? @relation(fields: [funcionarioId], references: [id], onDelete: Restrict)
+  funcionarioId String?      @unique @map("funcionario_id")
+
+  /// O CPF do titular, só os dígitos.
+  ///
+  /// É por ele que o recibo de pagamento acha a pasta sozinho: nome muda de
+  /// grafia entre a contabilidade e o cadastro ("José" e "Jose", o sobrenome
+  /// que entra e sai), e CPF não. Sem ele, sobra casar por nome.
+  cpf String?
+
+  documentos DocumentoRh[]
+
+  criadoPor String?  @map("criado_por")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([cpf])
+  @@map("pastas_rh")
+}
+
+/// Um documento guardado: o arquivo em si e o que se precisa saber dele sem
+/// abrir.
+///
+/// A pasta de RH de uma empresa pequena vive em três lugares ao mesmo tempo —
+/// uma gaveta de aço, o e-mail de quem cadastrou e o WhatsApp do contador —, e
+/// a pergunta que ninguém responde é sempre a mesma: "cadê o contrato do
+/// Fulano?". Aqui ela tem um lugar só.
+///
+/// O arquivo mora no banco, e não numa pasta do servidor. É a escolha que faz
+/// o backup ser um só: o dump que salva a folha salva os documentos junto. Um
+/// volume à parte seria mais barato por megabyte e teria custado a primeira
+/// restauração — a que se descobre estar sem os arquivos no dia em que
+/// precisa deles.
+model DocumentoRh {
+  id String @id @default(uuid())
+
+  pasta   PastaRh @relation(fields: [pastaId], references: [id], onDelete: Restrict)
+  pastaId String  @map("pasta_id")
+
+  /// Como o documento é chamado ("Contrato de experiência", "ASO admissional").
+  titulo String
+
+  /// A prateleira dentro da pasta: Contrato, CTPS, Exame médico, Recibo de
+  /// pagamento… Texto livre de propósito — a lista de tipos de uma casa não é a
+  /// de outra, e uma enumeração fechada obrigaria a mexer no código para
+  /// guardar um papel novo.
+  tipo String
+
+  descricao String?
+
+  /// "AAAA-MM" quando o documento é de um mês (recibo de pagamento, folha).
+  /// É o que impede o mesmo recibo de entrar duas vezes na mesma pasta.
+  competencia String?
+
+  /// O dia impresso no documento e, quando ele tem prazo, até quando vale.
+  /// Certidão e exame vencem, e um documento vencido na gaveta é o mesmo que
+  /// não ter documento nenhum.
+  emitidoEm DateTime? @map("emitido_em") @db.Date
+  valeAte   DateTime? @map("vale_ate") @db.Date
+
+  /// O nome com que o arquivo chegou, para sair daqui com ele.
+  arquivoNome    String @map("arquivo_nome")
+  /// O tipo MIME, que é o que decide se o navegador abre ou baixa.
+  arquivoTipo    String @map("arquivo_tipo")
+  /// Em bytes. Guardado à parte para a listagem dizer o tamanho sem ler o
+  /// arquivo — são megabytes cada, e a lista mostra dezenas deles.
+  arquivoTamanho Int    @map("arquivo_tamanho")
+  /// O conteúdo. Nunca vai numa listagem: só na rota que serve um por vez.
+  arquivo        Bytes
+
+  criadoPor String?  @map("criado_por")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([pastaId, tipo, competencia])
+  @@index([pastaId])
+  @@index([tipo])
+  @@index([valeAte])
+  @@map("documentos_rh")
 }

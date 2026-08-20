@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import { MODULOS, caminhoInicial } from '../lib/modulos';
+import { caminhoInicial, modulosDoPerfil } from '../lib/modulos';
 
 /**
  * A primeira tela depois do login: escolher em qual módulo trabalhar. Fundo
@@ -69,8 +69,10 @@ export function Modulos() {
           Escolha a área que deseja acessar
         </h1>
 
+        {/* Só o que este perfil enxerga: um cartão que leva a um lugar onde
+            todo clique é recusado é pior que cartão nenhum. */}
         <div className="mt-9 grid gap-4 sm:grid-cols-2">
-          {MODULOS.map((modulo) => (
+          {modulosDoPerfil(usuario?.role).map((modulo) => (
             <Link
               key={modulo.id}
               to={caminhoInicial(modulo)}

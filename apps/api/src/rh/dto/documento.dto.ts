@@ -1,0 +1,132 @@
+import { Type } from 'class-transformer';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+  ValidateNested,
+} from 'class-validator';
+
+/** Data de calendário, sem hora e sem fuso: "AAAA-MM-DD". */
+const DIA = /^\d{4}-\d{2}-\d{2}$/;
+
+/** O que é comum a guardar e a corrigir: tudo menos o arquivo. */
+export class DadosDoDocumentoDto {
+  @IsString({ message: 'Diga como este documento se chama.' })
+  @MinLength(2, { message: 'O título ficou curto demais.' })
+  @MaxLength(160)
+  titulo!: string;
+
+  /**
+   * A prateleira. Texto livre de propósito: a lista de tipos de uma casa não é
+   * a de outra, e uma enumeração fechada obrigaria a mexer no código para
+   * guardar um papel novo. A tela sugere os que já existem.
+   */
+  @IsString({ message: 'Diga de que tipo é este documento.' })
+  @MinLength(2, { message: 'O tipo ficou curto demais.' })
+  @MaxLength(60)
+  tipo!: string;
+
+  @IsOptional() @IsString() @MaxLength(600) descricao?: string;
+
+  @IsOptional()
+  @Matches(DIA, { message: 'A data de emissão precisa ser AAAA-MM-DD.' })
+  emitidoEm?: string;
+
+  @IsOptional()
+  @Matches(DIA, { message: 'A validade precisa ser AAAA-MM-DD.' })
+  valeAte?: string;
+}
+
+/** Um documento chegando: os dados mais o arquivo. */
+export class GuardarDocumentoDto extends DadosDoDocumentoDto {
+  /** Em que pasta ele entra. */
+  @IsUUID('4', { message: 'Escolha a pasta.' })
+  pastaId!: string;
+
+  /**
+   * "AAAA-MM" quando o documento é de um mês — recibo de pagamento, folha. É
+   * ela que impede o mesmo recibo de entrar duas vezes na mesma pasta.
+   */
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}$/, { message: 'A competência precisa ser AAAA-MM.' })
+  competencia?: string;
+
+  @IsString() @MinLength(1) @MaxLength(255) arquivoNome!: string;
+
+  /**
+   * O arquivo inteiro, como data URL ("data:application/pdf;base64,…") — o
+   * mesmo caminho pelo qual a foto da nota já chega. O tipo vem daqui e é
+   * conferido no serviço, e não do que o navegador afirmou no nome.
+   */
+  @IsString({ message: 'Escolha o arquivo.' })
+  @Matches(/^data:[-\w.+]+\/[-\w.+]+;base64,/, {
+    message: 'O arquivo não chegou num formato que eu saiba ler.',
+  })
+  arquivo!: string;
+}
+
+/** Só os dados: o arquivo guardado não se troca, se apaga e se sobe de novo. */
+export class EditarDocumentoDto extends DadosDoDocumentoDto {}
+
+/** Uma pasta criada ou renomeada à mão. */
+export class PastaDto {
+  @IsString({ message: 'Diga o nome da pasta.' })
+  @MinLength(2, { message: 'O nome ficou curto demais.' })
+  @MaxLength(120)
+  nome!: string;
+
+  /**
+   * O CPF do titular. Só serve para o recibo de pagamento achar esta pasta
+   * sozinho quando o PDF do mês for separado — e é por isso que ele vale mais
+   * que o nome: grafia muda, CPF não.
+   */
+  @IsOptional() @IsString() @MaxLength(20) cpf?: string;
+}
+
+/** O PDF de recibos chegando para leitura. */
+export class AnalisarRecibosDto {
+  @IsString({ message: 'Escolha o PDF dos recibos.' })
+  @Matches(/^data:application\/pdf;base64,/, {
+    message: 'O arquivo de recibos precisa ser um PDF.',
+  })
+  arquivo!: string;
+}
+
+/** Um recibo conferido na tela: as páginas dele e a pasta que vai recebê-lo. */
+export class ItemDoReciboDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(20)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Max(2000, { each: true })
+  paginas!: number[];
+
+  @IsUUID('4', { message: 'Escolha a pasta deste recibo.' })
+  pastaId!: string;
+
+  /** Só para a resposta dizer de quem era o recibo que deu certo ou não. */
+  @IsString() @MaxLength(120) nome!: string;
+}
+
+/** O que a tela confirmou: o mesmo PDF, mais o destino de cada recibo. */
+export class GuardarRecibosDto extends AnalisarRecibosDto {
+  @Matches(/^\d{4}-\d{2}$/, { message: 'A competência precisa ser AAAA-MM.' })
+  competencia!: string;
+
+  @IsArray()
+  @ArrayMinSize(1, { message: 'Nenhum recibo foi marcado para guardar.' })
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => ItemDoReciboDto)
+  itens!: ItemDoReciboDto[];
+}

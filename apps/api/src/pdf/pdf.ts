@@ -136,8 +136,19 @@ async function lerPaginas<T>(
 }
 
 export async function extrairTextoPdf(dados: Uint8Array): Promise<string> {
-  const paginas = await lerPaginas(dados, montarLinhas);
+  const paginas = await extrairPaginasPdf(dados);
   return paginas.join('\n');
+}
+
+/**
+ * O texto de cada página, uma por posição do vetor.
+ *
+ * Serve a quem precisa saber **em que página** cada coisa está — o PDF de
+ * recibos da folha é um documento por página, e juntar tudo num texto só
+ * apagaria justamente o corte.
+ */
+export async function extrairPaginasPdf(dados: Uint8Array): Promise<string[]> {
+  return lerPaginas(dados, montarLinhas);
 }
 
 /**

@@ -1479,3 +1479,85 @@ export interface CaixasDoFechamento {
   /** O caixa configurado para o pagamento em mãos, quando há um. */
   emUso: number | null;
 }
+
+// ---------------------------------------------------------------------------
+// RH — a estante de documentos
+// ---------------------------------------------------------------------------
+
+/** Uma pasta da estante: a de um funcionário, a da empresa, ou uma avulsa. */
+export interface PastaRh {
+  id: string;
+  nome: string;
+  apelido: string | null;
+  funcao: string | null;
+  daEmpresa: boolean;
+  funcionarioId: string | null;
+  cpf: string | null;
+  /** Funcionário que já saiu da empresa. A pasta continua. */
+  inativo: boolean;
+  /** Criada à mão: só ela se renomeia e se apaga. */
+  avulsa: boolean;
+  qtd: number;
+  vencidos: number;
+  aVencer: number;
+  ultimoEm: string | null;
+}
+
+export interface EstanteRh {
+  pastas: PastaRh[];
+  /** Os tipos já usados, para sugerir em vez de perguntar. */
+  tipos: string[];
+}
+
+/** Onde um documento está no prazo dele. */
+export type PrazoDoDocumento = 'sem-prazo' | 'vencido' | 'a-vencer' | 'em-dia';
+
+/** Um documento guardado, sem o arquivo — ele vem por uma rota só dele. */
+export interface DocumentoRh {
+  id: string;
+  pastaId: string;
+  titulo: string;
+  tipo: string;
+  descricao: string | null;
+  /** "AAAA-MM" quando o documento é de um mês (recibo de pagamento). */
+  competencia: string | null;
+  emitidoEm: string | null;
+  valeAte: string | null;
+  arquivoNome: string;
+  arquivoTipo: string;
+  arquivoTamanho: number;
+  prazo: PrazoDoDocumento;
+  criadoPor: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Um recibo achado dentro do PDF da folha, e a pasta que ele parece ser. */
+export interface ReciboDaFolha {
+  paginas: number[];
+  matricula: string;
+  nome: string;
+  cpf: string;
+  cargo: string | null;
+  pastaId: string | null;
+  pastaNome: string | null;
+  /** Como a pasta foi encontrada — para dar para discordar dela. */
+  casouPor: 'cpf' | 'nome' | null;
+  /** Este mês já está guardado nesta pasta: entraria repetido. */
+  jaGuardado: boolean;
+}
+
+export interface AnaliseDosRecibos {
+  competencia: string;
+  competenciaEscrita: string | null;
+  totalDePaginas: number;
+  /** Páginas que não deram para reconhecer: contadas, não descartadas. */
+  paginasSemDono: number[];
+  itens: ReciboDaFolha[];
+}
+
+export interface RecibosGuardados {
+  competencia: string;
+  guardados: Array<{ pasta: string; nome: string }>;
+  pulados: Array<{ nome: string; motivo: string }>;
+}

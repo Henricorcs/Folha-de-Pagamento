@@ -13,8 +13,12 @@ import type { AppConfig } from './config/configuration';
  * O número tem de ser o mesmo do `client_max_body_size` do nginx. Eles já
  * estiveram diferentes (1 MB aqui, 5 MB lá), e nessa faixa a guia em PDF
  * passava pelo nginx para morrer aqui.
+ *
+ * Subiu de 8 para 24 MB com a pasta do RH: o documento chega em base64, que
+ * engorda um terço no caminho, e o teto por arquivo lá é de 15 MB. Um contrato
+ * digitalizado colorido passa dos 8 com facilidade.
  */
-const LIMITE_CORPO = '8mb';
+const LIMITE_CORPO = '24mb';
 
 async function bootstrap() {
   // O parser vem desligado para entrar de novo logo abaixo com o teto maior:
