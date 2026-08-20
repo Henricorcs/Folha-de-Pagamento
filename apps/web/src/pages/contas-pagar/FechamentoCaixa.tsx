@@ -1008,6 +1008,16 @@ function TabelaDeLancamentos({
   onMudouNota: (id: number, qtdNotas: number) => void;
   onErro: (m: string) => void;
 }) {
+  /*
+   * Uma saída de cada vez com as notas à mostra, e o estado mora aqui.
+   *
+   * A tira de miniaturas é alta: duas ou três abertas empurram a lista para
+   * baixo e quem confere perde a linha em que estava. Morando na tabela, abrir
+   * uma fecha a outra sozinha — e qualquer clique numa linha fecha a que
+   * estiver aberta, que é o gesto de quem já olhou e quer a lista de volta.
+   */
+  const [comNotas, setComNotas] = useState<number | null>(null);
+
   return (
     <div className="overflow-x-auto rolagem-fina">
       <table className="w-full text-sm">
@@ -1030,6 +1040,8 @@ function TabelaDeLancamentos({
               lancamento={l}
               revisado={revisados}
               podeConferir={podeConferir}
+              vendoNotas={comNotas === l.id}
+              onVerNotas={(ver) => setComNotas(ver ? l.id : null)}
               onConferiu={onConferiu}
               onMudouNota={onMudouNota}
               onErro={onErro}
@@ -1046,6 +1058,8 @@ function LinhaDoLancamento({
   lancamento: l,
   revisado,
   podeConferir,
+  vendoNotas,
+  onVerNotas,
   onConferiu,
   onMudouNota,
   onErro,
@@ -1054,11 +1068,14 @@ function LinhaDoLancamento({
   lancamento: LancamentoDoCaixa;
   revisado: boolean;
   podeConferir: boolean;
+  /** Esta é a linha cujas notas estão à mostra. */
+  vendoNotas: boolean;
+  /** `false` fecha a tira de notas, seja de qual linha for. */
+  onVerNotas: (ver: boolean) => void;
   onConferiu: (id: number, conferido: boolean) => void;
   onMudouNota: (id: number, qtdNotas: number) => void;
   onErro: (m: string) => void;
 }) {
-  const [vendoNotas, setVendoNotas] = useState(false);
 
   /**
    * O retrato do lançamento vai junto do que se grava sobre ele.
@@ -1095,14 +1112,27 @@ function LinhaDoLancamento({
       ).data,
     onSuccess: (r) => {
       onMudouNota(l.id, r.qtdNotas);
-      setVendoNotas(true);
+      onVerNotas(true);
     },
     onError: (e) => onErro(mensagemErro(e)),
   });
 
   return (
     <>
-      <tr className="linha">
+      <tr
+        className="linha"
+        onClick={(e) => {
+          /*
+           * O clique num controle da linha é dele: "Ver notas" alterna, "+
+           * foto" abre o seletor, "OK" confere. Fechar por cima desfaria os
+           * três — e é justamente o botão de abrir que mais sofreria.
+           */
+          if ((e.target as HTMLElement).closest('button, label, a, input')) {
+            return;
+          }
+          onVerNotas(false);
+        }}
+      >
         <td className="td num whitespace-nowrap">{formatData(l.data)}</td>
         <td className="td">
           {l.historico || <span className="text-tinta-400">sem histórico</span>}
@@ -1120,10 +1150,14 @@ function LinhaDoLancamento({
             {l.qtdNotas > 0 && (
               <button
                 type="button"
-                onClick={() => setVendoNotas((v) => !v)}
+                onClick={() => onVerNotas(!vendoNotas)}
                 className="btn btn-p btn-ferramenta"
               >
-                {l.qtdNotas === 1 ? 'Ver nota' : `Ver ${l.qtdNotas} notas`}
+                {vendoNotas
+                  ? 'Fechar'
+                  : l.qtdNotas === 1
+                    ? 'Ver nota'
+                    : `Ver ${l.qtdNotas} notas`}
               </button>
             )}
             {/* Anexar continua aparecendo com foto já anexada: uma nota nem
@@ -1243,6 +1277,8 @@ function NotasDoLancamento({
 }) {
   const qc = useQueryClient();
   const chave = ['caixa', 'notas', caixaId, idLancamento];
+  /** Qual foto está aberta em tela cheia. */
+  const [aberta, setAberta] = useState<string | null>(null);
 
   const notas = useQuery({
     queryKey: chave,
@@ -1270,6 +1306,16 @@ function NotasDoLancamento({
     return <p className="ajuda pt-3">Nenhuma foto anexada.</p>;
   }
 
+  /*
+   * A sequência que as setas percorrem é a das fotos.
+   *
+   * O recibo assinado do diarista também é nota desta saída, mas é um PDF
+   * montado na hora — não há imagem para pôr no lugar da anterior. Ele fica
+   * de fora da caminhada e continua na tira, com o botão dele.
+   */
+  const fotos = notas.data.filter((n) => n.tipo !== 'RECIBO');
+  const naSequencia = fotos.findIndex((n) => n.id === aberta);
+
   return (
     <div className="flex flex-wrap gap-3 pt-3">
       {notas.data.map((n, i) =>
@@ -1286,11 +1332,77 @@ function NotasDoLancamento({
             fotoId={n.id}
             numero={i + 1}
             total={notas.data.length}
+            onAbrir={() => setAberta(n.id)}
             onApagar={somenteLeitura ? undefined : () => apagar.mutate(n.id)}
           />
         ),
       )}
+
+      {naSequencia >= 0 && (
+        <NotaEmTelaCheia
+          fotoId={fotos[naSequencia].id}
+          /* O número é o da nota na tira inteira, recibo incluído: é assim
+             que ela aparece embaixo da miniatura. */
+          titulo={`Nota ${
+            notas.data.findIndex((n) => n.id === fotos[naSequencia].id) + 1
+          } de ${notas.data.length}`}
+          onFechar={() => setAberta(null)}
+          onAnterior={
+            naSequencia > 0
+              ? () => setAberta(fotos[naSequencia - 1].id)
+              : undefined
+          }
+          onProxima={
+            naSequencia < fotos.length - 1
+              ? () => setAberta(fotos[naSequencia + 1].id)
+              : undefined
+          }
+        />
+      )}
     </div>
+  );
+}
+
+/** A imagem de uma nota. A miniatura e a tela cheia leem a mesma consulta. */
+function useFotoDaNota(fotoId: string) {
+  return useQuery({
+    queryKey: ['caixa', 'foto', fotoId],
+    queryFn: async () =>
+      (await api.get<{ foto: string | null }>(`/caixa/notas/${fotoId}`)).data,
+  });
+}
+
+/**
+ * A foto aberta em tela cheia, com as vizinhas a uma seta de distância.
+ *
+ * Mora no conjunto, e não na miniatura: passar de uma nota para a outra é
+ * assunto da saída inteira. A imagem vem da mesma consulta que a miniatura já
+ * fez — trocar de foto não espera rede.
+ */
+function NotaEmTelaCheia({
+  fotoId,
+  titulo,
+  onFechar,
+  onAnterior,
+  onProxima,
+}: {
+  fotoId: string;
+  titulo: string;
+  onFechar: () => void;
+  onAnterior?: () => void;
+  onProxima?: () => void;
+}) {
+  const foto = useFotoDaNota(fotoId);
+  if (!foto.data?.foto) return null;
+
+  return (
+    <FotoAmpliada
+      src={foto.data.foto}
+      titulo={titulo}
+      onFechar={onFechar}
+      onAnterior={onAnterior}
+      onProxima={onProxima}
+    />
   );
 }
 
@@ -1358,19 +1470,16 @@ function UmaFoto({
   fotoId,
   numero,
   total,
+  onAbrir,
   onApagar,
 }: {
   fotoId: string;
   numero: number;
   total: number;
+  onAbrir: () => void;
   onApagar?: () => void;
 }) {
-  const [ampliada, setAmpliada] = useState(false);
-  const foto = useQuery({
-    queryKey: ['caixa', 'foto', fotoId],
-    queryFn: async () =>
-      (await api.get<{ foto: string | null }>(`/caixa/notas/${fotoId}`)).data,
-  });
+  const foto = useFotoDaNota(fotoId);
 
   return (
     <div className="flex flex-col gap-1">
@@ -1387,28 +1496,19 @@ function UmaFoto({
       {foto.isLoading ? (
         <div className="h-40 w-40 animate-pulse rounded-xl border border-tinta-200 bg-tinta-100" />
       ) : foto.data?.foto ? (
-        <>
-          {/* A miniatura é o atalho; o que vale é o que ela abre. */}
-          <button
-            type="button"
-            onClick={() => setAmpliada(true)}
-            title="Ver em tela cheia"
-            className="cursor-zoom-in"
-          >
-            <img
-              src={foto.data.foto}
-              alt={`Nota ${numero} de ${total}`}
-              className="max-h-64 rounded-xl border border-tinta-200"
-            />
-          </button>
-          {ampliada && (
-            <FotoAmpliada
-              src={foto.data.foto}
-              titulo={`Nota ${numero} de ${total}`}
-              onFechar={() => setAmpliada(false)}
-            />
-          )}
-        </>
+        /* A miniatura é o atalho; o que vale é o que ela abre. */
+        <button
+          type="button"
+          onClick={onAbrir}
+          title="Ver em tela cheia"
+          className="cursor-zoom-in"
+        >
+          <img
+            src={foto.data.foto}
+            alt={`Nota ${numero} de ${total}`}
+            className="max-h-64 rounded-xl border border-tinta-200"
+          />
+        </button>
       ) : (
         <p className="ajuda">A foto não está mais aqui.</p>
       )}
@@ -1977,6 +2077,12 @@ function AcertarConta({
                       src={f}
                       titulo={`Nota ${i + 1} de ${fotos.length}`}
                       onFechar={() => setAmpliada(null)}
+                      onAnterior={i > 0 ? () => setAmpliada(i - 1) : undefined}
+                      onProxima={
+                        i < fotos.length - 1
+                          ? () => setAmpliada(i + 1)
+                          : undefined
+                      }
                     />
                   )}
                 </div>

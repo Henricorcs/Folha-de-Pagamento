@@ -286,16 +286,42 @@ export function FotoAmpliada({
   src,
   titulo,
   onFechar,
+  onAnterior,
+  onProxima,
 }: {
   src: string;
   titulo: string;
   onFechar: () => void;
+  /**
+   * As vizinhas, quando a saída tem mais de uma nota. Ausente é ponta da
+   * sequência: a seta some, e o "Nota 3 de 3" no alto diz por quê.
+   */
+  onAnterior?: () => void;
+  onProxima?: () => void;
 }) {
   const [inteira, setInteira] = useState(false);
+
+  /*
+   * Cada nota começa cabendo na tela.
+   *
+   * Quem está passando pelas fotos de uma saída quer ver o papel inteiro
+   * primeiro; herdar o zoom da anterior abriria a próxima num pedaço do
+   * meio, e a mesma foto pareceria outra coisa.
+   */
+  useEffect(() => setInteira(false), [src]);
 
   useEffect(() => {
     const aoTeclar = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onFechar();
+      // Sem o `preventDefault`, a seta ainda rola a foto ampliada por baixo.
+      if (e.key === 'ArrowLeft' && onAnterior) {
+        e.preventDefault();
+        onAnterior();
+      }
+      if (e.key === 'ArrowRight' && onProxima) {
+        e.preventDefault();
+        onProxima();
+      }
     };
     window.addEventListener('keydown', aoTeclar);
     // Rolar a página atrás tira do lugar a lista que se estava conferindo.
@@ -305,7 +331,7 @@ export function FotoAmpliada({
       window.removeEventListener('keydown', aoTeclar);
       document.body.style.overflow = overflowAnterior;
     };
-  }, [onFechar]);
+  }, [onFechar, onAnterior, onProxima]);
 
   /*
    * Vai pendurada no `body`, e não onde foi escrita.
@@ -364,8 +390,43 @@ export function FotoAmpliada({
           }
         />
       </div>
+
+      {/*
+        As setas ficam por cima da foto, e não na barra de cima: passar de uma
+        nota para a outra é o gesto que mais se repete quando a saída tem três
+        recibos, e ele fica mais curto na beirada da tela, onde o dedo e o
+        ponteiro já estão. Fora do container que rola, para não irem embora
+        junto com a foto em tamanho real.
+      */}
+      {onAnterior && (
+        <SetaDaFoto para="anterior" onClick={onAnterior} />
+      )}
+      {onProxima && <SetaDaFoto para="próxima" onClick={onProxima} />}
     </div>,
     document.body,
+  );
+}
+
+/** A seta que passa para a nota vizinha, colada na beirada da tela. */
+function SetaDaFoto({
+  para,
+  onClick,
+}: {
+  para: 'anterior' | 'próxima';
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={para === 'anterior' ? 'Nota anterior' : 'Próxima nota'}
+      title={para === 'anterior' ? 'Nota anterior' : 'Próxima nota'}
+      className={`absolute top-1/2 z-10 -translate-y-1/2 rounded-full border border-white/20 bg-barra/80 px-4 py-3 text-xl leading-none text-white/80 shadow-lg backdrop-blur-sm transition hover:bg-white/15 hover:text-white ${
+        para === 'anterior' ? 'left-3 sm:left-5' : 'right-3 sm:right-5'
+      }`}
+    >
+      {para === 'anterior' ? '‹' : '›'}
+    </button>
   );
 }
 
