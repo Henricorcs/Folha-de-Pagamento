@@ -111,12 +111,72 @@ export class FechamentoCaixaService {
     const { caixas } = await this.caixa.listarCaixas(cfg.caixaTabelaContas);
     const oCaixa = caixas.find((c) => c.id === caixaId);
 
-    const { lancamentos } = await this.caixa.listarLancamentos(
+    /*
+     * De onde vem o saldo inicial.
+     *
+     * O webservice do IXC não devolve saldo de conta — o cadastro tem
+     * `saldo_abertura`, do dia em que a conta nasceu, e mais nada. Somar a
+     * história inteira a cada abertura de tela é a leitura que já derrubou esta
+     * página com 502. Então o saldo se encadeia: cada fechamento guarda com
+     * quanto o período fechou, e o seguinte começa dali. O primeiro de cada
+     * caixa pergunta a quem está contando a gaveta.
+     *
+     * Quando o fechamento anterior foi contado, é a contagem que vale, e não a
+     * conta. Dinheiro que existe na gaveta e não aparece na soma continuaria a
+     * faltar em todos os períodos seguintes se o encadeamento seguisse o
+     * calculado — a diferença tem de morrer no fechamento em que apareceu.
+     */
+    const anterior = await this.prisma.fechamentoCaixa.findFirst({
+      where: { caixaId, ate: { lt: inicio } },
+      orderBy: { ate: 'desc' },
+    });
+    const saldoInicial = anterior ? Number(saldoQueSegue(anterior)) : null;
+
+    /*
+     * A gaveta não se conta pelo recorte da tela.
+     *
+     * O saldo esperado é o dinheiro que deve estar lá agora — um fato do
+     * caixa, não do filtro. Mas ele nascia da soma do período visível sobre o
+     * saldo do último fechamento, e essas duas pontas nem sempre se encostam:
+     * com o caixa fechado até 18/08, abrir a tela em 20/08 deixava o dia 19 de
+     * fora e mostrava R$ 4.766,00; pedido a partir de 19/08, o mesmo caixa no
+     * mesmo dia mostrava R$ 3.562,00. Um dos dois estava errado, e nada na
+     * tela dizia qual — o número mudava conforme a data inicial escolhida.
+     *
+     * Então a gaveta é somada da sua janela: do dia seguinte ao fechamento até
+     * o fim do recorte, incluindo os dias que ficaram de fora do filtro. O
+     * recorte continua mandando no resto da tela — é dele que saem as
+     * entradas, as saídas e a fila de conferir.
+     *
+     * Por dia inteiro, e não pelo instante guardado: fechamento assinado antes
+     * de 02eaaea tem `ate` à meia-noite do último dia, e partir do instante
+     * seguinte recontaria aquele dia todo.
+     */
+    const gavetaDesde = anterior
+      ? dataDoDia(diaSeguinte(diaISO(anterior.ate)), 'inicial')
+      : null;
+
+    /*
+     * As duas janelas saem de uma leitura só.
+     *
+     * Os dias que faltam são sempre mais velhos que o recorte, e a leitura do
+     * IXC caminha do mais novo para o mais velho até passar do começo do
+     * período. Pedir os dois intervalos em separado faria a segunda ida
+     * percorrer de novo tudo o que a primeira já tinha percorrido — nesta
+     * página, que já caiu uma vez com 502, isso se paga caro.
+     */
+    const { lancamentos: todos } = await this.caixa.listarLancamentos(
       caixaId,
-      inicio,
+      gavetaDesde && gavetaDesde < inicio ? gavetaDesde : inicio,
       fim,
       cfg,
     );
+    /** O recorte pedido: é ele que a tela lista e confere. */
+    const lancamentos = todos.filter((l) => l.data >= inicio);
+    /** A janela da gaveta: o que ela viu desde o fechamento. */
+    const daGaveta = gavetaDesde
+      ? todos.filter((l) => l.data >= gavetaDesde)
+      : [];
 
     const conferencias = await this.prisma.conferenciaCaixa.findMany({
       where: {
@@ -159,27 +219,6 @@ export class FechamentoCaixaService {
       where: { caixaId, ate: { gte: inicio }, de: { lte: fim } },
       orderBy: { de: 'desc' },
     });
-
-    /*
-     * De onde vem o saldo inicial.
-     *
-     * O webservice do IXC não devolve saldo de conta — o cadastro tem
-     * `saldo_abertura`, do dia em que a conta nasceu, e mais nada. Somar a
-     * história inteira a cada abertura de tela é a leitura que já derrubou esta
-     * página com 502. Então o saldo se encadeia: cada fechamento guarda com
-     * quanto o período fechou, e o seguinte começa dali. O primeiro de cada
-     * caixa pergunta a quem está contando a gaveta.
-     *
-     * Quando o fechamento anterior foi contado, é a contagem que vale, e não a
-     * conta. Dinheiro que existe na gaveta e não aparece na soma continuaria a
-     * faltar em todos os períodos seguintes se o encadeamento seguisse o
-     * calculado — a diferença tem de morrer no fechamento em que apareceu.
-     */
-    const anterior = await this.prisma.fechamentoCaixa.findFirst({
-      where: { caixaId, ate: { lt: inicio } },
-      orderBy: { ate: 'desc' },
-    });
-    const saldoInicial = anterior ? Number(saldoQueSegue(anterior)) : null;
 
     /*
      * Até onde este caixa já está conferido, seja qual for o recorte na tela.
@@ -266,6 +305,19 @@ export class FechamentoCaixaService {
     );
 
     /*
+     * O mesmo, na janela da gaveta.
+     *
+     * Sem dias fora do recorte as duas janelas são a mesma, e não custa
+     * consulta nenhuma: é a conta que a tela já fez. Havendo, pergunta-se pelo
+     * intervalo inteiro de uma vez — são duas leituras no banco daqui, baratas
+     * ao lado da ida ao IXC.
+     */
+    const ruaDaGaveta =
+      gavetaDesde && gavetaDesde < inicio
+        ? await this.ruaNoIntervalo(caixaId, gavetaDesde, fim)
+        : -entregueNoPeriodo + trocoNoPeriodo + gastoLancadoNoPeriodo;
+
+    /*
      * O recibo assinado do diarista vale como nota do pagamento dele.
      *
      * A diária paga em mãos vira conta a pagar baixada no caixa, e a saída
@@ -285,6 +337,12 @@ export class FechamentoCaixaService {
         comConferencia
           .filter((l) => l.tipo === t)
           .reduce((s, l) => s + l.valor, 0),
+      );
+
+    /** A mesma soma, na janela da gaveta — que pode ser maior que o recorte. */
+    const somaDaGaveta = (t: 'ENTRADA' | 'SAIDA') =>
+      arredondar(
+        daGaveta.filter((l) => l.tipo === t).reduce((s, l) => s + l.valor, 0),
       );
 
     return {
@@ -327,21 +385,82 @@ export class FechamentoCaixaService {
         trocoNoPeriodo,
         /** O que as saídas do IXC já descontam por conta da prestação. */
         gastoLancadoNoPeriodo,
-        /** O que deve estar na gaveta agora. Null enquanto falta o inicial. */
+        /**
+         * De que dia a gaveta está sendo somada (AAAA-MM-DD) — o dia seguinte
+         * ao último fechamento, seja qual for o `de` pedido. Null quando não
+         * há de onde partir.
+         */
+        gavetaDesde: gavetaDesde ? diaISO(gavetaDesde) : null,
+        /**
+         * O que deve estar na gaveta agora. Null enquanto falta o inicial.
+         *
+         * Não depende do recorte: conta desde o último fechamento, mesmo que a
+         * tela esteja mostrando só os últimos dias.
+         */
         saldoEsperado:
           saldoInicial === null
             ? null
             : arredondar(
                 saldoInicial +
-                  soma('ENTRADA') -
-                  soma('SAIDA') -
-                  entregueNoPeriodo +
-                  trocoNoPeriodo +
-                  gastoLancadoNoPeriodo,
+                  somaDaGaveta('ENTRADA') -
+                  somaDaGaveta('SAIDA') +
+                  ruaDaGaveta,
               ),
       },
       fechamentos,
     };
+  }
+
+  /**
+   * O que o dinheiro na rua fez com a gaveta num intervalo, num número só.
+   *
+   * O que saiu com alguém sai fisicamente sem virar saída no IXC; o troco
+   * volta do mesmo jeito; e o gasto que a prestação lançou como conta a pagar
+   * volta para a conta, porque a baixa dele no caixa o faz sair uma segunda
+   * vez pelas saídas de lá. Devolve o efeito líquido dos três.
+   *
+   * Só é chamado quando o recorte da tela deixa dias de fora da janela da
+   * gaveta. No encaixe normal a conta já está feita, e este método não roda.
+   */
+  private async ruaNoIntervalo(
+    caixaId: number,
+    de: Date,
+    ate: Date,
+  ): Promise<number> {
+    const entregas = await this.prisma.dinheiroNaRua.findMany({
+      where: { caixaId, entregueEm: { gte: de, lte: ate } },
+      select: { valor: true },
+    });
+    const movimentos = await this.prisma.movimentoDaRua.findMany({
+      where: {
+        entrega: { caixaId },
+        OR: [
+          { data: { gte: de, lte: ate } },
+          { gastoPagoEm: { gte: de, lte: ate } },
+        ],
+      },
+    });
+    const somaDosMovimentos = (
+      tipo: TipoMovimentoDaRua,
+      quando: (m: (typeof movimentos)[number]) => Date | null,
+    ) =>
+      movimentos
+        .filter((m) => {
+          if (m.tipo !== tipo) return false;
+          const d = quando(m);
+          return !!d && d >= de && d <= ate;
+        })
+        .reduce((s, m) => s + Number(m.valor), 0);
+
+    const entregue =
+      entregas.reduce((s, d) => s + Number(d.valor), 0) +
+      somaDosMovimentos('REFORCO', (m) => m.data);
+
+    return arredondar(
+      -entregue +
+        somaDosMovimentos('TROCO', (m) => m.data) +
+        somaDosMovimentos('NOTA', (m) => m.gastoPagoEm),
+    );
   }
 
   /**
@@ -1165,6 +1284,27 @@ export class FechamentoCaixaService {
         `Este caixa já está fechado até ${formatarDia(extrato.resumo.fechadoAte)}. ` +
           `Comece o período em ${formatarDia(diaSeguinte(extrato.resumo.fechadoAte))} — ` +
           'recontar dias já conferidos somaria as mesmas saídas duas vezes.',
+      );
+    }
+
+    /*
+     * Período que pula dias desde o último fechamento também é recusado.
+     *
+     * O outro lado do mesmo erro: o saldo inicial vem do fechamento anterior,
+     * e ele não sabe o que aconteceu nos dias saltados. Fechar assim assinaria
+     * um saldo final que já nasce sem o movimento daqueles dias — e o próximo
+     * período partiria dele. A tela avisa antes; aqui se barra, porque o
+     * estrago fica guardado.
+     */
+    if (
+      extrato.resumo.fechadoAte &&
+      dados.de > diaSeguinte(extrato.resumo.fechadoAte)
+    ) {
+      const primeiro = diaSeguinte(extrato.resumo.fechadoAte);
+      throw new BadRequestException(
+        `Este caixa está conferido até ${formatarDia(extrato.resumo.fechadoAte)}, ` +
+          `e os dias a partir de ${formatarDia(primeiro)} ficariam de fora da ` +
+          `contagem. Comece o período em ${formatarDia(primeiro)}.`,
       );
     }
 

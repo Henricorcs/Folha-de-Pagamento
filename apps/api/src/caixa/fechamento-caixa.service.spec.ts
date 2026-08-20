@@ -14,6 +14,8 @@ import { FechamentoCaixaService } from './fechamento-caixa.service';
  *    fica negativo por engano de digitação;
  *  - a contagem da gaveta vence o cálculo, e é dela que o período seguinte
  *    parte — senão a diferença anda de fechamento em fechamento;
+ *  - o saldo da gaveta é um fato do caixa e não do recorte: mudar a data
+ *    inicial na tela não muda o dinheiro que tem de estar lá;
  *  - a despesa lançada pela prestação não desconta o dinheiro duas vezes;
  *  - a foto nunca sai numa listagem.
  */
@@ -29,6 +31,26 @@ interface ConsultaDeFechamento {
   where?: { caixaId?: number; ate?: { lt?: Date } };
   orderBy?: unknown;
 }
+
+/**
+ * As duas perguntas à tabela do dinheiro na rua: as contas abertas agora (sem
+ * data) e as entregas de um intervalo. O `entregueEm` é o que as separa.
+ */
+interface ConsultaDeEntrega {
+  where?: {
+    caixaId?: number;
+    baixadoEm?: null;
+    entregueEm?: { gte: Date; lte: Date };
+  };
+}
+
+/**
+ * A entrega do teste que não diz quando aconteceu serve para qualquer
+ * intervalo: a maioria dos casos não tem nada a dizer sobre datas, e datar
+ * todas só para o filtro do dublê enterraria o que cada uma quer mostrar.
+ */
+const dentro = (d: Date | undefined, faixa: { gte: Date; lte: Date }) =>
+  d === undefined || (d >= faixa.gte && d <= faixa.lte);
 
 function montarServico(
   opts: {
@@ -90,14 +112,18 @@ function montarServico(
       findMany: jest.fn().mockResolvedValue(opts.diariasAssinadas ?? []),
     },
     dinheiroNaRua: {
-      // Primeira chamada: as contas abertas. Segunda: as entregas do período,
-      // para o saldo da gaveta.
-      findMany: jest
-        .fn()
-        .mockResolvedValueOnce(
-          (opts.naRua ?? []).map((d) => ({ movimentos: [], ...d })),
-        )
-        .mockResolvedValue(opts.entregasDoPeriodo ?? []),
+      // Qual das duas perguntas é, pelo filtro e não pela ordem: com a gaveta
+      // somando dias fora do recorte, a das entregas vem mais de uma vez.
+      findMany: jest.fn(async (args: ConsultaDeEntrega) =>
+        args.where?.entregueEm
+          ? (opts.entregasDoPeriodo ?? []).filter((d) =>
+              dentro(
+                d.entregueEm as Date | undefined,
+                args.where!.entregueEm!,
+              ),
+            )
+          : (opts.naRua ?? []).map((d) => ({ movimentos: [], ...d })),
+      ),
       findUnique: jest
         .fn()
         .mockResolvedValue(
@@ -142,10 +168,22 @@ function montarServico(
        * período (filtrado por data) e o último do caixa (sem filtro). O filtro
        * é o que as distingue.
        */
-      findFirst: jest.fn(async (args: Record<string, never> | ConsultaDeFechamento) =>
-        (args as ConsultaDeFechamento).where?.ate
-          ? (opts.anterior ?? null)
-          : (opts.ultimo ?? null),
+      findFirst: jest.fn(
+        async (args: Record<string, never> | ConsultaDeFechamento) => {
+          const consulta = args as ConsultaDeFechamento;
+          if (!consulta.where?.ate) return opts.ultimo ?? null;
+          if (!opts.anterior) return null;
+          /*
+           * Sem `ate` informado, o anterior termina na véspera do período —
+           * o encaixe normal, em que a gaveta parte de onde a tela começa.
+           * Teste que queira dias soltos entre um fechamento e o outro diz o
+           * `ate` dele.
+           */
+          const vespera = new Date(consulta.where.ate.lt as Date);
+          vespera.setDate(vespera.getDate() - 1);
+          vespera.setHours(23, 59, 59, 999);
+          return { ate: vespera, saldoContado: null, ...opts.anterior };
+        },
       ),
       findUnique: jest.fn().mockResolvedValue(opts.fechamento ?? null),
       create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -180,7 +218,24 @@ function montarServico(
     listarCaixas: jest
       .fn()
       .mockResolvedValue({ tabela: 'contas', caixas: [{ id: 7, nome: 'CX - Werick' }] }),
-    listarLancamentos: jest.fn().mockResolvedValue({ tabela: 'fn_lancamento_caixa', lancamentos }),
+    /*
+     * Por data, como o webservice filtra — e por dia inteiro, como ele: as
+     * pontas do intervalo viram 00:00 e 23:59:59.999 antes de comparar.
+     * Devolver tudo a qualquer intervalo esconderia justamente a diferença
+     * entre o que a gaveta soma e o que a tela mostra.
+     */
+    listarLancamentos: jest.fn(async (_caixa: number, de: Date, ate: Date) => {
+      const inicio = new Date(de);
+      inicio.setHours(0, 0, 0, 0);
+      const fim = new Date(ate);
+      fim.setHours(23, 59, 59, 999);
+      return {
+        tabela: 'fn_lancamento_caixa',
+        lancamentos: lancamentos.filter(
+          (l) => l.data >= inicio && l.data <= fim,
+        ),
+      };
+    }),
     resolverCaixa: jest.fn().mockResolvedValue(7),
   };
 
@@ -209,6 +264,22 @@ const saida = (id: number, valor: number) => ({
   valor,
   historico: `saída ${id}`,
   tipo: 'SAIDA' as const,
+});
+
+/** O dia em que as prestações destes testes dizem que o dinheiro saiu. */
+const PAGO_EM = new Date(2026, 7, 19, 10);
+
+/** A mesma saída, no dia em que se quer que ela tenha acontecido. */
+const saidaEm = (id: number, valor: number, data: Date) => ({
+  ...saida(id, valor),
+  data,
+});
+
+/** Uma entrada de dinheiro no caixa, no dia escolhido. */
+const entradaEm = (id: number, valor: number, data: Date) => ({
+  ...saidaEm(id, valor, data),
+  historico: `entrada ${id}`,
+  tipo: 'ENTRADA' as const,
 });
 
 describe('extrato do caixa', () => {
@@ -609,7 +680,9 @@ describe('a conta de quem levou dinheiro', () => {
   it('a saída criada no IXC recebe as fotos, e continua por conferir', async () => {
     const { service, prisma } = montarServico({
       entrega: conta,
-      lancamentos: [saida(77, 100)],
+      // No mesmo dia em que a prestação diz que o dinheiro saiu: é entre as
+      // saídas daquele dia que a foto vai procurar a sua.
+      lancamentos: [saidaEm(77, 100, PAGO_EM)],
     });
 
     await service.lancarMovimento(
@@ -643,7 +716,7 @@ describe('a conta de quem levou dinheiro', () => {
   it('não toma uma saída que já tem foto', async () => {
     const { service, prisma } = montarServico({
       entrega: conta,
-      lancamentos: [saida(77, 100), saida(78, 100)],
+      lancamentos: [saidaEm(77, 100, PAGO_EM), saidaEm(78, 100, PAGO_EM)],
       conferencias: [{ idLancamentoIxc: 77, conferido: true, qtdNotas: 1 }],
     });
 
@@ -974,6 +1047,105 @@ describe('o saldo que deve estar na gaveta', () => {
     // Saíram 200, voltaram 50: a gaveta ficou 150 menor.
     expect(e.resumo.saldoEsperado).toBe(850);
   });
+
+  /*
+   * O defeito que trouxe esta parte: o mesmo caixa, no mesmo dia, mostrava
+   * R$ 4.766,00 quando o recorte começava em 20/08 e R$ 3.562,00 quando
+   * começava em 19/08. O saldo saía da soma do recorte sobre o fechamento
+   * anterior, e o dia 19 — que não estava no recorte nem dentro do fechamento
+   * — não entrava em conta nenhuma. O dinheiro na gaveta é um só.
+   */
+  it('não muda de valor quando a data inicial muda', async () => {
+    // Fechado até 18/08 com 3.311 na gaveta. No dia 19 saíram 2.008 e
+    // entraram 804; no dia 20, saíram 255 e entraram 1.710.
+    const fechadoAte18 = {
+      anterior: {
+        saldoFinal: 3311,
+        ate: new Date(2026, 7, 18, 23, 59, 59, 999),
+      },
+      lancamentos: [
+        saidaEm(1, 2008, new Date(2026, 7, 19, 14)),
+        entradaEm(2, 804, new Date(2026, 7, 19, 15)),
+        saidaEm(3, 255, new Date(2026, 7, 20, 9)),
+        entradaEm(4, 1710, new Date(2026, 7, 20, 10)),
+      ],
+    };
+
+    const desde19 = await montarServico(fechadoAte18).service.extrato(
+      7,
+      '2026-08-19',
+      '2026-08-20',
+    );
+    const so20 = await montarServico(fechadoAte18).service.extrato(
+      7,
+      '2026-08-20',
+      '2026-08-20',
+    );
+
+    expect(desde19.resumo.saldoEsperado).toBe(3562);
+    expect(so20.resumo.saldoEsperado).toBe(3562);
+    expect(so20.resumo.gavetaDesde).toBe('2026-08-19');
+    // O recorte continua mandando no resto da tela: a lista é a do dia pedido.
+    expect(so20.resumo.saidas).toBe(255);
+    expect(so20.resumo.entradas).toBe(1710);
+    expect(so20.resumo.lancamentos).toBe(2);
+  });
+
+  it('o que saiu com alguém fora do recorte também falta na gaveta', async () => {
+    const { service } = montarServico({
+      anterior: {
+        saldoFinal: 1000,
+        ate: new Date(2026, 7, 18, 23, 59, 59, 999),
+      },
+      entregasDoPeriodo: [
+        { valor: 150, entregueEm: new Date(2026, 7, 19, 16) },
+      ],
+    });
+
+    const e = await service.extrato(7, '2026-08-20', '2026-08-20');
+
+    // A entrega não é do período mostrado, e por isso não aparece no
+    // indicador dele — mas o dinheiro não está na gaveta.
+    expect(e.resumo.entregueNoPeriodo).toBe(0);
+    expect(e.resumo.saldoEsperado).toBe(850);
+  });
+
+  /*
+   * Fechamento assinado antes de 02eaaea guarda `ate` à meia-noite do último
+   * dia. Partir do instante seguinte recontaria o dia 18 inteiro — dias que
+   * aquele fechamento já tinha contado e já estão no saldo dele.
+   */
+  it('fechamento antigo, com ate à meia-noite, não reconta o próprio dia', async () => {
+    const { service } = montarServico({
+      anterior: { saldoFinal: 1000, ate: new Date(2026, 7, 18) },
+      lancamentos: [saidaEm(1, 300, new Date(2026, 7, 18, 15))],
+    });
+
+    const e = await service.extrato(7, '2026-08-20', '2026-08-20');
+
+    expect(e.resumo.saldoEsperado).toBe(1000);
+  });
+
+  /*
+   * Os dias que faltam são mais velhos que o recorte, e a leitura do IXC
+   * caminha do mais novo para o mais velho: pedir os dois intervalos em
+   * separado faria a segunda ida percorrer de novo o caminho da primeira.
+   */
+  it('lê o IXC uma vez só, desde o dia seguinte ao fechamento', async () => {
+    const { service, caixa } = montarServico({
+      anterior: {
+        saldoFinal: 1000,
+        ate: new Date(2026, 7, 18, 23, 59, 59, 999),
+      },
+    });
+
+    await service.extrato(7, '2026-08-20', '2026-08-20');
+
+    expect(caixa.listarLancamentos).toHaveBeenCalledTimes(1);
+    const [, de, ate] = caixa.listarLancamentos.mock.calls[0];
+    expect(de).toEqual(new Date(2026, 7, 19));
+    expect(ate).toEqual(new Date(2026, 7, 20, 23, 59, 59, 999));
+  });
 });
 
 describe('fechar o período', () => {
@@ -1106,11 +1278,31 @@ describe('fechar o período', () => {
     ).rejects.toThrow(/já está fechado até 18\/08\/2026.*19\/08\/2026/s);
   });
 
+  /*
+   * O outro lado do mesmo erro: o saldo inicial vem do fechamento anterior e
+   * não sabe o que aconteceu nos dias saltados. Fechar assim assinaria um
+   * saldo final sem o movimento deles, e o período seguinte partiria dali.
+   */
+  it('recusa período que pula dias desde o último fechamento', async () => {
+    const { service } = montarServico({
+      ultimo: { ate: new Date(2026, 7, 18, 23, 59, 59, 999) },
+      anterior: {
+        saldoFinal: 1000,
+        ate: new Date(2026, 7, 18, 23, 59, 59, 999),
+      },
+    });
+
+    await expect(
+      service.fechar({ caixaId: 7, de: '2026-08-20', ate: '2026-08-31' }),
+    ).rejects.toThrow(/conferido até 18\/08\/2026.*19\/08\/2026/s);
+  });
+
   it('começando no dia seguinte ao último, fecha normalmente', async () => {
     const { service, criados } = montarServico({
       anterior: { saldoFinal: 0, saldoContado: 3368 },
       ultimo: { ate: new Date(2026, 7, 18) },
-      lancamentos: [saida(1, 100)],
+      // Dentro do período que vai ser fechado, e não na véspera dele.
+      lancamentos: [saidaEm(1, 100, new Date(2026, 7, 20))],
       conferencias: [{ idLancamentoIxc: 1, conferido: true }],
     });
 

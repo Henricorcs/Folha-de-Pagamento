@@ -1436,7 +1436,17 @@ export interface ExtratoDoCaixa {
      * saiu na entrega e voltou a sair como conta a pagar baixada no caixa.
      */
     gastoLancadoNoPeriodo: number;
-    /** O que deve estar na gaveta agora. Null enquanto falta o inicial. */
+    /**
+     * De que dia a gaveta está sendo somada (AAAA-MM-DD) — o dia seguinte ao
+     * último fechamento, seja qual for o `de` pedido.
+     */
+    gavetaDesde: string | null;
+    /**
+     * O que deve estar na gaveta agora. Null enquanto falta o inicial.
+     *
+     * Não depende do recorte: conta desde o último fechamento, mesmo que a
+     * tela esteja mostrando só os últimos dias.
+     */
     saldoEsperado: number | null;
   };
   fechamentos: FechamentoCaixa[];

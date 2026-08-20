@@ -421,7 +421,15 @@ function Conferencia({
                     : `${qtdEntradas} entradas — reforço, devolução ou troco`
               }
             />
-            {/* O que a gaveta deve ter agora. */}
+            {/*
+              O que a gaveta deve ter agora — e não o que o recorte diz.
+
+              Este é o único número da tela que não segue o "De": ele conta do
+              último fechamento até aqui, passando por cima dos dias que
+              ficaram fora do filtro. Se seguisse o recorte, mudaria de valor a
+              cada data escolhida, e nenhuma das versões seria o dinheiro que
+              está na gaveta. Por isso o detalhe diz desde quando ele conta.
+            */}
             <Indicador
               rotulo="Saldo esperado na gaveta"
               valor={
@@ -430,8 +438,8 @@ function Conferencia({
                   : formatBRL(resumo.saldoEsperado)
               }
               detalhe={
-                resumo.saldoEsperado !== null
-                  ? `de ${formatBRL(resumo.saldoInicial ?? 0)} no início do período`
+                resumo.saldoEsperado !== null && resumo.gavetaDesde
+                  ? `de ${formatBRL(resumo.saldoInicial ?? 0)}, contando desde ${formatData(resumo.gavetaDesde)}`
                   : invadeFechado
                     ? `comece o período em ${formatData(diaSeguinte(invadeFechado))}`
                     : 'informe o saldo inicial ao fechar'
