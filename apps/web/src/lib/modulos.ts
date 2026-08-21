@@ -149,9 +149,30 @@ export const MODULO_FOLHA = folha;
 export const MODULO_CONTAS_PAGAR = contasPagar;
 export const MODULO_RH = rh;
 
-/** Os módulos que este perfil enxerga. */
-export function modulosDoPerfil(papel?: PerfilUsuario): Modulo[] {
-  return MODULOS.filter((m) => !m.papeis || (papel && m.papeis.includes(papel)));
+/**
+ * Os módulos que este login abre.
+ *
+ * Duas perguntas se somam aqui. O **perfil** diz o que a pessoa pode fazer, e
+ * alguns módulos só existem para certos perfis (o RH guarda contrato e exame
+ * médico). A **lista do login** diz onde ela trabalha, e é o administrador quem
+ * a distribui — quem cuida do RH não tem o que fazer no caixa da empresa.
+ *
+ * Lista vazia é sem restrição, e ADMIN passa sempre: é ele quem distribui o
+ * acesso, e trancar a si mesmo não teria conserto pela tela. A API repete a
+ * mesma conta — aqui o módulo só some do menu.
+ */
+export function modulosDoUsuario(usuario?: {
+  role: PerfilUsuario;
+  modulos?: string[];
+} | null): Modulo[] {
+  if (!usuario) return [];
+  const lista = usuario.modulos ?? [];
+  const semRestricao = usuario.role === 'ADMIN' || lista.length === 0;
+
+  return MODULOS.filter((m) => {
+    if (m.papeis && !m.papeis.includes(usuario.role)) return false;
+    return semRestricao || lista.includes(m.id);
+  });
 }
 
 export function caminhoInicial(modulo: Modulo): string {

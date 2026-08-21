@@ -1,0 +1,12 @@
+-- Os modulos que cada login abre.
+--
+-- O perfil ja dizia o que a pessoa pode fazer (ADMIN, RH, VISUALIZADOR); isto
+-- diz onde. Sao perguntas diferentes: quem cuida do RH mexe em tudo dentro do
+-- RH e nao tem o que fazer no caixa da empresa.
+--
+-- Vazio = todos, de proposito. E uma lista de restricao, e nao de permissao:
+-- assim os logins que existiam antes desta coluna continuam abrindo o que sempre
+-- abriram, e ninguem fica trancado do lado de fora por causa de uma migracao.
+-- Quem e ADMIN passa em qualquer caso -- e ele quem distribui o acesso, e
+-- trancar a si mesmo nao teria conserto pela tela.
+ALTER TABLE "users" ADD COLUMN "modulos" TEXT[] DEFAULT ARRAY[]::TEXT[];

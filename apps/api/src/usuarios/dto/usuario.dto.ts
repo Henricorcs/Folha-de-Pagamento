@@ -1,13 +1,17 @@
 import { UserRole } from '@prisma/client';
 import { Transform } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsEmail,
   IsEnum,
+  IsIn,
   IsOptional,
   IsString,
   MinLength,
 } from 'class-validator';
+import { MODULOS } from '../../auth/modulos.guard';
 
 const email = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.toLowerCase().trim() : value;
@@ -29,6 +33,13 @@ export class CriarUsuarioDto {
   @IsOptional()
   @IsEnum(UserRole)
   role?: UserRole;
+
+  /** Os módulos que este login abre. Vazio = todos. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MODULOS.length)
+  @IsIn(MODULOS as unknown as string[], { each: true })
+  modulos?: string[];
 }
 
 export class AtualizarUsuarioDto {
@@ -49,6 +60,13 @@ export class AtualizarUsuarioDto {
   @IsOptional()
   @IsBoolean()
   ativo?: boolean;
+
+  /** Os módulos que este login abre. Vazio = todos. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MODULOS.length)
+  @IsIn(MODULOS as unknown as string[], { each: true })
+  modulos?: string[];
 
   /** Preenchido, define uma nova senha (o admin não vê a antiga). */
   @IsOptional()

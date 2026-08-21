@@ -26,6 +26,15 @@ model User {
   senhaHash String   @map("senha_hash")
   role      UserRole @default(RH)
   ativo     Boolean  @default(true)
+
+  /// Os módulos que este login abre ("folha", "contas-pagar", "rh").
+  ///
+  /// **Vazio = todos.** É uma lista de restrição, e não de permissão: assim os
+  /// logins que existiam antes desta coluna continuam abrindo o que sempre
+  /// abriram, e ninguém fica trancado do lado de fora por causa de uma
+  /// migração. Quem é ADMIN passa em qualquer caso — é ele quem distribui o
+  /// acesso, e trancar a si mesmo não teria conserto pela tela.
+  modulos   String[] @default([])
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

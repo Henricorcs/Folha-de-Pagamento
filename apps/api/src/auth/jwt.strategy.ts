@@ -27,7 +27,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   async validate(payload: JwtPayload) {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, nome: true, email: true, role: true, ativo: true },
+      // Os módulos vêm do banco, e não do token: tirar um de alguém tem efeito
+      // no clique seguinte, e não quando o login dela expirar.
+      select: {
+        id: true,
+        nome: true,
+        email: true,
+        role: true,
+        ativo: true,
+        modulos: true,
+      },
     });
     if (!user || !user.ativo) {
       throw new UnauthorizedException('Usuário inválido ou inativo');

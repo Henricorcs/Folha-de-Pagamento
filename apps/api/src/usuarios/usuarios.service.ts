@@ -15,6 +15,7 @@ const CAMPOS = {
   nome: true,
   email: true,
   role: true,
+  modulos: true,
   ativo: true,
   createdAt: true,
   updatedAt: true,
@@ -41,6 +42,8 @@ export class UsuariosService {
           email: dto.email,
           senhaHash: await bcrypt.hash(dto.senha, CUSTO_HASH),
           role: dto.role ?? UserRole.RH,
+          // Vazio = todos. Ver o comentário da coluna no schema.
+          modulos: dto.modulos ?? [],
         },
         select: CAMPOS,
       });
@@ -73,6 +76,7 @@ export class UsuariosService {
           nome: dto.nome?.trim(),
           email: dto.email,
           role: dto.role,
+          modulos: dto.modulos,
           ativo: dto.ativo,
           ...(dto.senha
             ? { senhaHash: await bcrypt.hash(dto.senha, CUSTO_HASH) }

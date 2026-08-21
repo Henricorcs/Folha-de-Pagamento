@@ -35,6 +35,7 @@ export class AuthService {
         nome: user.nome,
         email: user.email,
         role: user.role,
+        modulos: user.modulos,
       },
     };
   }

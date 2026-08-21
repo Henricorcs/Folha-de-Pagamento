@@ -20,6 +20,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
 import { RhModule } from './rh/rh.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
+import { ModulosGuard } from './auth/modulos.guard';
 import { RolesGuard } from './auth/roles.guard';
 import { HealthController } from './health/health.controller';
 
@@ -55,6 +56,8 @@ import { HealthController } from './health/health.controller';
     // Depois do login, o perfil decide o que dá para fazer. A ordem importa:
     // o JwtAuthGuard precisa ter posto o usuário na requisição antes.
     { provide: APP_GUARD, useClass: RolesGuard },
+    // E, por último, onde ela pode fazer: o perfil diz o quê, o módulo diz onde.
+    { provide: APP_GUARD, useClass: ModulosGuard },
   ],
 })
 export class AppModule {}

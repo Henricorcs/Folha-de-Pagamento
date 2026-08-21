@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Navigate, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import type { Modulo } from '../lib/modulos';
+import { modulosDoUsuario, type Modulo } from '../lib/modulos';
 import { useTema } from '../lib/tema';
 import { IconeGrade, IconeLua, IconeSol } from './icones';
 
@@ -24,6 +24,16 @@ export function Layout({ modulo }: { modulo: Modulo }) {
     logout();
     navigate('/login');
   }
+
+  /*
+   * Módulo que este login não abre não se mostra nem pelo endereço direto.
+   *
+   * Quem recusa de verdade é a API — cada rota dela confere a lista —, mas uma
+   * tela que carrega para depois encher de "sem acesso" é pior que não abrir:
+   * de volta à escolha de módulos, que é onde a pessoa consegue fazer algo.
+   */
+  const abre = modulosDoUsuario(usuario).some((m) => m.id === modulo.id);
+  if (usuario && !abre) return <Navigate to="/modulos" replace />;
 
   return (
     <div className="flex min-h-screen bg-tinta-50">

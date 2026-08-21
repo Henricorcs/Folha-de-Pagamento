@@ -5,6 +5,11 @@ export interface Usuario {
   nome: string;
   email: string;
   role: PerfilUsuario;
+  /**
+   * Os módulos que este login abre ("folha", "contas-pagar", "rh").
+   * **Vazio = todos** — é lista de restrição, não de permissão.
+   */
+  modulos?: string[];
 }
 
 /** Login como aparece na tela de gerenciamento (só para ADMIN). */

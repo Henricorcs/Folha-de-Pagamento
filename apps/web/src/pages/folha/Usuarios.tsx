@@ -5,12 +5,14 @@ import {
   Bloco,
   CabecalhoPagina,
   Carregando,
+  Janela,
   Pagina,
   Selo,
 } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { formatData } from '../../lib/format';
+import { MODULOS } from '../../lib/modulos';
 import { PERFIL_DESCRICAO, PERFIL_LABEL, PERFIL_TOM } from '../../lib/status';
 import type { PerfilUsuario, UsuarioAdmin } from '../../lib/types';
 
@@ -21,6 +23,7 @@ export function Usuarios() {
   const { usuario: eu } = useAuth();
   const [feedback, setFeedback] = useState<string | null>(null);
   const [erro, setErro] = useState(false);
+  const [editando, setEditando] = useState<UsuarioAdmin | null>(null);
 
   const lista = useQuery({
     queryKey: ['usuarios'],
@@ -98,6 +101,7 @@ export function Usuarios() {
                 <tr className="border-t border-tinta-200">
                   <th className="th">Pessoa</th>
                   <th className="th">Perfil</th>
+                  <th className="th">Módulos</th>
                   <th className="th">Criado em</th>
                   <th className="th text-center">Acesso</th>
                   <th className="th text-right">Ações</th>
@@ -106,7 +110,7 @@ export function Usuarios() {
               <tbody>
                 {lista.isLoading && (
                   <tr>
-                    <td colSpan={5}>
+                    <td colSpan={6}>
                       <Carregando />
                     </td>
                   </tr>
@@ -146,6 +150,15 @@ export function Usuarios() {
                           ))}
                         </select>
                       </td>
+                      <td className="td">
+                        <ModulosDoLogin
+                          usuario={u}
+                          pendente={alterar.isPending}
+                          onMudar={(modulos) =>
+                            alterar.mutate({ id: u.id, dados: { modulos } })
+                          }
+                        />
+                      </td>
                       <td className="td num text-tinta-500">
                         {formatData(u.createdAt)}
                       </td>
@@ -176,6 +189,12 @@ export function Usuarios() {
                       </td>
                       <td className="td text-right">
                         <div className="flex justify-end gap-3 text-xs font-semibold">
+                          <button
+                            onClick={() => setEditando(u)}
+                            className="text-brand-700 hover:underline"
+                          >
+                            editar
+                          </button>
                           <button
                             onClick={() => novaSenha(u)}
                             className="text-brand-700 hover:underline"
@@ -208,6 +227,24 @@ export function Usuarios() {
         </Bloco>
       </div>
 
+      {editando && (
+        <Janela
+          titulo={`Editar — ${editando.nome}`}
+          onFechar={() => setEditando(null)}
+        >
+          <EditarLogin
+            usuario={editando}
+            pendente={alterar.isPending}
+            onSalvar={(dados) => {
+              alterar.mutate(
+                { id: editando.id, dados },
+                { onSuccess: () => setEditando(null) },
+              );
+            }}
+          />
+        </Janela>
+      )}
+
       <div className="surgir surgir-3 mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
         {PERFIS.map((p) => (
           <div key={p} className="card p-5">
@@ -233,16 +270,26 @@ function NovoUsuario({
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [role, setRole] = useState<PerfilUsuario>('RH');
+  /** Vazio = todos, que é o que a API entende e o que a tela mostra ligado. */
+  const [modulos, setModulos] = useState<string[]>([]);
 
   const criar = useMutation({
     mutationFn: async () =>
-      (await api.post<UsuarioAdmin>('/usuarios', { nome, email, senha, role }))
-        .data,
+      (
+        await api.post<UsuarioAdmin>('/usuarios', {
+          nome,
+          email,
+          senha,
+          role,
+          modulos,
+        })
+      ).data,
     onSuccess: (u) => {
       setNome('');
       setEmail('');
       setSenha('');
       setRole('RH');
+      setModulos([]);
       onCriado(u.nome);
     },
     onError: (err) => onErro(mensagemErro(err)),
@@ -313,6 +360,48 @@ function NovoUsuario({
         </div>
       </div>
 
+      {/* Onde este login trabalha. Nada marcado = todos os módulos que o
+          perfil permite, que é o padrão de sempre. */}
+      <div className="mt-4">
+        <span className="rotulo">Módulos</span>
+        <div className="flex flex-wrap gap-1.5">
+          {MODULOS.map((m) => {
+            const ligado = modulos.length === 0 || modulos.includes(m.id);
+            const some = m.papeis && !m.papeis.includes(role);
+            return (
+              <button
+                key={m.id}
+                type="button"
+                disabled={some}
+                onClick={() => {
+                  const atual =
+                    modulos.length === 0 ? MODULOS.map((x) => x.id) : modulos;
+                  const novo = ligado
+                    ? atual.filter((id) => id !== m.id)
+                    : [...atual, m.id];
+                  if (novo.length === 0) return;
+                  setModulos(novo);
+                }}
+                className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                  some
+                    ? 'cursor-not-allowed border-tinta-100 text-tinta-300'
+                    : ligado
+                      ? 'border-brand-300 bg-brand-500/10 text-brand-700'
+                      : 'border-tinta-200 text-tinta-400 hover:border-tinta-300'
+                }`}
+                title={
+                  some
+                    ? `O perfil ${PERFIL_LABEL[role]} não abre ${m.nome}`
+                    : undefined
+                }
+              >
+                {m.nome}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="mt-5 flex flex-wrap items-center gap-4 border-t border-tinta-100 pt-5">
         <button
           onClick={() => criar.mutate()}
@@ -327,5 +416,147 @@ function NovoUsuario({
         </p>
       </div>
     </Bloco>
+  );
+}
+
+/**
+ * Onde este login trabalha.
+ *
+ * O perfil diz o que a pessoa pode fazer; isto diz onde. Um módulo apagado é um
+ * módulo que nem aparece para ela — nem no menu, nem digitando o endereço, e a
+ * API recusa do mesmo jeito.
+ *
+ * Lista vazia é "todos", e é assim que nascem os logins antigos: por isso, sem
+ * nada marcado, os três aparecem ligados. Desmarcar um grava a lista dos que
+ * sobraram. O ADMIN não se restringe: é ele quem distribui o acesso, e trancar
+ * a si mesmo não teria conserto por aqui.
+ */
+function ModulosDoLogin({
+  usuario,
+  pendente,
+  onMudar,
+}: {
+  usuario: UsuarioAdmin;
+  pendente: boolean;
+  onMudar: (modulos: string[]) => void;
+}) {
+  if (usuario.role === 'ADMIN') {
+    return (
+      <span className="text-xs text-tinta-400" title="Administrador abre tudo">
+        todos
+      </span>
+    );
+  }
+
+  const lista = usuario.modulos ?? [];
+  const todos = lista.length === 0;
+
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {MODULOS.map((m) => {
+        const ligado = todos || lista.includes(m.id);
+        const some = m.papeis && !m.papeis.includes(usuario.role);
+        return (
+          <button
+            key={m.id}
+            type="button"
+            disabled={pendente || some}
+            title={
+              some
+                ? `O perfil ${PERFIL_LABEL[usuario.role]} não abre ${m.nome}`
+                : ligado
+                  ? `Tirar ${m.nome} deste login`
+                  : `Dar ${m.nome} a este login`
+            }
+            onClick={() => {
+              const atual = todos ? MODULOS.map((x) => x.id) : [...lista];
+              const novo = ligado
+                ? atual.filter((id) => id !== m.id)
+                : [...atual, m.id];
+              // Sem nenhum marcado a lista voltaria a significar "todos", que é
+              // o contrário do que quem desmarcou o último quis dizer.
+              if (novo.length === 0) return;
+              onMudar(novo);
+            }}
+            className={`rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${
+              some
+                ? 'cursor-not-allowed border-tinta-100 text-tinta-300'
+                : ligado
+                  ? 'border-brand-300 bg-brand-500/10 text-brand-700'
+                  : 'border-tinta-200 text-tinta-400 hover:border-tinta-300'
+            }`}
+          >
+            {m.nome}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Nome e e-mail de um login. A senha tem caminho próprio; o perfil, também. */
+function EditarLogin({
+  usuario,
+  pendente,
+  onSalvar,
+}: {
+  usuario: UsuarioAdmin;
+  pendente: boolean;
+  onSalvar: (dados: { nome: string; email: string }) => void;
+}) {
+  const [nome, setNome] = useState(usuario.nome);
+  const [email, setEmail] = useState(usuario.email);
+
+  const valido = nome.trim().length >= 2 && email.includes('@');
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (valido) onSalvar({ nome: nome.trim(), email: email.trim() });
+      }}
+    >
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label className="rotulo" htmlFor="editar-nome">
+            Nome
+          </label>
+          <input
+            id="editar-nome"
+            value={nome}
+            onChange={(e) => setNome(e.target.value)}
+            className="campo"
+            autoFocus
+          />
+        </div>
+        <div>
+          <label className="rotulo" htmlFor="editar-email">
+            E-mail
+          </label>
+          <input
+            id="editar-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="campo"
+            autoComplete="off"
+          />
+          <p className="ajuda">
+            É por ele que a pessoa entra. Trocando aqui, o login antigo deixa de
+            funcionar no mesmo instante.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-5 flex justify-end">
+        <button
+          type="submit"
+          disabled={!valido || pendente}
+          className="btn btn-primario"
+        >
+          {pendente ? 'Salvando…' : 'Salvar'}
+        </button>
+      </div>
+    </form>
   );
 }
