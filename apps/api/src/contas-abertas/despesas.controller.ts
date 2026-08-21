@@ -15,6 +15,7 @@ import type { Request } from 'express';
 import { FornecedorService } from '../financeiro/fornecedor.service';
 import { DespesasService } from './despesas.service';
 import {
+  AnexarNotaDto,
   CriarDespesaDto,
   EditarTituloDto,
   ExcluirLoteDto,
@@ -52,6 +53,22 @@ export class DespesasController {
     @Req() req: Request,
   ) {
     return this.pagamentos.pagar(idFnApagar, dto, usuarioNome(req));
+  }
+
+  /**
+   * Anexa a nota a um título no IXC.
+   *
+   * Rota própria, e não um campo da criação da despesa: assim a nota também
+   * entra depois, num título que já existe — e uma falha ao subir o arquivo não
+   * derruba o lançamento da conta, que é a parte que não dá para refazer.
+   */
+  @Post('contas-abertas/:idFnApagar/nota')
+  @HttpCode(200)
+  anexarNota(
+    @Param('idFnApagar', ParseIntPipe) idFnApagar: number,
+    @Body() dto: AnexarNotaDto,
+  ) {
+    return this.service.anexarNota(idFnApagar, dto);
   }
 
   /** Paga várias de uma vez, todas pela mesma forma. */

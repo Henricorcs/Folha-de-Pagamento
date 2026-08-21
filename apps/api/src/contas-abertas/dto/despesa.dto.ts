@@ -12,6 +12,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   MaxLength,
   Min,
   MinLength,
@@ -275,4 +276,24 @@ export class CriarDespesaDto {
    * não fecha.
    */
   @IsOptional() @IsISO8601() dataPagamento?: string;
+}
+
+/**
+ * A nota de uma conta a pagar, subindo para o IXC.
+ *
+ * Chega como data URL, que é o que o navegador dá tanto do arquivo escolhido
+ * quanto do print colado da área de transferência — e o segundo não tem nome
+ * nenhum, por isso o nome é opcional aqui.
+ */
+export class AnexarNotaDto {
+  @IsString({ message: 'Escolha ou cole a nota.' })
+  @Matches(/^data:[-\w.+]+\/[-\w.+]+;base64,/, {
+    message: 'O arquivo não chegou num formato que eu saiba ler.',
+  })
+  arquivo!: string;
+
+  @IsOptional() @IsString() @MaxLength(255) nome?: string;
+
+  /** O que aparece na lista de arquivos do título, no IXC. */
+  @IsOptional() @IsString() @MaxLength(100) descricao?: string;
 }

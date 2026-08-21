@@ -52,12 +52,17 @@ function montarServico(
     }),
   };
 
+  // O cliente do IXC só é usado para anexar a nota ao título; nenhum caso daqui
+  // passa por lá, e um dublê mudo basta para o construtor.
+  const ixc = { upload: jest.fn() };
+
   const service = new DespesasService(
     contasPagar as never,
     categorias as never,
     pagamentos as never,
+    ixc as never,
   );
-  return { service, contasPagar, categorias, pagamentos, conta };
+  return { service, contasPagar, categorias, pagamentos, conta , ixc };
 }
 
 const BASE: CriarDespesaDto = {
@@ -269,5 +274,66 @@ describe('DespesasService.lancar — conta que já foi paga', () => {
 
     expect(pagamentos.pagar).not.toHaveBeenCalled();
     expect(r.baixa?.avisos[0]).toContain('não recebeu número do IXC');
+  });
+});
+
+/**
+ * A nota que vai anexada ao título, no próprio IXC.
+ *
+ * O papel fica onde a conta está: quem abrir o título por lá acha a nota na aba
+ * de arquivos, sem saber que este sistema existe. O que se protege aqui é o
+ * nome do arquivo — print colado não tem nenhum, e anexo sem extensão vira um
+ * binário que não abre para quem clica.
+ */
+describe('a nota anexada à conta', () => {
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+  it('sobe para o recurso de arquivos do pagar, com o id do título', async () => {
+    const { service, ixc } = montarServico();
+
+    await service.anexarNota(4242, { arquivo: PNG, nome: 'cupom.png' });
+
+    const [recurso, campo, arquivo, campos] = ixc.upload.mock.calls[0];
+    expect(recurso).toBe('fn_apagar_arquivos');
+    expect(campo).toBe('arquivo');
+    expect(campos.id_apagar).toBe('4242');
+    expect(arquivo.nome).toBe('cupom.png');
+    expect(arquivo.tipo).toBe('image/png');
+  });
+
+  /* Print colado não tem nome: quem nomeia é a API, com a extensão do tipo. */
+  it('inventa nome com extensão quando o print não traz nenhum', async () => {
+    const { service, ixc } = montarServico();
+
+    const r = await service.anexarNota(4242, { arquivo: PNG });
+
+    expect(r.nome).toMatch(/^nota-[\d-]+\.png$/);
+    expect(ixc.upload.mock.calls[0][2].nome).toBe(r.nome);
+  });
+
+  it('põe a extensão no nome que veio sem ela', async () => {
+    const { service } = montarServico();
+
+    const r = await service.anexarNota(4242, { arquivo: PNG, nome: 'cupom' });
+
+    expect(r.nome).toBe('cupom.png');
+  });
+
+  /* Planilha e documento do Word não são prova de gasto. */
+  it('recusa o que não é imagem nem PDF', async () => {
+    const { service, ixc } = montarServico();
+
+    await expect(
+      service.anexarNota(4242, { arquivo: 'data:text/plain;base64,b2k=' }),
+    ).rejects.toThrow(/PDF ou imagem/i);
+    expect(ixc.upload).not.toHaveBeenCalled();
+  });
+
+  it('a descrição é o que a lista de arquivos do IXC mostra', async () => {
+    const { service, ixc } = montarServico();
+
+    await service.anexarNota(4242, { arquivo: PNG, descricao: 'Combustível' });
+
+    expect(ixc.upload.mock.calls[0][3].descricao).toBe('Combustível');
   });
 });

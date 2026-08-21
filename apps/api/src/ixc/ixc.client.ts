@@ -130,10 +130,43 @@ export class IxcClient {
     return this.write('post', `/${endpoint}`, body);
   }
 
+  /**
+   * Anexa um arquivo — os anexos do IXC não vão em JSON.
+   *
+   * `fn_apagar_arquivos` e os parentes dele (`cliente_arquivos`,
+   * `su_oss_chamado_arquivos`) recebem `multipart/form-data`: o binário num
+   * campo e o resto como texto ao lado. É o mesmo corpo que a tela do IXC manda
+   * quando alguém anexa um papel por lá.
+   *
+   * O nome do campo do arquivo muda por recurso — "arquivo" no pagar,
+   * "local_arquivo" no cliente e na OS —, então vem de quem chama.
+   */
+  async upload(
+    recurso: string,
+    campoDoArquivo: string,
+    arquivo: { nome: string; tipo: string; conteudo: Buffer },
+    campos: Record<string, string>,
+  ): Promise<IxcActionResponse> {
+    const form = new FormData();
+    for (const [chave, valor] of Object.entries(campos)) {
+      form.append(chave, valor);
+    }
+    form.append(
+      campoDoArquivo,
+      new Blob([new Uint8Array(arquivo.conteudo)], { type: arquivo.tipo }),
+      arquivo.nome,
+    );
+
+    // Sem `Content-Type` à mão: o axios põe o boundary do multipart, e um
+    // cabeçalho escrito aqui o apagaria — o IXC receberia um corpo que não
+    // consegue separar.
+    return this.write('post', `/${recurso}`, form);
+  }
+
   private async write(
     method: 'post' | 'put' | 'delete',
     url: string,
-    body?: Record<string, unknown>,
+    body?: unknown,
   ): Promise<IxcActionResponse> {
     let res;
     try {

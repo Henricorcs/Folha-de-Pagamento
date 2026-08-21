@@ -52,12 +52,17 @@ function montarServico(opts: { falharNa?: number } = {}) {
     })),
   };
 
+  // O cliente do IXC só é usado para anexar a nota ao título; nenhum caso daqui
+  // passa por lá, e um dublê mudo basta para o construtor.
+  const ixc = { upload: jest.fn() };
+
   const service = new DespesasService(
     contasPagar as never,
     categorias as never,
     pagamentos as never,
+    ixc as never,
   );
-  return { service, contasPagar, categorias, pagamentos };
+  return { service, contasPagar, categorias, pagamentos , ixc };
 }
 
 const BASE: CriarDespesaDto = {

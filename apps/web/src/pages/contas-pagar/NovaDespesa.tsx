@@ -166,6 +166,9 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
   const [taxaAdmin, setTaxaAdmin] = useState('');
   const [reajusteAnual, setReajusteAnual] = useState('');
   const [lancada, setLancada] = useState<DespesaLancada | null>(null);
+  /** A nota que vai junto: arquivo escolhido ou print colado. */
+  const [nota, setNota] = useState<{ nome: string; dados: string } | null>(null);
+  const [avisoDaNota, setAvisoDaNota] = useState<string | null>(null);
 
   const categorias = useQuery({
     queryKey: ['categorias-despesa'],
@@ -319,6 +322,29 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
           categoriaId: categoriaId || undefined,
           apenasDiasUteis: soDiasUteis,
         });
+      }
+
+      /*
+       * A nota sobe depois, e por rota própria.
+       *
+       * O lançamento é a parte que não dá para refazer — a conta já está no
+       * IXC. Se o anexo falhar (arquivo grande, webservice fora), o que se
+       * perde é o anexo, e a tela diz isso: a conta continua lançada, e a nota
+       * se anexa de novo pelo IXC ou por aqui.
+       */
+      const idNoIxc = data.conta.idFnApagarIxc;
+      if (nota && idNoIxc) {
+        try {
+          await api.post(`/contas-abertas/${idNoIxc}/nota`, {
+            arquivo: nota.dados,
+            nome: nota.nome,
+            descricao: observacao.trim().slice(0, 100) || 'Nota',
+          });
+        } catch (err) {
+          setAvisoDaNota(
+            `A conta foi lançada, mas a nota não subiu: ${mensagemErro(err)}`,
+          );
+        }
       }
 
       return data;
@@ -1311,11 +1337,21 @@ export function NovaDespesa({ onFechar }: { onFechar: () => void }) {
             title="Vai para o campo de observação do IXC — é o que se lê na lista de contas a pagar de lá"
           />
         </div>
+
+        <div className="sm:col-span-2">
+          <CampoDaNota nota={nota} onMudar={setNota} />
+        </div>
       </div>
 
       {lancar.isError && (
         <p className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
           {mensagemErro(lancar.error)}
+        </p>
+      )}
+
+      {avisoDaNota && (
+        <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
+          {avisoDaNota}
         </p>
       )}
 
@@ -1471,4 +1507,135 @@ function hoje(): string {
   const mes = String(agora.getMonth() + 1).padStart(2, '0');
   const dia = String(agora.getDate()).padStart(2, '0');
   return `${agora.getFullYear()}-${mes}-${dia}`;
+}
+
+/**
+ * A nota que vai anexada à conta, no IXC.
+ *
+ * Dois caminhos, porque são dois hábitos: quem tem o arquivo salvo escolhe o
+ * arquivo; quem acabou de receber o comprovante no WhatsApp ou no internet
+ * banking dá um print e cola aqui — e é esse o caminho que não existia em lugar
+ * nenhum, porque colar imagem não é coisa que um `<input type=file>` aceite.
+ *
+ * O print colado não tem nome: quem nomeia é a API, com a data e a extensão
+ * certa. Sem extensão, o anexo do IXC vira um binário que não abre.
+ */
+function CampoDaNota({
+  nota,
+  onMudar,
+}: {
+  nota: { nome: string; dados: string } | null;
+  onMudar: (nota: { nome: string; dados: string } | null) => void;
+}) {
+  const [erro, setErro] = useState<string | null>(null);
+  const [lendo, setLendo] = useState(false);
+
+  /*
+   * O Ctrl+V vale na janela inteira, e não só dentro de um quadrado.
+   *
+   * Quem copiou o comprovante quer colar; procurar onde clicar antes é um passo
+   * que ninguém dá. Só entra imagem — texto colado é texto de campo, e roubá-lo
+   * daqui quebraria a digitação normal.
+   */
+  useEffect(() => {
+    async function aoColar(e: ClipboardEvent) {
+      const arquivo = [...(e.clipboardData?.files ?? [])].find((f) =>
+        f.type.startsWith('image/'),
+      );
+      if (!arquivo) return;
+      e.preventDefault();
+      setLendo(true);
+      setErro(null);
+      try {
+        onMudar({ nome: '', dados: await lerComoDataUrl(arquivo) });
+      } catch (err) {
+        setErro(err instanceof Error ? err.message : String(err));
+      } finally {
+        setLendo(false);
+      }
+    }
+
+    window.addEventListener('paste', aoColar);
+    return () => window.removeEventListener('paste', aoColar);
+  }, [onMudar]);
+
+  async function escolher(e: React.ChangeEvent<HTMLInputElement>) {
+    const arquivo = e.target.files?.[0];
+    e.target.value = '';
+    if (!arquivo) return;
+    setLendo(true);
+    setErro(null);
+    try {
+      onMudar({ nome: arquivo.name, dados: await lerComoDataUrl(arquivo) });
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLendo(false);
+    }
+  }
+
+  const ehImagem = nota?.dados.startsWith('data:image/');
+
+  return (
+    <div>
+      <span className="rotulo">Nota</span>
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="btn btn-p btn-neutro w-fit cursor-pointer">
+          {lendo ? 'Lendo…' : nota ? 'Trocar arquivo' : 'Anexar nota'}
+          <input
+            type="file"
+            accept="image/*,application/pdf"
+            className="hidden"
+            onChange={escolher}
+          />
+        </label>
+
+        {nota ? (
+          <div className="flex items-center gap-2">
+            {ehImagem ? (
+              <img
+                src={nota.dados}
+                alt="Nota anexada"
+                className="h-10 w-16 rounded-lg border border-tinta-200 object-cover"
+              />
+            ) : (
+              <span className="rounded-lg border border-tinta-200 px-2 py-1 text-xs text-tinta-600">
+                PDF
+              </span>
+            )}
+            <span className="max-w-[220px] truncate text-sm text-tinta-600">
+              {nota.nome || 'print colado'}
+            </span>
+            <button
+              type="button"
+              onClick={() => onMudar(null)}
+              className="text-xs font-semibold text-rose-500 hover:underline"
+            >
+              tirar
+            </button>
+          </div>
+        ) : (
+          <span className="text-xs text-tinta-400">
+            ou dê Ctrl+V para colar um print — ele vai como foto
+          </span>
+        )}
+      </div>
+      <p className="ajuda">
+        Vai anexada ao título no IXC, na aba de arquivos dele. PDF ou imagem,
+        até 8 MB. Em lançamento parcelado, a nota vai na primeira parcela.
+      </p>
+      {erro && <p className="mt-1 text-sm text-rose-600">{erro}</p>}
+    </div>
+  );
+}
+
+/** O arquivo como data URL — é assim que ele chega à API. */
+function lerComoDataUrl(arquivo: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const leitor = new FileReader();
+    leitor.onload = () => resolve(String(leitor.result));
+    leitor.onerror = () =>
+      reject(new Error('Não consegui ler este arquivo do seu computador.'));
+    leitor.readAsDataURL(arquivo);
+  });
 }

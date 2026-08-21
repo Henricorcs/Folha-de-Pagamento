@@ -1,4 +1,9 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  conferirArquivo as conferir,
+  emMegabytes,
+  lerDataUrl as lerArquivo,
+} from '../arquivos/data-url';
 import { PrismaService } from '../prisma/prisma.service';
 import type {
   EditarDocumentoDto,
@@ -484,19 +489,12 @@ export class DocumentosRhService {
 
 /** Recusa o que não é papel, e o que é papel demais. */
 export function conferirArquivo(conteudo: Buffer, tipo: string): void {
-  if (!TIPOS_ACEITOS.has(tipo)) {
-    throw new BadRequestException(
-      `Não guardo arquivo do tipo "${tipo}". Aqui entram PDF, imagem, ` +
-        'documento do Word, planilha e texto.',
-    );
-  }
-  if (conteudo.length > LIMITE_BYTES) {
-    throw new BadRequestException(
-      `O arquivo tem ${emMegabytes(conteudo.length)} e o limite é de ` +
-        `${emMegabytes(LIMITE_BYTES)}. Digitalize em preto e branco ou em ` +
-        'resolução menor, que costuma resolver.',
-    );
-  }
+  conferir(
+    { conteudo, tipo },
+    TIPOS_ACEITOS,
+    LIMITE_BYTES,
+    'Aqui entram PDF, imagem, documento do Word, planilha e texto.',
+  );
 }
 
 /** Tudo menos a coluna do conteúdo. */
@@ -585,27 +583,13 @@ export function situacaoDoPrazo(
   return 'em-dia';
 }
 
-/**
- * O conteúdo e o tipo de uma data URL.
- *
- * O tipo sai daqui, e não do nome do arquivo: extensão é o que quem manda diz
- * ter mandado, e é ela que erra quando um PDF chega chamado ".jpg".
- */
+/** O conteúdo e o tipo de uma data URL, no formato que este módulo usa. */
 export function lerDataUrl(url: string): {
   conteudo: Buffer;
   tipoDoArquivo: string;
 } {
-  const m = /^data:([-\w.+]+\/[-\w.+]+);base64,(.*)$/s.exec(url);
-  if (!m) {
-    throw new BadRequestException(
-      'O arquivo não chegou num formato que eu saiba ler.',
-    );
-  }
-  const conteudo = Buffer.from(m[2], 'base64');
-  if (conteudo.length === 0) {
-    throw new BadRequestException('O arquivo chegou vazio.');
-  }
-  return { conteudo, tipoDoArquivo: m[1].toLowerCase() };
+  const arquivo = lerArquivo(url);
+  return { conteudo: arquivo.conteudo, tipoDoArquivo: arquivo.tipo };
 }
 
 /** Só os dígitos de um CPF/CNPJ — é assim que ele se compara. */
@@ -634,6 +618,3 @@ function diaDaqui(d: Date): number {
   return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
-function emMegabytes(bytes: number): string {
-  return `${(bytes / (1024 * 1024)).toFixed(1).replace('.', ',')} MB`;
-}

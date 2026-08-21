@@ -4,6 +4,13 @@ import { ContasPagarService } from '../financeiro/contas-pagar.service';
 import { CategoriasService } from './categorias.service';
 import { CriarDespesaDto } from './dto/despesa.dto';
 import { PagamentosService } from './pagamentos.service';
+import {
+  conferirArquivo,
+  emMegabytes,
+  extensaoDoTipo,
+  lerDataUrl,
+} from '../arquivos/data-url';
+import { IxcClient } from '../ixc/ixc.client';
 
 /** O que aconteceu ao dar por paga a conta recém-lançada. */
 export interface BaixaDoLancamento {
@@ -51,7 +58,51 @@ export class DespesasService {
     private readonly contasPagar: ContasPagarService,
     private readonly categorias: CategoriasService,
     private readonly pagamentos: PagamentosService,
+    private readonly ixc: IxcClient,
   ) {}
+
+  /**
+   * Anexa a nota ao título, no próprio IXC.
+   *
+   * O papel fica onde a conta está, e não numa gaveta deste app: quem abrir o
+   * título por lá — para conferir, para estornar, para responder ao contador —
+   * acha a nota no mesmo lugar, sem saber que este sistema existe. O IXC tem o
+   * recurso pronto para isso (`fn_apagar_arquivos`), e é ele que a tela dele
+   * lista na aba de arquivos.
+   *
+   * Aceita imagem e PDF: é foto de cupom, digitalização de nota e print de
+   * comprovante que entram aqui.
+   */
+  async anexarNota(
+    idFnApagar: number,
+    dados: { arquivo: string; nome?: string; descricao?: string },
+  ): Promise<{ anexado: true; nome: string }> {
+    const arquivo = lerDataUrl(dados.arquivo);
+    conferirArquivo(
+      arquivo,
+      TIPOS_DE_NOTA,
+      LIMITE_DA_NOTA,
+      'A nota entra como PDF ou imagem.',
+    );
+
+    const nome = nomeDoAnexo(dados.nome, arquivo.tipo);
+    await this.ixc.upload(
+      'fn_apagar_arquivos',
+      'arquivo',
+      { nome, tipo: arquivo.tipo, conteudo: arquivo.conteudo },
+      {
+        id_apagar: String(idFnApagar),
+        // A descrição é o que aparece na lista de arquivos do título no IXC.
+        descricao: (dados.descricao?.trim() || 'Nota').slice(0, 100),
+      },
+    );
+
+    this.logger.log(
+      `Nota "${nome}" (${emMegabytes(arquivo.conteudo.length)}) anexada ao ` +
+        `título ${idFnApagar} no IXC.`,
+    );
+    return { anexado: true, nome };
+  }
 
   /** As despesas que não chegaram ao IXC, para a tela poder mostrá-las. */
   naoEnviadas() {
@@ -340,4 +391,50 @@ function hojeUtc(): Date {
   return new Date(
     Date.UTC(agora.getFullYear(), agora.getMonth(), agora.getDate()),
   );
+}
+
+/**
+ * O que entra como nota de uma conta a pagar.
+ *
+ * Papel: cupom fotografado, nota digitalizada, print do comprovante. Planilha e
+ * documento do Word ficam de fora — o que se anexa aqui é a prova do gasto, e
+ * ela vem em imagem ou PDF.
+ */
+const TIPOS_DE_NOTA = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/heic',
+]);
+
+/**
+ * Teto da nota. Menor que o do RH de propósito: aqui o arquivo ainda atravessa
+ * o webservice do IXC, que é a parte lenta e a que costuma desistir.
+ */
+const LIMITE_DA_NOTA = 8 * 1024 * 1024;
+
+/**
+ * O nome com que o arquivo chega ao IXC.
+ *
+ * Print colado não tem nome nenhum, e um arquivo sem extensão no anexo do IXC
+ * não abre em lugar nenhum: quem clica lá recebe um binário sem dono. Então o
+ * nome sai daqui quando não veio de fora, e a extensão vem do tipo declarado no
+ * próprio arquivo.
+ */
+function nomeDoAnexo(nome: string | undefined, tipo: string): string {
+  const ext = extensaoDoTipo(tipo);
+  const limpo = (nome ?? '')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^A-Za-z0-9.\-_ ]/g, '')
+    .trim()
+    .slice(0, 80);
+
+  if (!limpo) {
+    const agora = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+    return `nota-${agora}.${ext}`;
+  }
+  return limpo.toLowerCase().endsWith(`.${ext}`) ? limpo : `${limpo}.${ext}`;
 }
