@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { IconeVoltar } from '../../components/icones';
 import {
   Aviso,
   Bloco,
@@ -146,16 +145,8 @@ export function PastaRhAberta() {
 
   return (
     <Pagina>
-      <button
-        type="button"
-        onClick={voltar}
-        className="surgir mb-3 flex items-center gap-1.5 text-sm text-tinta-500 transition hover:text-tinta-800"
-      >
-        <IconeVoltar className="h-4 w-4" />
-        Voltar
-      </button>
-
       <CabecalhoPagina
+        voltar={voltar}
         secao={
           pasta?.daEmpresa ? 'Pasta da empresa' : (pasta?.funcao ?? 'Pasta')
         }

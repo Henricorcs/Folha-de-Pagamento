@@ -7,6 +7,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { formatNumeroBR } from '../lib/format';
+import { IconeVoltar } from './icones';
 
 /**
  * Peças compartilhadas da interface. A regra da casa: o número é o herói —
@@ -143,24 +144,46 @@ export function CabecalhoPagina({
   secao,
   titulo,
   descricao,
+  voltar,
   acoes,
 }: {
   /** Onde a pessoa está — a mesma palavra da barra lateral. */
   secao: string;
   titulo: string;
   descricao?: ReactNode;
+  /**
+   * Para onde volta a seta, quando a tela tem de onde voltar.
+   *
+   * Ela mora aqui, encostada no título, e não numa linha própria acima dele:
+   * solta lá em cima ela vira um link de rodapé no lugar errado — do tamanho
+   * de uma legenda, longe do que nomeia a tela, e ninguém a vê.
+   */
+  voltar?: () => void;
   acoes?: ReactNode;
 }) {
   return (
     <header className="surgir mb-5 flex flex-wrap items-end justify-between gap-3">
-      <div className="min-w-0">
-        <p className="eyebrow mb-1">{secao}</p>
-        <h1 className="titulo-pagina">{titulo}</h1>
-        {descricao && (
-          <p className="mt-1.5 max-w-2xl text-[13px] leading-relaxed text-tinta-500">
-            {descricao}
-          </p>
+      <div className="flex min-w-0 items-center gap-3">
+        {voltar && (
+          <button
+            type="button"
+            onClick={voltar}
+            aria-label="Voltar"
+            title="Voltar para a tela anterior"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-tinta-200 bg-papel text-tinta-600 transition hover:border-brand-300 hover:bg-brand-500/5 hover:text-brand-700"
+          >
+            <IconeVoltar className="h-5 w-5" />
+          </button>
         )}
+        <div className="min-w-0">
+          <p className="eyebrow mb-1">{secao}</p>
+          <h1 className="titulo-pagina">{titulo}</h1>
+          {descricao && (
+            <p className="mt-1.5 max-w-2xl text-[13px] leading-relaxed text-tinta-500">
+              {descricao}
+            </p>
+          )}
+        </div>
       </div>
       {acoes && <div className="flex flex-wrap items-center gap-2">{acoes}</div>}
     </header>

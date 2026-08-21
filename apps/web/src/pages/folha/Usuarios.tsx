@@ -382,13 +382,7 @@ function NovoUsuario({
                   if (novo.length === 0) return;
                   setModulos(novo);
                 }}
-                className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
-                  some
-                    ? 'cursor-not-allowed border-tinta-100 text-tinta-300'
-                    : ligado
-                      ? 'border-brand-300 bg-brand-500/10 text-brand-700'
-                      : 'border-tinta-200 text-tinta-400 hover:border-tinta-300'
-                }`}
+                className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${corDoModulo(ligado, !!some)}`}
                 title={
                   some
                     ? `O perfil ${PERFIL_LABEL[role]} não abre ${m.nome}`
@@ -478,13 +472,7 @@ function ModulosDoLogin({
               if (novo.length === 0) return;
               onMudar(novo);
             }}
-            className={`rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${
-              some
-                ? 'cursor-not-allowed border-tinta-100 text-tinta-300'
-                : ligado
-                  ? 'border-brand-300 bg-brand-500/10 text-brand-700'
-                  : 'border-tinta-200 text-tinta-400 hover:border-tinta-300'
-            }`}
+            className={`rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${corDoModulo(ligado, !!some)}`}
           >
             {m.nome}
           </button>
@@ -559,4 +547,25 @@ function EditarLogin({
       </div>
     </form>
   );
+}
+
+/**
+ * Verde abre, vermelho não.
+ *
+ * O que a coluna responde é "onde esta pessoa entra?", e a resposta se lê de
+ * longe: os módulos ligados são os verdes, e o que está de fora fica vermelho —
+ * e não apagado, que se confunde com "ainda não decidi".
+ *
+ * O que o perfil não alcança é vermelho mais claro e não clica: continua de
+ * fora, mas não é escolha de ninguém (Visualizador não abre o RH, que guarda
+ * contrato e exame médico).
+ */
+function corDoModulo(ligado: boolean, foraDoPerfil: boolean): string {
+  if (foraDoPerfil) {
+    return 'cursor-not-allowed border-rose-200/70 text-rose-400/70 dark:border-rose-500/20 dark:text-rose-400/50';
+  }
+  if (ligado) {
+    return 'border-emerald-300 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 dark:border-emerald-500/40 dark:text-emerald-300';
+  }
+  return 'border-rose-300 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 dark:border-rose-500/40 dark:text-rose-300';
 }
