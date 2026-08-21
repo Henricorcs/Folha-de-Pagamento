@@ -11,6 +11,7 @@ import {
   type Tom,
 } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
+import { semAcento } from '../../lib/busca';
 import { mesAnterior, mesAtual, mesSeguinte, nomeDoMes } from '../../lib/folha';
 import { formatBRL, formatData } from '../../lib/format';
 import { STATUS_LABEL, TIPO_LABEL } from '../../lib/status';
@@ -918,10 +919,11 @@ export function Folha() {
   // A busca só esconde linhas; nada sai da seleção por não estar à vista. Quem
   // procurou "Dão" para conferir um valor não quer que os outros 53 pagamentos
   // se desmarquem sozinhos.
-  const procurado = buscaPessoa.trim().toLowerCase();
+  // Sem acento: quem procura o "Dão" escreve "dao".
+  const procurado = semAcento(buscaPessoa.trim());
   const gruposVisiveis = procurado
     ? grupos.filter((g) =>
-        `${g.nome} ${g.apelido ?? ''}`.toLowerCase().includes(procurado),
+        semAcento(`${g.nome} ${g.apelido ?? ''}`).includes(procurado),
       )
     : grupos;
 

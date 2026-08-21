@@ -12,6 +12,7 @@ import {
   type Tom,
 } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
+import { semAcento } from '../../lib/busca';
 import { SeletorDeCategoria } from '../../components/SeletorDeCategoria';
 import { formatBRL, formatData } from '../../lib/format';
 import { TIPO_LABEL } from '../../lib/status';
@@ -716,15 +717,6 @@ function PrazoDaConta({ conta }: { conta: ContaAberta }) {
  * Tira os acentos para comparar. Quem procura "aurelio" quer achar "Marco
  * Aurélio Castro" — e não achou, uma vez, concluindo que a conta nem existia.
  */
-function semAcento(texto: string): string {
-  // O intervalo é o dos acentos separados pelo NFD, escrito em escape para não
-  // depender de como este arquivo foi salvo.
-  return texto
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-}
-
 function filtrar(
   contas: ContaAberta[],
   recorte: Recorte,

@@ -12,6 +12,7 @@ import {
   Vazio,
 } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
+import { combina, semAcento } from '../../lib/busca';
 import type { EstanteRh, PastaRh } from '../../lib/types';
 
 /**
@@ -38,12 +39,11 @@ export function PastasRh() {
     // A estante é o primeiro nível. As subpastas aparecem dentro da pasta
     // delas, que é onde alguém foi procurá-las.
     const todas = (estante.data?.pastas ?? []).filter((p) => !p.paiId);
-    const busca = termo.trim().toLowerCase();
+    // Sem acento: quem procura o Anderson Conceição escreve "conceicao".
+    const busca = semAcento(termo.trim());
     if (!busca) return todas;
     return todas.filter((p) =>
-      [p.nome, p.apelido, p.funcao, p.cpf]
-        .filter(Boolean)
-        .some((campo) => String(campo).toLowerCase().includes(busca)),
+      combina([p.nome, p.apelido, p.funcao, p.cpf], busca),
     );
   }, [estante.data, termo]);
 

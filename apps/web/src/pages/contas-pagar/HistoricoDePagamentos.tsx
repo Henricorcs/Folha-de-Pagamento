@@ -10,6 +10,7 @@ import {
   Vazio,
 } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
+import { combina, semAcento } from '../../lib/busca';
 import { formatBRL, formatData } from '../../lib/format';
 import { TIPO_LABEL } from '../../lib/status';
 import type { HistoricoPagamentos, PagamentoFeito } from '../../lib/types';
@@ -403,7 +404,10 @@ function filtrar(
   recorte: Recorte,
   busca: string,
 ): PagamentoFeito[] {
-  const termo = busca.trim().toLowerCase();
+  // Sem acento dos dois lados: quem procura o posto escreve "sao domin", e o
+  // que está guardado é "Posto São Domingos". Comparando cru, a tela dizia
+  // "nenhum pagamento aqui" para uma lista cheia deles.
+  const termo = semAcento(busca.trim());
 
   return pagamentos.filter((p) => {
     const passaRecorte =
@@ -411,19 +415,19 @@ function filtrar(
       (recorte === 'ressalva' && !p.conferencia.fecha) ||
       (recorte === 'parciais' && p.parcial);
     if (!passaRecorte) return false;
-    if (!termo) return true;
 
-    return [
-      p.fornecedor.nome,
-      p.documento,
-      p.observacao,
-      p.formaPagamento,
-      p.caixa.nome,
-      p.classificacao?.nome,
-      p.origem?.beneficiario,
-    ]
-      .filter((v): v is string => !!v)
-      .some((v) => v.toLowerCase().includes(termo));
+    return combina(
+      [
+        p.fornecedor.nome,
+        p.documento,
+        p.observacao,
+        p.formaPagamento,
+        p.caixa.nome,
+        p.classificacao?.nome,
+        p.origem?.beneficiario,
+      ],
+      termo,
+    );
   });
 }
 
