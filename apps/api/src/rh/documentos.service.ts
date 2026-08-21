@@ -42,6 +42,9 @@ export const LIMITE_BYTES = 15 * 1024 * 1024;
 /** Documento que vence dentro disto está "a vencer" na tela. */
 const DIAS_DE_AVISO = 30;
 
+/** Quantos níveis de pasta dentro de pasta. Ver `exigirEspacoNaArvore`. */
+const NIVEIS = 3;
+
 /**
  * A estante de documentos.
  *
@@ -78,6 +81,7 @@ export class DocumentosRhService {
               ativo: true,
             },
           },
+          _count: { select: { subpastas: true } },
         },
       }),
       // Só o que a contagem precisa: o arquivo em si não entra nesta consulta.
@@ -99,6 +103,31 @@ export class DocumentosRhService {
       resumos.set(d.pastaId, atual);
     }
 
+    /*
+     * O que está nas subpastas conta na pasta de cima.
+     *
+     * O cartão da estante responde "quanto papel tem o Fulano?", e a resposta
+     * não muda porque alguém organizou os exames numa subpasta. Dentro dela, o
+     * número de cada linha continua sendo o dela: os dois existem, e cada um
+     * responde a uma pergunta diferente.
+     */
+    const naArvore = new Map<string, ResumoDaPasta>();
+    for (const p of pastas) {
+      const meu = resumos.get(p.id) ?? vazio();
+      let atual: string | null = p.id;
+      while (atual) {
+        const soma = naArvore.get(atual) ?? vazio();
+        soma.qtd += meu.qtd;
+        soma.vencidos += meu.vencidos;
+        soma.aVencer += meu.aVencer;
+        if (meu.ultimoEm && (!soma.ultimoEm || meu.ultimoEm > soma.ultimoEm)) {
+          soma.ultimoEm = meu.ultimoEm;
+        }
+        naArvore.set(atual, soma);
+        atual = paiDe(pastas, atual);
+      }
+    }
+
     const comResumo = pastas.map((p) => ({
       id: p.id,
       // O cadastro manda no nome: quem trocou de sobrenome no IXC não pode
@@ -109,11 +138,17 @@ export class DocumentosRhService {
       daEmpresa: p.daEmpresa,
       funcionarioId: p.funcionarioId,
       cpf: p.cpf,
+      /** Vazio = pasta de primeiro nível, a que aparece na estante. */
+      paiId: p.paiId,
+      /** Quantas pastas ela tem dentro. */
+      subpastas: p._count.subpastas,
       /** Pasta de quem já saiu da empresa. */
       inativo: p.funcionario ? !p.funcionario.ativo : false,
       /** Pasta que não veio do cadastro: só ela se renomeia e se apaga. */
       avulsa: !p.funcionarioId && !p.daEmpresa,
       ...(resumos.get(p.id) ?? vazio()),
+      /** O mesmo, contando o que está nas subpastas. */
+      naArvore: naArvore.get(p.id) ?? vazio(),
     }));
 
     return {
@@ -166,27 +201,98 @@ export class DocumentosRhService {
     }
   }
 
-  /** Uma pasta criada à mão: quem não está no cadastro também tem papel. */
+  /**
+   * Uma pasta criada à mão — na estante ou dentro de outra.
+   *
+   * Na estante ela é de quem não está no cadastro: o sócio, o estagiário, quem
+   * saiu antes de o sistema existir. Dentro de outra, é a divisória da gaveta:
+   * "Exames" dentro do Fulano, "2026" dentro de "Recibos de pagamento".
+   */
   async criarPasta(dto: PastaDto, usuarioId?: string) {
     const nome = dto.nome.trim();
     const cpf = soDigitos(dto.cpf) || null;
+    const paiId = dto.paiId ?? null;
 
+    if (paiId) await this.exigirEspacoNaArvore(paiId);
+
+    /*
+     * O nome só briga com os irmãos.
+     *
+     * Duas pastas "Exames" na estante seriam confusão; uma dentro de cada
+     * funcionário é o desenho normal de uma gaveta. Na estante o CPF também
+     * conta: duas pastas da mesma pessoa é como metade dos documentos some —
+     * eles ficam na outra.
+     */
     const igual = await this.prisma.pastaRh.findFirst({
-      where: cpf
-        ? { OR: [{ cpf }, { nome: { equals: nome, mode: 'insensitive' } }] }
-        : { nome: { equals: nome, mode: 'insensitive' } },
+      where: {
+        paiId,
+        ...(cpf && !paiId
+          ? { OR: [{ cpf }, { nome: { equals: nome, mode: 'insensitive' } }] }
+          : { nome: { equals: nome, mode: 'insensitive' } }),
+      },
       select: { id: true, nome: true },
     });
     if (igual) {
       throw new BadRequestException(
-        `Já existe a pasta "${igual.nome}". Duas pastas da mesma pessoa é ` +
-          'como metade dos documentos some: eles ficam na outra.',
+        paiId
+          ? `Esta pasta já tem uma "${igual.nome}" dentro dela.`
+          : `Já existe a pasta "${igual.nome}". Duas pastas da mesma pessoa é ` +
+            'como metade dos documentos some: eles ficam na outra.',
       );
     }
 
     return this.prisma.pastaRh.create({
-      data: { nome, cpf, criadoPor: usuarioId ?? null },
+      data: { nome, cpf, paiId, criadoPor: usuarioId ?? null },
     });
+  }
+
+  /**
+   * Garante que existe uma subpasta com este nome dentro daquela.
+   *
+   * É o que põe o recibo do mês em "Fulano / Recibos de pagamento" sem pedir
+   * nada a ninguém: a divisória nasce no primeiro recibo e é reusada em todos
+   * os meses seguintes.
+   */
+  async garantirSubpasta(paiId: string, nome: string): Promise<string> {
+    const existente = await this.prisma.pastaRh.findFirst({
+      where: { paiId, nome: { equals: nome, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (existente) return existente.id;
+
+    const criada = await this.prisma.pastaRh.create({
+      data: { nome, paiId },
+      select: { id: true },
+    });
+    return criada.id;
+  }
+
+  /**
+   * Até onde a árvore pode ir.
+   *
+   * Três níveis dão "Fulano / Recibos de pagamento / 2026", que é mais fundo do
+   * que uma gaveta de RH costuma precisar. Sem teto, a estante vira um labirinto
+   * que ninguém percorre até o fim para achar um papel.
+   */
+  private async exigirEspacoNaArvore(paiId: string) {
+    let nivel = 1;
+    let atual: string | null = paiId;
+    while (atual) {
+      const pasta: { paiId: string | null } | null =
+        await this.prisma.pastaRh.findUnique({
+          where: { id: atual },
+          select: { paiId: true },
+        });
+      if (!pasta) throw new BadRequestException('Esta pasta não existe mais.');
+      nivel += 1;
+      if (nivel > NIVEIS) {
+        throw new BadRequestException(
+          `Dá para aninhar até ${NIVEIS} níveis de pasta. Mais fundo que ` +
+            'isso, ninguém acha o papel.',
+        );
+      }
+      atual = pasta.paiId;
+    }
   }
 
   /**
@@ -217,13 +323,19 @@ export class DocumentosRhService {
         'Esta pasta é do cadastro e não se apaga por aqui.',
       );
     }
-    const dentro = await this.prisma.documentoRh.count({
-      where: { pastaId: id },
-    });
+    const [dentro, subpastas] = await Promise.all([
+      this.prisma.documentoRh.count({ where: { pastaId: id } }),
+      this.prisma.pastaRh.count({ where: { paiId: id } }),
+    ]);
     if (dentro > 0) {
       throw new BadRequestException(
         `A pasta tem ${dentro} documento(s) dentro. Apague-os primeiro — ou ` +
           'deixe a pasta onde está, que ela não atrapalha ninguém.',
+      );
+    }
+    if (subpastas > 0) {
+      throw new BadRequestException(
+        `A pasta tem ${subpastas} subpasta(s) dentro. Apague-as primeiro.`,
       );
     }
     await this.prisma.pastaRh.delete({ where: { id } });
@@ -317,10 +429,14 @@ export class DocumentosRhService {
    */
   async editar(id: string, dto: EditarDocumentoDto) {
     await this.exigirDocumento(id);
+    // Mudar de pasta é o único jeito de pôr numa subpasta nova o que já estava
+    // guardado. O arquivo vai junto: é o mesmo documento, noutra divisória.
+    if (dto.pastaId) await this.exigirPasta(dto.pastaId);
 
     const doc = await this.prisma.documentoRh.update({
       where: { id },
       data: {
+        ...(dto.pastaId ? { pastaId: dto.pastaId } : {}),
         titulo: dto.titulo.trim(),
         tipo: dto.tipo.trim(),
         descricao: dto.descricao?.trim() || null,
@@ -410,6 +526,14 @@ export interface ResumoDaPasta {
 
 function vazio(): ResumoDaPasta {
   return { qtd: 0, vencidos: 0, aVencer: 0, ultimoEm: null };
+}
+
+/** O pai de uma pasta, na lista que já veio do banco. */
+function paiDe(
+  pastas: Array<{ id: string; paiId: string | null }>,
+  id: string,
+): string | null {
+  return pastas.find((p) => p.id === id)?.paiId ?? null;
 }
 
 /** A empresa primeiro; depois a gente, em ordem alfabética. */

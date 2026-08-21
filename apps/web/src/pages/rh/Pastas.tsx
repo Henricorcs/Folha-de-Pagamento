@@ -36,7 +36,9 @@ export function PastasRh() {
   });
 
   const pastas = useMemo(() => {
-    const todas = estante.data?.pastas ?? [];
+    // A estante é o primeiro nível. As subpastas aparecem dentro da pasta
+    // delas, que é onde alguém foi procurá-las.
+    const todas = (estante.data?.pastas ?? []).filter((p) => !p.paiId);
     const busca = termo.trim().toLowerCase();
     if (!busca) return todas;
     return todas.filter((p) =>
@@ -57,7 +59,9 @@ export function PastasRh() {
     onError: (e) => setErro(mensagemErro(e)),
   });
 
-  const comPendencia = pastas.filter((p) => p.vencidos > 0 || p.aVencer > 0);
+  const comPendencia = pastas.filter(
+    (p) => p.naArvore.vencidos > 0 || p.naArvore.aVencer > 0,
+  );
 
   return (
     <Pagina>
@@ -131,7 +135,7 @@ export function PastasRh() {
 }
 
 /** A pasta na estante: o nome, o que há dentro e o que está vencendo. */
-function CartaoDaPasta({ pasta }: { pasta: PastaRh }) {
+export function CartaoDaPasta({ pasta }: { pasta: PastaRh }) {
   return (
     <Link
       to={`/rh/pastas/${pasta.id}`}
@@ -157,39 +161,55 @@ function CartaoDaPasta({ pasta }: { pasta: PastaRh }) {
               saiu
             </Selo>
           )}
-          {pasta.avulsa && (
+          {/* "Avulsa" só quer dizer algo na estante, onde separa a pasta
+              criada à mão da que veio do cadastro. Toda subpasta é criada à
+              mão: dizê-lo em cada uma seria ruído. */}
+          {pasta.avulsa && !pasta.paiId && (
             <Selo pequeno tom="neutro" titulo="Criada à mão, fora do cadastro">
               avulsa
             </Selo>
           )}
         </div>
 
-        <p className="truncate text-xs text-tinta-400">
-          {pasta.apelido ? `"${pasta.apelido}" · ` : ''}
-          {pasta.funcao ?? (pasta.daEmpresa ? 'Documentos da empresa' : '—')}
-        </p>
+        {/* Subpasta não tem função nem apelido: a linha some em vez de
+            mostrar um travessão. */}
+        {(pasta.apelido || pasta.funcao || pasta.daEmpresa || !pasta.paiId) && (
+          <p className="truncate text-xs text-tinta-400">
+            {pasta.apelido ? `"${pasta.apelido}" · ` : ''}
+            {pasta.funcao ?? (pasta.daEmpresa ? 'Documentos da empresa' : '—')}
+          </p>
+        )}
 
+        {/* O número do cartão conta as subpastas junto: a pergunta aqui é
+            "quanto papel tem o Fulano?", e ela não muda porque alguém
+            organizou os exames numa divisória. */}
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-tinta-500">
           <span className="num">
-            {pasta.qtd === 0
+            {pasta.naArvore.qtd === 0
               ? 'nenhum documento'
-              : pasta.qtd === 1
+              : pasta.naArvore.qtd === 1
                 ? '1 documento'
-                : `${pasta.qtd} documentos`}
+                : `${pasta.naArvore.qtd} documentos`}
           </span>
-          {pasta.ultimoEm && (
+          {pasta.subpastas > 0 && (
             <span className="text-tinta-400">
-              · último em {formatData(pasta.ultimoEm)}
+              · {pasta.subpastas} subpasta{pasta.subpastas > 1 ? 's' : ''}
             </span>
           )}
-          {pasta.vencidos > 0 && (
+          {pasta.naArvore.ultimoEm && (
+            <span className="text-tinta-400">
+              · último em {formatData(pasta.naArvore.ultimoEm)}
+            </span>
+          )}
+          {pasta.naArvore.vencidos > 0 && (
             <Selo pequeno tom="erro">
-              {pasta.vencidos} vencido{pasta.vencidos > 1 ? 's' : ''}
+              {pasta.naArvore.vencidos} vencido
+              {pasta.naArvore.vencidos > 1 ? 's' : ''}
             </Selo>
           )}
-          {pasta.aVencer > 0 && (
+          {pasta.naArvore.aVencer > 0 && (
             <Selo pequeno tom="atencao">
-              {pasta.aVencer} vencendo
+              {pasta.naArvore.aVencer} vencendo
             </Selo>
           )}
         </div>
@@ -199,13 +219,16 @@ function CartaoDaPasta({ pasta }: { pasta: PastaRh }) {
 }
 
 /** Nome e CPF: o CPF é o que faz o recibo do mês achar esta pasta sozinho. */
-function FormularioDaPasta({
+export function FormularioDaPasta({
   pendente,
   erro,
+  semCpf = false,
   onSalvar,
 }: {
   pendente: boolean;
   erro: string | null;
+  /** Subpasta é divisória, e não pessoa: ali o CPF não quer dizer nada. */
+  semCpf?: boolean;
   onSalvar: (dados: { nome: string; cpf?: string }) => void;
 }) {
   const [nome, setNome] = useState('');
@@ -221,20 +244,20 @@ function FormularioDaPasta({
       }}
     >
       <div className="grid gap-4 sm:grid-cols-2">
-        <div>
+        <div className={semCpf ? 'sm:col-span-2' : ''}>
           <label className="rotulo" htmlFor="nome-da-pasta">
-            De quem é a pasta
+            {semCpf ? 'Nome da pasta' : 'De quem é a pasta'}
           </label>
           <input
             id="nome-da-pasta"
             value={nome}
             onChange={(e) => setNome(e.target.value)}
-            placeholder="Nome completo"
+            placeholder={semCpf ? 'Ex.: Exames' : 'Nome completo'}
             className="campo"
             autoFocus
           />
         </div>
-        <div>
+        <div className={semCpf ? 'hidden' : ''}>
           <label className="rotulo" htmlFor="cpf-da-pasta">
             CPF <span className="text-tinta-400">(opcional)</span>
           </label>

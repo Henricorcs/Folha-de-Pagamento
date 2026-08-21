@@ -152,8 +152,26 @@ export class RhController {
       dto.arquivo,
       dto.competencia,
       dto.itens,
+      dto.arquivoNome ?? 'recibos.pdf',
       usuarioId(req),
     );
+  }
+
+  /** O histórico: cada vez que um arquivo do mês foi separado. */
+  @Get('recibos/lotes')
+  lotes() {
+    return this.recibos.lotes();
+  }
+
+  /**
+   * Desfaz um lançamento inteiro: apaga de todas as pastas o que ele guardou.
+   *
+   * É a única saída de quem separou o arquivo errado — sem isto, o conserto
+   * seria caçar vinte e três documentos em vinte e três pastas diferentes.
+   */
+  @Delete('recibos/lotes/:id')
+  desfazerLote(@Param('id') id: string) {
+    return this.recibos.desfazer(id);
   }
 }
 

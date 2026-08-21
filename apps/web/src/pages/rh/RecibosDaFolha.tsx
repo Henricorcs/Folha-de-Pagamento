@@ -10,9 +10,11 @@ import {
   Vazio,
 } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
+import { formatData } from '../../lib/format';
 import type {
   AnaliseDosRecibos,
   EstanteRh,
+  LoteDeRecibos,
   PastaRh,
   RecibosGuardados,
 } from '../../lib/types';
@@ -39,10 +41,17 @@ export function RecibosDaFolha() {
   const [fora, setFora] = useState<Set<string>>(new Set());
   const [erro, setErro] = useState<string | null>(null);
   const [resultado, setResultado] = useState<RecibosGuardados | null>(null);
+  const [desfeito, setDesfeito] = useState<string | null>(null);
 
   const estante = useQuery({
     queryKey: ['rh', 'pastas'],
     queryFn: async () => (await api.get<EstanteRh>('/rh/pastas')).data,
+  });
+
+  const lotes = useQuery({
+    queryKey: ['rh', 'recibos', 'lotes'],
+    queryFn: async () =>
+      (await api.get<LoteDeRecibos[]>('/rh/recibos/lotes')).data,
   });
 
   const analisar = useMutation({
@@ -80,6 +89,29 @@ export function RecibosDaFolha() {
     onError: (e) => setErro(mensagemErro(e)),
   });
 
+  /*
+   * Desfazer apaga o que aquele lançamento guardou, em todas as pastas de uma
+   * vez. É a única saída de quem separou o arquivo errado — o conserto à mão
+   * seria caçar vinte e três documentos em vinte e três pastas diferentes.
+   */
+  const desfazer = useMutation({
+    mutationFn: async (lote: LoteDeRecibos) =>
+      (
+        await api.delete<{ competencia: string; apagados: number }>(
+          `/rh/recibos/lotes/${lote.id}`,
+        )
+      ).data,
+    onSuccess: (r) => {
+      setErro(null);
+      setResultado(null);
+      setDesfeito(
+        `${r.apagados} recibo(s) de ${mesDaCompetencia(r.competencia)} apagados das pastas.`,
+      );
+      void qc.invalidateQueries({ queryKey: ['rh'] });
+    },
+    onError: (e) => setErro(mensagemErro(e)),
+  });
+
   const guardar = useMutation({
     mutationFn: async () => {
       const analise = analisar.data!;
@@ -94,6 +126,7 @@ export function RecibosDaFolha() {
         await api.post<RecibosGuardados>('/rh/recibos', {
           arquivo: arquivo!.dados,
           competencia: analise.competencia,
+          arquivoNome: arquivo!.nome,
           itens,
         })
       ).data;
@@ -101,6 +134,7 @@ export function RecibosDaFolha() {
     onSuccess: (r) => {
       setResultado(r);
       setErro(null);
+      setDesfeito(null);
       analisar.reset();
       setArquivo(null);
       void qc.invalidateQueries({ queryKey: ['rh'] });
@@ -134,6 +168,7 @@ export function RecibosDaFolha() {
       />
 
       {erro && <Aviso tom="erro">{erro}</Aviso>}
+      {desfeito && <Aviso tom="marca">{desfeito}</Aviso>}
 
       {resultado && (
         <Aviso tom="pago">
@@ -298,7 +333,11 @@ export function RecibosDaFolha() {
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-tinta-500">
-              {aGuardar} de {analise.itens.length} marcados.
+              {aGuardar} de {analise.itens.length} marcados. Cada recibo entra
+              na subpasta{' '}
+              <span className="text-tinta-700">Recibos de pagamento</span> da
+              pasta escolhida — ela nasce na primeira vez e é a mesma nos meses
+              seguintes.
             </p>
             <button
               type="button"
@@ -324,6 +363,77 @@ export function RecibosDaFolha() {
             </Link>
           </div>
         </Vazio>
+      )}
+
+      {/*
+        O histórico existe para ser desfeito.
+
+        Separar um mês toca vinte e três pastas de uma vez, e o engano — mês
+        errado, arquivo errado — só aparece depois de tudo guardado. Aqui cada
+        lançamento é uma linha, e um clique tira das pastas tudo o que ele pôs.
+      */}
+      {(lotes.data?.length ?? 0) > 0 && (
+        <Bloco titulo="O que já foi separado" className="mt-8" semPadding>
+          <div className="overflow-x-auto rolagem-fina">
+            <table className="w-full text-sm">
+              <thead>
+                <tr>
+                  <th className="th">Quando</th>
+                  <th className="th">Competência</th>
+                  <th className="th">Arquivo</th>
+                  <th className="th text-right">Recibos</th>
+                  <th className="th text-right" />
+                </tr>
+              </thead>
+              <tbody>
+                {(lotes.data ?? []).map((lote) => (
+                  <tr key={lote.id} className="linha">
+                    <td className="td whitespace-nowrap">
+                      {formatData(lote.createdAt)}
+                    </td>
+                    <td className="td num whitespace-nowrap">
+                      {mesDaCompetencia(lote.competencia)}
+                    </td>
+                    <td className="td">
+                      <span className="truncate text-tinta-500">
+                        {lote.arquivoNome}
+                      </span>
+                    </td>
+                    <td className="td num whitespace-nowrap text-right">
+                      {lote.guardados}
+                      {lote.guardados !== lote.quantidade && (
+                        <span
+                          className="ml-1 text-xs text-tinta-400"
+                          title={`Entraram ${lote.quantidade}; o resto já foi apagado à mão`}
+                        >
+                          de {lote.quantidade}
+                        </span>
+                      )}
+                    </td>
+                    <td className="td text-right">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const ok = confirm(
+                            `Desfazer o lançamento de ${mesDaCompetencia(lote.competencia)}?\n\n` +
+                              `Isto apaga ${lote.guardados} recibo(s) das pastas de todo mundo. ` +
+                              'Os arquivos saem daqui e não voltam.',
+                          );
+                          if (ok) desfazer.mutate(lote);
+                        }}
+                        disabled={desfazer.isPending}
+                        className="btn btn-p btn-sutil"
+                        title="Apaga das pastas tudo o que este lançamento guardou"
+                      >
+                        Desfazer
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Bloco>
       )}
     </Pagina>
   );

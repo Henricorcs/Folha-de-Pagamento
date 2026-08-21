@@ -1488,6 +1488,16 @@ model PastaRh {
   funcionario   Funcionario? @relation(fields: [funcionarioId], references: [id], onDelete: Restrict)
   funcionarioId String?      @unique @map("funcionario_id")
 
+  /// A pasta que contém esta. Vazio = pasta de primeiro nível, a da estante.
+  ///
+  /// É o que deixa cada um organizar a própria gaveta: "Exames" dentro do
+  /// Fulano, "2026" dentro de "Recibos". A pasta de funcionário e a da empresa
+  /// são sempre de primeiro nível — elas são a estante, e não papel dentro
+  /// dela.
+  pai       PastaRh?  @relation("SubpastasRh", fields: [paiId], references: [id], onDelete: Restrict)
+  paiId     String?   @map("pai_id")
+  subpastas PastaRh[] @relation("SubpastasRh")
+
   /// O CPF do titular, só os dígitos.
   ///
   /// É por ele que o recibo de pagamento acha a pasta sozinho: nome muda de
@@ -1502,6 +1512,7 @@ model PastaRh {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([cpf])
+  @@index([paiId])
   @@map("pastas_rh")
 }
 
@@ -1518,11 +1529,48 @@ model PastaRh {
 /// volume à parte seria mais barato por megabyte e teria custado a primeira
 /// restauração — a que se descobre estar sem os arquivos no dia em que
 /// precisa deles.
+/// Uma vez em que o PDF de recibos da folha foi separado e guardado.
+///
+/// Existe para poder ser desfeita. Separar o mês é uma ação que toca vinte e
+/// três pastas de uma vez, e o engano — mês errado, arquivo errado, tudo indo
+/// para a pasta errada — só aparece depois de tudo guardado. Sem o lote, o
+/// conserto seria apagar documento por documento, achando cada um numa pasta
+/// diferente.
+model LoteDeRecibos {
+  id String @id @default(uuid())
+
+  /// "AAAA-MM" do mês que foi separado.
+  competencia String
+
+  /// O nome do arquivo que veio da contabilidade, para reconhecer o lote.
+  arquivoNome String @map("arquivo_nome")
+
+  /// Quantos recibos entraram. Fica guardado porque o desfazer apaga os
+  /// documentos, e o histórico continua tendo de dizer o que aquele dia fez.
+  quantidade Int
+
+  documentos DocumentoRh[]
+
+  criadoPor String?  @map("criado_por")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([competencia])
+  @@map("lotes_de_recibos")
+}
+
 model DocumentoRh {
   id String @id @default(uuid())
 
   pasta   PastaRh @relation(fields: [pastaId], references: [id], onDelete: Restrict)
   pastaId String  @map("pasta_id")
+
+  /// O lote que trouxe este documento, quando ele veio de um.
+  ///
+  /// `SetNull` de propósito: apagar o registro do lote não pode levar junto o
+  /// recibo de alguém. Quem apaga os documentos é o desfazer, que sabe o que
+  /// está fazendo.
+  lote   LoteDeRecibos? @relation(fields: [loteId], references: [id], onDelete: SetNull)
+  loteId String?        @map("lote_id")
 
   /// Como o documento é chamado ("Contrato de experiência", "ASO admissional").
   titulo String
@@ -1561,6 +1609,7 @@ model DocumentoRh {
 
   @@unique([pastaId, tipo, competencia])
   @@index([pastaId])
+  @@index([loteId])
   @@index([tipo])
   @@index([valeAte])
   @@map("documentos_rh")

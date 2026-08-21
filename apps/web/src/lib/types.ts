@@ -1484,8 +1484,16 @@ export interface CaixasDoFechamento {
 // RH — a estante de documentos
 // ---------------------------------------------------------------------------
 
+/** O que há numa pasta: quantos papéis, e quantos pedem atenção. */
+export interface ResumoDaPasta {
+  qtd: number;
+  vencidos: number;
+  aVencer: number;
+  ultimoEm: string | null;
+}
+
 /** Uma pasta da estante: a de um funcionário, a da empresa, ou uma avulsa. */
-export interface PastaRh {
+export interface PastaRh extends ResumoDaPasta {
   id: string;
   nome: string;
   apelido: string | null;
@@ -1493,14 +1501,16 @@ export interface PastaRh {
   daEmpresa: boolean;
   funcionarioId: string | null;
   cpf: string | null;
+  /** Vazio = pasta de primeiro nível, a que aparece na estante. */
+  paiId: string | null;
+  /** Quantas pastas ela tem dentro. */
+  subpastas: number;
   /** Funcionário que já saiu da empresa. A pasta continua. */
   inativo: boolean;
   /** Criada à mão: só ela se renomeia e se apaga. */
   avulsa: boolean;
-  qtd: number;
-  vencidos: number;
-  aVencer: number;
-  ultimoEm: string | null;
+  /** O mesmo resumo, contando o que está nas subpastas. */
+  naArvore: ResumoDaPasta;
 }
 
 export interface EstanteRh {
@@ -1558,6 +1568,21 @@ export interface AnaliseDosRecibos {
 
 export interface RecibosGuardados {
   competencia: string;
+  /** O lançamento que isto virou no histórico. Null = nada foi guardado. */
+  loteId: string | null;
   guardados: Array<{ pasta: string; nome: string }>;
   pulados: Array<{ nome: string; motivo: string }>;
+}
+
+/** Uma vez em que o PDF do mês foi separado — e que dá para desfazer. */
+export interface LoteDeRecibos {
+  id: string;
+  competencia: string;
+  arquivoNome: string;
+  /** Quantos entraram naquele dia. */
+  quantidade: number;
+  /** Quantos ainda estão guardados; menos que o de cima = alguém já apagou. */
+  guardados: number;
+  criadoPor: string | null;
+  createdAt: string;
 }

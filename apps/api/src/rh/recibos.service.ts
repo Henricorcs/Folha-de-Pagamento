@@ -2,11 +2,25 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PDFDocument } from 'pdf-lib';
 import { extrairPaginasPdf } from '../pdf/pdf';
 import { PrismaService } from '../prisma/prisma.service';
-import { conferirArquivo, lerDataUrl, soDigitos } from './documentos.service';
+import {
+  conferirArquivo,
+  DocumentosRhService,
+  lerDataUrl,
+  soDigitos,
+} from './documentos.service';
 import { chaveDoNome, lerRecibos, type ReciboLido } from './recibos.parse';
 
 /** O tipo com que o recibo entra na pasta. Fixo: é o que o mês seguinte procura. */
 export const TIPO_RECIBO = 'Recibo de pagamento';
+
+/**
+ * A subpasta que recebe os recibos dentro da pasta de cada um.
+ *
+ * Doze papéis por ano soltos entre o contrato e os exames afogam a pasta de
+ * quem tem três anos de casa. A divisória nasce no primeiro recibo e é a mesma
+ * em todos os meses seguintes.
+ */
+export const SUBPASTA_DOS_RECIBOS = 'Recibos de pagamento';
 
 /**
  * O PDF de recibos da folha, separado por pessoa.
@@ -25,7 +39,10 @@ export const TIPO_RECIBO = 'Recibo de pagamento';
 export class RecibosDaFolhaService {
   private readonly logger = new Logger(RecibosDaFolhaService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly documentos: DocumentosRhService,
+  ) {}
 
   /**
    * Lê o PDF e diz o que achou. Não grava nada.
@@ -54,9 +71,16 @@ export class RecibosDaFolhaService {
     const pastas = await this.pastasParaCasar();
     const jaGuardados = await this.prisma.documentoRh.findMany({
       where: { tipo: TIPO_RECIBO, competencia: leitura.competencia },
-      select: { pastaId: true },
+      select: { pastaId: true, pasta: { select: { paiId: true } } },
     });
-    const jaTem = new Set(jaGuardados.map((d) => d.pastaId));
+    /*
+     * O recibo mora na subpasta, e quem a tela mostra é a pasta da pessoa: o
+     * "já guardado" tem de subir um nível, ou o mesmo mês entraria de novo a
+     * cada vez que o arquivo fosse lido.
+     */
+    const jaTem = new Set(
+      jaGuardados.map((d) => d.pasta.paiId ?? d.pastaId),
+    );
 
     return {
       competencia: leitura.competencia,
@@ -89,6 +113,7 @@ export class RecibosDaFolhaService {
     arquivoDataUrl: string,
     competencia: string,
     itens: Array<{ paginas: number[]; pastaId: string; nome: string }>,
+    arquivoNome: string,
     usuarioId?: string,
   ) {
     if (itens.length === 0) {
@@ -98,6 +123,23 @@ export class RecibosDaFolhaService {
     const conteudo = pdfDaDataUrl(arquivoDataUrl);
     const original = await PDFDocument.load(conteudo, {
       ignoreEncryption: true,
+    });
+
+    /*
+     * O lote nasce antes dos documentos porque é ele que os marca.
+     *
+     * Separar um mês toca vinte e três pastas de uma vez, e o engano (mês
+     * errado, arquivo errado) só aparece depois de tudo guardado. Com o lote,
+     * desfazer é um clique; sem ele, seria caçar vinte e três documentos em
+     * vinte e três pastas diferentes.
+     */
+    const lote = await this.prisma.loteDeRecibos.create({
+      data: {
+        competencia,
+        arquivoNome: arquivoNome.trim().slice(0, 255) || 'recibos.pdf',
+        quantidade: 0,
+        criadoPor: usuarioId ?? null,
+      },
     });
 
     const guardados: Array<{ pasta: string; nome: string }> = [];
@@ -119,6 +161,20 @@ export class RecibosDaFolhaService {
         continue;
       }
 
+      /*
+       * O recibo não entra solto na pasta da pessoa: vai para a divisória dos
+       * recibos, criada na primeira vez e reusada em todos os meses seguintes.
+       * Pasta que já é a divisória (alguém escolheu a subpasta na mão) fica
+       * onde está, para não virar "Recibos" dentro de "Recibos".
+       */
+      const destinoId =
+        pasta.nome.toLowerCase() === SUBPASTA_DOS_RECIBOS.toLowerCase()
+          ? pasta.id
+          : await this.documentos.garantirSubpasta(
+              pasta.id,
+              SUBPASTA_DOS_RECIBOS,
+            );
+
       const recorte = await PDFDocument.create();
       const copiadas = await recorte.copyPages(
         original,
@@ -132,7 +188,8 @@ export class RecibosDaFolhaService {
       try {
         await this.prisma.documentoRh.create({
           data: {
-            pastaId: pasta.id,
+            pastaId: destinoId,
+            loteId: lote.id,
             titulo: `Recibo de pagamento ${mes}/${ano}`,
             tipo: TIPO_RECIBO,
             competencia,
@@ -169,11 +226,84 @@ export class RecibosDaFolhaService {
       }
     }
 
+    /*
+     * Lote sem nada dentro não vira linha no histórico: um "desfazer" que não
+     * desfaz nada é ruído na única lista que serve para consertar engano.
+     */
+    if (guardados.length === 0) {
+      await this.prisma.loteDeRecibos.delete({ where: { id: lote.id } });
+    } else {
+      await this.prisma.loteDeRecibos.update({
+        where: { id: lote.id },
+        data: { quantidade: guardados.length },
+      });
+    }
+
     this.logger.log(
       `Recibos de ${competencia}: ${guardados.length} guardado(s), ` +
         `${pulados.length} pulado(s).`,
     );
-    return { competencia, guardados, pulados };
+    return {
+      competencia,
+      loteId: guardados.length > 0 ? lote.id : null,
+      guardados,
+      pulados,
+    };
+  }
+
+  /**
+   * O histórico: cada vez que um arquivo do mês foi separado.
+   *
+   * Curto de propósito — o que se procura aqui é o lote de ontem, o que acabou
+   * de sair errado. O de dois anos atrás não tem mais o que desfazer.
+   */
+  async lotes() {
+    const lotes = await this.prisma.loteDeRecibos.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      include: { _count: { select: { documentos: true } } },
+    });
+
+    return lotes.map((l) => ({
+      id: l.id,
+      competencia: l.competencia,
+      arquivoNome: l.arquivoNome,
+      /** Quantos entraram naquele dia. */
+      quantidade: l.quantidade,
+      /**
+       * Quantos ainda estão guardados. Menor que o de cima = alguém já apagou
+       * documento à mão, e o desfazer vai achar menos do que o lote diz.
+       */
+      guardados: l._count.documentos,
+      criadoPor: l.criadoPor,
+      createdAt: l.createdAt,
+    }));
+  }
+
+  /**
+   * Desfaz um lote: apaga de todas as pastas o que ele guardou.
+   *
+   * As pastas ficam. Uma divisória vazia não atrapalha ninguém, e apagá-la
+   * levaria junto o que alguém tivesse posto lá dentro no meio-tempo.
+   */
+  async desfazer(loteId: string) {
+    const lote = await this.prisma.loteDeRecibos.findUnique({
+      where: { id: loteId },
+      include: { _count: { select: { documentos: true } } },
+    });
+    if (!lote) {
+      throw new BadRequestException('Este lançamento não existe mais.');
+    }
+
+    const { count } = await this.prisma.documentoRh.deleteMany({
+      where: { loteId },
+    });
+    await this.prisma.loteDeRecibos.delete({ where: { id: loteId } });
+
+    this.logger.log(
+      `Lote de recibos de ${lote.competencia} desfeito: ${count} documento(s) apagados.`,
+    );
+    return { competencia: lote.competencia, apagados: count };
   }
 
   /** As pastas com o que serve para reconhecer o dono de um recibo. */

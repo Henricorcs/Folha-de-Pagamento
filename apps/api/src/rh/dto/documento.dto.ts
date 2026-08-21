@@ -74,8 +74,17 @@ export class GuardarDocumentoDto extends DadosDoDocumentoDto {
   arquivo!: string;
 }
 
-/** Só os dados: o arquivo guardado não se troca, se apaga e se sobe de novo. */
-export class EditarDocumentoDto extends DadosDoDocumentoDto {}
+/**
+ * Só os dados: o arquivo guardado não se troca, se apaga e se sobe de novo.
+ *
+ * A pasta, sim: é o único jeito de pôr numa subpasta nova o que já estava
+ * guardado.
+ */
+export class EditarDocumentoDto extends DadosDoDocumentoDto {
+  @IsOptional()
+  @IsUUID('4', { message: 'Pasta inválida.' })
+  pastaId?: string;
+}
 
 /** Uma pasta criada ou renomeada à mão. */
 export class PastaDto {
@@ -90,6 +99,13 @@ export class PastaDto {
    * que o nome: grafia muda, CPF não.
    */
   @IsOptional() @IsString() @MaxLength(20) cpf?: string;
+
+  /**
+   * Dentro de qual pasta ela nasce. Vazio = na estante, no primeiro nível.
+   */
+  @IsOptional()
+  @IsUUID('4', { message: 'Pasta inválida.' })
+  paiId?: string;
 }
 
 /** O PDF de recibos chegando para leitura. */
@@ -122,6 +138,9 @@ export class ItemDoReciboDto {
 export class GuardarRecibosDto extends AnalisarRecibosDto {
   @Matches(/^\d{4}-\d{2}$/, { message: 'A competência precisa ser AAAA-MM.' })
   competencia!: string;
+
+  /** O nome do arquivo que veio da contabilidade, para o histórico. */
+  @IsOptional() @IsString() @MaxLength(255) arquivoNome?: string;
 
   @IsArray()
   @ArrayMinSize(1, { message: 'Nenhum recibo foi marcado para guardar.' })

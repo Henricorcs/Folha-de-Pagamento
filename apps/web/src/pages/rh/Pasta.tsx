@@ -13,7 +13,13 @@ import {
 } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
 import { formatData } from '../../lib/format';
-import type { DocumentoRh, EstanteRh, PrazoDoDocumento } from '../../lib/types';
+import type {
+  DocumentoRh,
+  EstanteRh,
+  PastaRh,
+  PrazoDoDocumento,
+} from '../../lib/types';
+import { CartaoDaPasta, FormularioDaPasta } from './Pastas';
 
 /** O que a pasta aceita — o mesmo que a API guarda. */
 const ACEITOS =
@@ -32,6 +38,7 @@ export function PastaRhAberta() {
   const qc = useQueryClient();
   const [termo, setTermo] = useState('');
   const [guardando, setGuardando] = useState(false);
+  const [criandoSubpasta, setCriandoSubpasta] = useState(false);
   const [editando, setEditando] = useState<DocumentoRh | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [feito, setFeito] = useState<string | null>(null);
@@ -52,7 +59,12 @@ export function PastaRhAberta() {
     enabled: !!id,
   });
 
-  const pasta = estante.data?.pastas.find((p) => p.id === id);
+  const todas = estante.data?.pastas ?? [];
+  const pasta = todas.find((p) => p.id === id);
+  /** As pastas de dentro desta. */
+  const subpastas = todas.filter((p) => p.paiId === id);
+  /** O caminho até aqui, da estante para dentro. */
+  const caminho = trilha(todas, pasta);
 
   function avisar(texto: string) {
     setFeito(texto);
@@ -63,6 +75,18 @@ export function PastaRhAberta() {
     void qc.invalidateQueries({ queryKey: ['rh', 'documentos'] });
     void qc.invalidateQueries({ queryKey: ['rh', 'pastas'] });
   }
+
+  const criarSubpasta = useMutation({
+    mutationFn: async (dados: { nome: string }) =>
+      (await api.post<PastaRh>('/rh/pastas', { ...dados, paiId: id })).data,
+    onSuccess: (p) => {
+      setCriandoSubpasta(false);
+      setErro(null);
+      avisar(`Pasta "${p.nome}" criada aqui dentro.`);
+      recarregar();
+    },
+    onError: (e) => setErro(mensagemErro(e)),
+  });
 
   const guardar = useMutation({
     mutationFn: async (dados: Record<string, unknown>) =>
@@ -114,9 +138,16 @@ export function PastaRhAberta() {
         }
         acoes={
           <div className="flex flex-wrap gap-2">
-            <Link to="/rh/pastas" className="btn btn-neutro">
-              Todas as pastas
-            </Link>
+            <button
+              type="button"
+              onClick={() => {
+                setErro(null);
+                setCriandoSubpasta(true);
+              }}
+              className="btn btn-neutro"
+            >
+              Nova pasta aqui dentro
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -131,8 +162,36 @@ export function PastaRhAberta() {
         }
       />
 
+      {/* O caminho de volta. Dentro de uma subpasta, "todas as pastas" não
+          basta: quem entrou em "Fulano / Exames" quer voltar ao Fulano. */}
+      <nav className="surgir mb-4 flex flex-wrap items-center gap-1.5 text-sm text-tinta-400">
+        <Link to="/rh/pastas" className="hover:text-tinta-700">
+          Todas as pastas
+        </Link>
+        {caminho.map((p) => (
+          <span key={p.id} className="flex items-center gap-1.5">
+            <span aria-hidden>/</span>
+            {p.id === id ? (
+              <span className="text-tinta-700">{p.nome}</span>
+            ) : (
+              <Link to={`/rh/pastas/${p.id}`} className="hover:text-tinta-700">
+                {p.nome}
+              </Link>
+            )}
+          </span>
+        ))}
+      </nav>
+
       {feito && <Aviso tom="pago">{feito}</Aviso>}
       {erro && !guardando && !editando && <Aviso tom="erro">{erro}</Aviso>}
+
+      {subpastas.length > 0 && (
+        <div className="surgir mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {subpastas.map((p) => (
+            <CartaoDaPasta key={p.id} pasta={p} />
+          ))}
+        </div>
+      )}
 
       <div className="surgir mb-5">
         <input
@@ -190,6 +249,20 @@ export function PastaRhAberta() {
         </Bloco>
       )}
 
+      {criandoSubpasta && (
+        <Janela
+          titulo={`Nova pasta dentro de ${pasta?.nome ?? 'esta'}`}
+          onFechar={() => setCriandoSubpasta(false)}
+        >
+          <FormularioDaPasta
+            semCpf
+            pendente={criarSubpasta.isPending}
+            erro={erro}
+            onSalvar={(dados) => criarSubpasta.mutate({ nome: dados.nome })}
+          />
+        </Janela>
+      )}
+
       {guardando && (
         <Janela titulo="Guardar documento" onFechar={() => setGuardando(false)}>
           <FormularioDoDocumento
@@ -209,6 +282,7 @@ export function PastaRhAberta() {
           <FormularioDoDocumento
             documento={editando}
             tipos={estante.data?.tipos ?? []}
+            pastas={todas}
             pendente={editar.isPending}
             erro={erro}
             onSalvar={(dados) => editar.mutate({ id: editando.id, ...dados })}
@@ -344,16 +418,20 @@ function SeloDoPrazo({ prazo }: { prazo: PrazoDoDocumento }) {
 function FormularioDoDocumento({
   documento,
   tipos,
+  pastas,
   pendente,
   erro,
   onSalvar,
 }: {
   documento?: DocumentoRh;
   tipos: string[];
+  /** Todas as pastas: corrigindo, dá para mudar o documento de lugar. */
+  pastas?: PastaRh[];
   pendente: boolean;
   erro: string | null;
   onSalvar: (dados: Record<string, unknown>) => void;
 }) {
+  const [pastaId, setPastaId] = useState(documento?.pastaId ?? '');
   const [titulo, setTitulo] = useState(documento?.titulo ?? '');
   const [tipo, setTipo] = useState(documento?.tipo ?? '');
   const [descricao, setDescricao] = useState(documento?.descricao ?? '');
@@ -397,6 +475,7 @@ function FormularioDoDocumento({
         e.preventDefault();
         if (!podeSalvar) return;
         onSalvar({
+          ...(editando && pastaId !== documento?.pastaId ? { pastaId } : {}),
           titulo: titulo.trim(),
           tipo: tipo.trim(),
           descricao: descricao.trim() || undefined,
@@ -437,6 +516,34 @@ function FormularioDoDocumento({
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">
+        {/* Mudar de pasta é o único jeito de pôr numa divisória nova o que já
+            estava guardado. O arquivo vai junto: é o mesmo documento. */}
+        {editando && pastas && pastas.length > 0 && (
+          <div className="sm:col-span-2">
+            <label className="rotulo" htmlFor="pasta-do-documento">
+              Em que pasta ele fica
+            </label>
+            <select
+              id="pasta-do-documento"
+              value={pastaId}
+              onChange={(e) => setPastaId(e.target.value)}
+              className="campo"
+            >
+              {[...pastas]
+                .sort((a, b) =>
+                  caminhoLegivel(pastas, a).localeCompare(
+                    caminhoLegivel(pastas, b),
+                    'pt-BR',
+                  ),
+                )
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {caminhoLegivel(pastas, p)}
+                  </option>
+                ))}
+            </select>
+          </div>
+        )}
         <div>
           <label className="rotulo" htmlFor="titulo-do-documento">
             Como este documento se chama
@@ -544,6 +651,30 @@ const SUGESTOES = [
   'Certidão',
   'Alvará',
 ];
+
+/** O caminho até uma pasta, da estante para dentro. */
+function trilha(
+  pastas: PastaRh[],
+  pasta?: PastaRh,
+): Array<{ id: string; nome: string }> {
+  const caminho: Array<{ id: string; nome: string }> = [];
+  let atual = pasta;
+  // Teto de segurança: a árvore tem três níveis, e um ciclo aqui travaria a
+  // tela em vez de mostrar a pasta.
+  for (let i = 0; atual && i < 10; i += 1) {
+    caminho.unshift({ id: atual.id, nome: atual.nome });
+    const paiId: string | null = atual.paiId;
+    atual = paiId ? pastas.find((p) => p.id === paiId) : undefined;
+  }
+  return caminho;
+}
+
+/** "Fulano / Exames", para o seletor dizer onde cada pasta fica. */
+function caminhoLegivel(pastas: PastaRh[], pasta: PastaRh): string {
+  return trilha(pastas, pasta)
+    .map((p) => p.nome)
+    .join(' / ');
+}
 
 /** O arquivo como data URL — é assim que ele chega à API. */
 function lerComoDataUrl(arquivo: File): Promise<string> {
