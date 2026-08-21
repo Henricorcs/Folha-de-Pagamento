@@ -157,3 +157,67 @@ describe('motivoDaRecusa — onde o IXC escreve o motivo', () => {
     ).toBe('A');
   });
 });
+
+/**
+ * O anexo é o único caminho desta casa que não vai em JSON, e o modo dele
+ * falhar é o pior que existe: o IXC responde "deu certo" e não guarda nada.
+ *
+ * Foi o que aconteceu na primeira versão. A instância do axios daqui fixa
+ * `Content-Type: application/json` para todas as chamadas — as listagens
+ * precisam disso —, e esse cabeçalho vencia o que o axios calcularia sozinho
+ * para um `FormData`: o IXC recebia um multipart rotulado como JSON, não achava
+ * separador nenhum e a aba de arquivos do título continuava vazia.
+ */
+describe('IxcClient.upload', () => {
+  const arquivo = {
+    nome: 'cupom.png',
+    tipo: 'image/png',
+    conteudo: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  };
+
+  async function subir() {
+    const request = jest.fn().mockResolvedValue({
+      status: 200,
+      data: { type: 'success', id: '77' },
+    });
+    const client = new IxcClient(makeHttp(request));
+    await client.upload('fn_apagar_arquivos', 'arquivo', arquivo, {
+      id_apagar: '4242',
+      descricao: 'Nota',
+    });
+    return request.mock.calls[0][0];
+  }
+
+  it('manda multipart, com o boundary no cabeçalho', async () => {
+    const call = await subir();
+
+    expect(call.method).toBe('post');
+    expect(call.url).toBe('/fn_apagar_arquivos');
+    const tipo = call.headers['Content-Type'] as string;
+    expect(tipo).toMatch(/^multipart\/form-data; boundary=/);
+    // O mesmo boundary tem de abrir o corpo, ou o IXC não separa nada.
+    const boundary = tipo.split('boundary=')[1];
+    expect((call.data as Buffer).toString('latin1')).toContain(`--${boundary}`);
+  });
+
+  it('leva os campos de texto e o arquivo com nome e tipo', async () => {
+    const call = await subir();
+    const corpo = (call.data as Buffer).toString('latin1');
+
+    expect(corpo).toContain('name="id_apagar"');
+    expect(corpo).toContain('4242');
+    expect(corpo).toContain('name="descricao"');
+    expect(corpo).toContain('name="arquivo"; filename="cupom.png"');
+    expect(corpo).toContain('Content-Type: image/png');
+  });
+
+  /* O binário sai byte a byte: um PNG que passe por conversão de texto vira
+     um arquivo que não abre. */
+  it('não estraga o binário no caminho', async () => {
+    const call = await subir();
+    const corpo = call.data as Buffer;
+
+    expect(corpo.includes(arquivo.conteudo)).toBe(true);
+    expect(call.headers['Content-Length']).toBe(String(corpo.length));
+  });
+});

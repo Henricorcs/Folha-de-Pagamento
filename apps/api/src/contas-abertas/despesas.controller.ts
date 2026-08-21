@@ -10,8 +10,10 @@ import {
   Post,
   Query,
   Req,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { FornecedorService } from '../financeiro/fornecedor.service';
 import { DespesasService } from './despesas.service';
 import {
@@ -69,6 +71,34 @@ export class DespesasController {
     @Body() dto: AnexarNotaDto,
   ) {
     return this.service.anexarNota(idFnApagar, dto);
+  }
+
+  /** As notas que este título já tem no IXC. */
+  @Get('contas-abertas/:idFnApagar/notas')
+  notas(@Param('idFnApagar', ParseIntPipe) idFnApagar: number) {
+    return this.service.notas(idFnApagar);
+  }
+
+  /**
+   * O conteúdo de uma nota, para a tela abrir numa aba.
+   *
+   * Vai `inline`, como o documento do RH: PDF e foto se leem no visualizador do
+   * navegador, que é melhor do que qualquer coisa que a tela fosse desenhar.
+   */
+  @Get('contas-abertas/notas/:id/arquivo')
+  async arquivoDaNota(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('extensao') extensao: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const nota = await this.service.baixarNota(id, extensao);
+    res.set({
+      'Content-Type': nota.tipo,
+      'Content-Length': String(nota.conteudo.length),
+      'Content-Disposition': `inline; filename="${nota.nome}"`,
+      'Cache-Control': 'private, no-store',
+    });
+    return new StreamableFile(nota.conteudo);
   }
 
   /** Paga várias de uma vez, todas pela mesma forma. */

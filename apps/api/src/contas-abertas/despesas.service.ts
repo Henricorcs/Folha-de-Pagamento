@@ -11,6 +11,7 @@ import {
   lerDataUrl,
 } from '../arquivos/data-url';
 import { IxcClient } from '../ixc/ixc.client';
+import { parseIxcId } from '../ixc/ixc.parse';
 
 /** O que aconteceu ao dar por paga a conta recém-lançada. */
 export interface BaixaDoLancamento {
@@ -60,6 +61,76 @@ export class DespesasService {
     private readonly pagamentos: PagamentosService,
     private readonly ixc: IxcClient,
   ) {}
+
+  /**
+   * As notas que um título já tem, lidas do IXC.
+   *
+   * É a mesma lista que a aba "Arquivos" da tela dele mostra — e é ela que
+   * responde "a nota subiu mesmo?", que é a pergunta de quem acabou de anexar.
+   */
+  async notas(idFnApagar: number): Promise<NotaDoTitulo[]> {
+    const res = await this.ixc.list<Record<string, unknown>>(
+      'fn_apagar_arquivos',
+      {
+        qtype: 'fn_apagar_arquivos.id_apagar',
+        query: String(idFnApagar),
+        oper: '=',
+        rp: 50,
+        sortname: 'fn_apagar_arquivos.id',
+        sortorder: 'desc',
+      },
+    );
+
+    return res.registros
+      .map((raw) => {
+        const id = parseIxcId(raw.id);
+        if (id === null) return null;
+        return {
+          id,
+          descricao: textoOuNull(raw.descricao) ?? 'Nota',
+          extensao: (textoOuNull(raw.extensao) ?? '').replace('.', ''),
+          data: textoOuNull(raw.data) ?? textoOuNull(raw.data_cadastro),
+          usuario: textoOuNull(raw.usuario) ?? textoOuNull(raw.id_usuario),
+        };
+      })
+      .filter((n): n is NotaDoTitulo => n !== null);
+  }
+
+  /**
+   * O conteúdo de uma nota, para a tela abrir.
+   *
+   * O webservice devolve o arquivo em base64, e a coleção do IXC não diz em que
+   * campo — por isso ele é procurado: o primeiro texto grande que se pareça com
+   * base64 é o arquivo. Não achando, o erro diz quais campos vieram, que é o
+   * que permite acertar isto sem adivinhar de novo.
+   */
+  async baixarNota(
+    id: number,
+    extensao?: string,
+  ): Promise<{ conteudo: Buffer; tipo: string; nome: string }> {
+    const resposta = (await this.ixc.action('fn_apagar_arquivos_download', {
+      id: String(id),
+    })) as Record<string, unknown>;
+
+    const base64 = acharBase64(resposta);
+    if (!base64) {
+      this.logger.warn(
+        `Download da nota ${id}: não achei o arquivo na resposta ` +
+          `(campos: ${Object.keys(resposta).join(', ')}).`,
+      );
+      throw new BadRequestException(
+        'O IXC respondeu, mas não achei o arquivo na resposta dele. Abra a ' +
+          'nota pela aba "Arquivos" do título, no IXC.',
+      );
+    }
+
+    const ext = (extensao ?? 'pdf').toLowerCase().replace('.', '');
+    return {
+      conteudo: Buffer.from(base64, 'base64'),
+      tipo: TIPO_POR_EXTENSAO[ext] ?? 'application/octet-stream',
+      nome: `nota-${id}.${ext}`,
+    };
+  }
 
   /**
    * Anexa a nota ao título, no próprio IXC.
@@ -437,4 +508,48 @@ function nomeDoAnexo(nome: string | undefined, tipo: string): string {
     return `nota-${agora}.${ext}`;
   }
   return limpo.toLowerCase().endsWith(`.${ext}`) ? limpo : `${limpo}.${ext}`;
+}
+
+/** O texto de um campo do IXC, ou nada quando ele vem vazio. */
+function textoOuNull(valor: unknown): string | null {
+  const s = String(valor ?? '').trim();
+  return s || null;
+}
+
+/** Uma nota anexada a um título, como a aba "Arquivos" do IXC a lista. */
+export interface NotaDoTitulo {
+  id: number;
+  descricao: string;
+  /** "png", "pdf" — é o que decide como o navegador abre o arquivo. */
+  extensao: string;
+  data: string | null;
+  usuario: string | null;
+}
+
+const TIPO_POR_EXTENSAO: Record<string, string> = {
+  pdf: 'application/pdf',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  heic: 'image/heic',
+};
+
+/**
+ * O primeiro campo da resposta que se pareça com um arquivo em base64.
+ *
+ * Texto longo, só com o alfabeto do base64 e de tamanho múltiplo de quatro. Um
+ * id, uma data ou uma mensagem não passam por essa peneira; um arquivo de
+ * verdade, sim.
+ */
+function acharBase64(resposta: Record<string, unknown>): string | null {
+  for (const valor of Object.values(resposta)) {
+    if (typeof valor !== 'string' || valor.length < 100) continue;
+    const limpo = valor.includes(',') ? valor.slice(valor.indexOf(',') + 1) : valor;
+    if (/^[A-Za-z0-9+/=\r\n]+$/.test(limpo) && limpo.replace(/\s/g, '').length % 4 === 0) {
+      return limpo;
+    }
+  }
+  return null;
 }

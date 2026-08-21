@@ -4,7 +4,11 @@ import { Carregando, Janela, Selo } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
 import { formatBRL, formatData } from '../../lib/format';
 import { TIPO_LABEL } from '../../lib/status';
-import type { DetalheDoTitulo, PagamentoFeito } from '../../lib/types';
+import type {
+  DetalheDoTitulo,
+  NotaDoTitulo,
+  PagamentoFeito,
+} from '../../lib/types';
 
 /**
  * A ficha de um pagamento: quanto saiu, quando, de qual caixa — e, no fim, o
@@ -201,6 +205,8 @@ export function DetalheDoPagamento({
           </div>
         )}
 
+        <NotasDoTitulo idFnApagar={pagamento.idFnApagar} />
+
         {pagamento.origem && (
           <div className="mt-4 rounded-xl bg-brand-50 px-4 py-3 text-sm text-brand-800">
             Este pagamento nasceu no módulo Folha de Pagamento —{' '}
@@ -380,5 +386,85 @@ export function PrazoDoPagamento({
     <Selo pequeno={pequeno} tom="pago">
       {adiantado === 1 ? 'pago 1 dia antes' : `pago ${adiantado} dias antes`}
     </Selo>
+  );
+}
+
+/**
+ * As notas anexadas a este título, lidas do IXC.
+ *
+ * É a mesma lista da aba "Arquivos" da tela dele. Aparece aqui porque a
+ * pergunta de quem abre a ficha de um pagamento é "cadê a nota disso?" — e
+ * mandar a pessoa ao IXC para responder seria mandá-la embora da tela em que
+ * ela já está.
+ */
+function NotasDoTitulo({ idFnApagar }: { idFnApagar: number }) {
+  const [abrindo, setAbrindo] = useState<number | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
+
+  const notas = useQuery({
+    queryKey: ['notas-do-titulo', idFnApagar],
+    queryFn: async () =>
+      (
+        await api.get<NotaDoTitulo[]>(
+          `/contas-abertas/${idFnApagar}/notas`,
+        )
+      ).data,
+    // Anexo é raro e o IXC é lento: não vale repetir a pergunta sozinho.
+    retry: 0,
+  });
+
+  /*
+   * O arquivo vem pela API autenticada, e não por um `href` direto: o token
+   * vive no cabeçalho, e uma aba aberta na mão chegaria lá sem ele.
+   */
+  async function abrir(nota: NotaDoTitulo) {
+    setAbrindo(nota.id);
+    setErro(null);
+    try {
+      const { data } = await api.get<Blob>(
+        `/contas-abertas/notas/${nota.id}/arquivo`,
+        { params: { extensao: nota.extensao || undefined }, responseType: 'blob' },
+      );
+      const url = URL.createObjectURL(data);
+      window.open(url, '_blank', 'noopener');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      setErro(mensagemErro(e));
+    } finally {
+      setAbrindo(null);
+    }
+  }
+
+  const lista = notas.data ?? [];
+  // Sem nota e sem erro não há o que dizer: um bloco vazio em toda ficha seria
+  // ruído em quase todas elas.
+  if (lista.length === 0 && !erro) return null;
+
+  return (
+    <div className="mt-4">
+      <div className="rotulo">Notas anexadas</div>
+      <div className="flex flex-wrap gap-2">
+        {lista.map((nota) => (
+          <button
+            key={nota.id}
+            type="button"
+            onClick={() => abrir(nota)}
+            disabled={abrindo === nota.id}
+            className="btn btn-p btn-neutro"
+            title={
+              nota.data
+                ? `Anexada em ${nota.data}${nota.usuario ? ` por ${nota.usuario}` : ''}`
+                : undefined
+            }
+          >
+            {abrindo === nota.id ? 'Abrindo…' : nota.descricao}
+            {nota.extensao && (
+              <span className="ml-1 text-tinta-400">.{nota.extensao}</span>
+            )}
+          </button>
+        ))}
+      </div>
+      {erro && <p className="mt-1 text-sm text-rose-600">{erro}</p>}
+    </div>
   );
 }

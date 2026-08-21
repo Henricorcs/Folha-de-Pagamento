@@ -1591,3 +1591,13 @@ export interface LoteDeRecibos {
   criadoPor: string | null;
   createdAt: string;
 }
+
+/** Uma nota anexada a um título no IXC — a aba "Arquivos" da tela dele. */
+export interface NotaDoTitulo {
+  id: number;
+  descricao: string;
+  /** "png", "pdf" — é o que decide como o navegador abre o arquivo. */
+  extensao: string;
+  data: string | null;
+  usuario: string | null;
+}

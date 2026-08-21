@@ -4,6 +4,7 @@ import {
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import type { AxiosInstance } from 'axios';
 import { IXC_HTTP } from './ixc.http';
 import type {
@@ -138,6 +139,14 @@ export class IxcClient {
    * campo e o resto como texto ao lado. É o mesmo corpo que a tela do IXC manda
    * quando alguém anexa um papel por lá.
    *
+   * O corpo é montado à mão, byte a byte, e o `Content-Type` sai daqui com o
+   * boundary dentro. Não é capricho: a instância do axios desta casa fixa
+   * `Content-Type: application/json` para todas as chamadas — é o que as
+   * listagens e as baixas precisam —, e esse cabeçalho vence o que o axios
+   * calcularia sozinho para um `FormData`. O IXC recebia um multipart rotulado
+   * como JSON, não achava separador nenhum e guardava o anexo em lugar nenhum,
+   * respondendo como se tivesse dado certo.
+   *
    * O nome do campo do arquivo muda por recurso — "arquivo" no pagar,
    * "local_arquivo" no cliente e na OS —, então vem de quem chama.
    */
@@ -147,30 +156,41 @@ export class IxcClient {
     arquivo: { nome: string; tipo: string; conteudo: Buffer },
     campos: Record<string, string>,
   ): Promise<IxcActionResponse> {
-    const form = new FormData();
-    for (const [chave, valor] of Object.entries(campos)) {
-      form.append(chave, valor);
-    }
-    form.append(
+    const { corpo, contentType } = montarMultipart(
+      campos,
       campoDoArquivo,
-      new Blob([new Uint8Array(arquivo.conteudo)], { type: arquivo.tipo }),
-      arquivo.nome,
+      arquivo,
     );
 
-    // Sem `Content-Type` à mão: o axios põe o boundary do multipart, e um
-    // cabeçalho escrito aqui o apagaria — o IXC receberia um corpo que não
-    // consegue separar.
-    return this.write('post', `/${recurso}`, form);
+    const resposta = await this.write('post', `/${recurso}`, corpo, {
+      'Content-Type': contentType,
+      'Content-Length': String(corpo.length),
+    });
+
+    /*
+     * A resposta do anexo vai para o log inteira.
+     *
+     * Este caminho não tem como ser testado sem o IXC de verdade, e o modo de
+     * ele falhar é o pior que existe: responder "deu certo" e não guardar nada.
+     * Com a resposta no log, a próxima vez que a aba de arquivos aparecer vazia
+     * se sabe em um minuto se o IXC recusou ou se o arquivo se perdeu depois.
+     */
+    this.logger.log(
+      `Anexo em ${recurso} (${arquivo.nome}, ${arquivo.conteudo.length} bytes): ` +
+        JSON.stringify(resposta).slice(0, 500),
+    );
+    return resposta;
   }
 
   private async write(
     method: 'post' | 'put' | 'delete',
     url: string,
     body?: unknown,
+    headers?: Record<string, string>,
   ): Promise<IxcActionResponse> {
     let res;
     try {
-      res = await this.http.request({ url, method, data: body });
+      res = await this.http.request({ url, method, data: body, headers });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Falha de rede em ${method.toUpperCase()} ${url}: ${message}`);
@@ -273,4 +293,50 @@ function extrairId(data: IxcActionResponse): number | null {
   const candidato = data.id ?? (data as Record<string, unknown>).ret ?? null;
   const n = Number(candidato);
   return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * Um corpo `multipart/form-data` montado à mão.
+ *
+ * Sem biblioteca de propósito: são vinte linhas de formato conhecido, e o que
+ * se ganha é saber exatamente o que sai daqui — inclusive o boundary, que
+ * precisa aparecer no cabeçalho e nunca dentro do conteúdo.
+ */
+function montarMultipart(
+  campos: Record<string, string>,
+  campoDoArquivo: string,
+  arquivo: { nome: string; tipo: string; conteudo: Buffer },
+): { corpo: Buffer; contentType: string } {
+  // Aleatório e longo: o boundary não pode existir dentro do arquivo, ou o IXC
+  // cortaria o binário no meio.
+  const boundary = `----ilnetfinance${randomUUID().replace(/-/g, '')}`;
+  const partes: Buffer[] = [];
+
+  for (const [chave, valor] of Object.entries(campos)) {
+    partes.push(
+      Buffer.from(
+        `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="${chave}"\r\n\r\n` +
+          `${valor}\r\n`,
+        'utf8',
+      ),
+    );
+  }
+
+  partes.push(
+    Buffer.from(
+      `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="${campoDoArquivo}"; ` +
+        `filename="${arquivo.nome}"\r\n` +
+        `Content-Type: ${arquivo.tipo}\r\n\r\n`,
+      'utf8',
+    ),
+  );
+  partes.push(arquivo.conteudo);
+  partes.push(Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'));
+
+  return {
+    corpo: Buffer.concat(partes),
+    contentType: `multipart/form-data; boundary=${boundary}`,
+  };
 }
