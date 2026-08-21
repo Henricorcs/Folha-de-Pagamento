@@ -12,7 +12,6 @@ import {
   Vazio,
 } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
-import { formatData } from '../../lib/format';
 import type { EstanteRh, PastaRh } from '../../lib/types';
 
 /**
@@ -78,7 +77,7 @@ export function PastasRh() {
             }}
             className="btn btn-primario"
           >
-            Nova pasta
+            + Nova pasta
           </button>
         }
       />
@@ -114,7 +113,7 @@ export function PastasRh() {
             : 'As pastas dos funcionários nascem do cadastro. Sem nenhuma aqui, sincronize os funcionários no módulo da folha.'}
         </Vazio>
       ) : (
-        <div className="surgir grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="surgir grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
           {pastas.map((p) => (
             <CartaoDaPasta key={p.id} pasta={p} />
           ))}
@@ -134,82 +133,60 @@ export function PastasRh() {
   );
 }
 
-/** A pasta na estante: o nome, o que há dentro e o que está vencendo. */
+/**
+ * A pasta na estante: o nome, o que há dentro e o que está vencendo.
+ *
+ * Compacta de propósito. São dezenas delas numa tela só — uma por pessoa da
+ * casa —, e cartão grande obriga a rolar para achar quem se procura. O que
+ * sobra é o essencial: de quem é, quanto papel tem, e o que pede atenção.
+ *
+ * O quadrado da pasta é amarelo em todas: é por ele que o olho separa "isto é
+ * uma pasta" de qualquer outro cartão da interface, e a cor não pode mudar de
+ * pasta para pasta sem passar a querer dizer alguma coisa.
+ */
 export function CartaoDaPasta({ pasta }: { pasta: PastaRh }) {
+  const resumo = pasta.naArvore;
+
   return (
     <Link
       to={`/rh/pastas/${pasta.id}`}
-      className="group flex items-start gap-3 rounded-2xl border border-tinta-200 bg-papel p-4 transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-sm"
+      /* O apelido e a função saíram do cartão para ele caber; ficam aqui, para
+         quem passa o mouse em duas pastas de nome parecido. */
+      title={[pasta.nome, pasta.apelido && `"${pasta.apelido}"`, pasta.funcao]
+        .filter(Boolean)
+        .join(' · ')}
+      className="group flex items-center gap-2.5 rounded-xl border border-tinta-200 bg-papel px-3 py-2.5 transition hover:border-amber-300 hover:bg-amber-50/40 dark:hover:bg-amber-400/5"
     >
-      <span
-        className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-          pasta.daEmpresa
-            ? 'bg-brand-500/15 text-brand-600'
-            : 'bg-amber-500/15 text-amber-600'
-        }`}
-      >
-        <IconePasta className="h-5 w-5" />
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-400/20 text-amber-600 dark:bg-amber-400/15 dark:text-amber-300">
+        <IconePasta className="h-[18px] w-[18px]" />
       </span>
 
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="truncate font-medium text-tinta-800">
+        <div className="flex items-center gap-1.5">
+          <span className="truncate text-sm font-medium text-tinta-800">
             {pasta.nome}
           </span>
           {pasta.inativo && (
-            <Selo pequeno tom="neutro" titulo="Não trabalha mais aqui">
+            <span className="shrink-0 text-[10px] uppercase tracking-wide text-tinta-400">
               saiu
-            </Selo>
-          )}
-          {/* "Avulsa" só quer dizer algo na estante, onde separa a pasta
-              criada à mão da que veio do cadastro. Toda subpasta é criada à
-              mão: dizê-lo em cada uma seria ruído. */}
-          {pasta.avulsa && !pasta.paiId && (
-            <Selo pequeno tom="neutro" titulo="Criada à mão, fora do cadastro">
-              avulsa
-            </Selo>
+            </span>
           )}
         </div>
 
-        {/* Subpasta não tem função nem apelido: a linha some em vez de
-            mostrar um travessão. */}
-        {(pasta.apelido || pasta.funcao || pasta.daEmpresa || !pasta.paiId) && (
-          <p className="truncate text-xs text-tinta-400">
-            {pasta.apelido ? `"${pasta.apelido}" · ` : ''}
-            {pasta.funcao ?? (pasta.daEmpresa ? 'Documentos da empresa' : '—')}
-          </p>
-        )}
-
-        {/* O número do cartão conta as subpastas junto: a pergunta aqui é
-            "quanto papel tem o Fulano?", e ela não muda porque alguém
-            organizou os exames numa divisória. */}
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-tinta-500">
-          <span className="num">
-            {pasta.naArvore.qtd === 0
-              ? 'nenhum documento'
-              : pasta.naArvore.qtd === 1
-                ? '1 documento'
-                : `${pasta.naArvore.qtd} documentos`}
+        <div className="flex items-center gap-1.5 text-xs text-tinta-400">
+          <span className="num truncate">
+            {resumo.qtd === 0 ? 'vazia' : `${resumo.qtd} doc.`}
+            {pasta.subpastas > 0 && ` · ${pasta.subpastas} pasta`}
+            {pasta.subpastas > 1 && 's'}
           </span>
-          {pasta.subpastas > 0 && (
-            <span className="text-tinta-400">
-              · {pasta.subpastas} subpasta{pasta.subpastas > 1 ? 's' : ''}
-            </span>
-          )}
-          {pasta.naArvore.ultimoEm && (
-            <span className="text-tinta-400">
-              · último em {formatData(pasta.naArvore.ultimoEm)}
-            </span>
-          )}
-          {pasta.naArvore.vencidos > 0 && (
+          {resumo.vencidos > 0 && (
             <Selo pequeno tom="erro">
-              {pasta.naArvore.vencidos} vencido
-              {pasta.naArvore.vencidos > 1 ? 's' : ''}
+              {resumo.vencidos}
             </Selo>
           )}
-          {pasta.naArvore.aVencer > 0 && (
+          {resumo.aVencer > 0 && (
             <Selo pequeno tom="atencao">
-              {pasta.naArvore.aVencer} vencendo
+              {resumo.aVencer}
             </Selo>
           )}
         </div>

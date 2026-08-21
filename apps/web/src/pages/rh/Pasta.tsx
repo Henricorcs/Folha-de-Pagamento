@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { IconeVoltar } from '../../components/icones';
 import {
   Aviso,
   Bloco,
@@ -35,6 +36,7 @@ const ACEITOS =
  */
 export function PastaRhAberta() {
   const { id = '' } = useParams();
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const [termo, setTermo] = useState('');
   const [guardando, setGuardando] = useState(false);
@@ -124,8 +126,35 @@ export function PastaRhAberta() {
 
   const lista = documentos.data ?? [];
 
+  /*
+   * Voltar é a tela anterior, e não uma rota fixa.
+   *
+   * Quem chegou aqui pela estante volta para a estante; quem entrou numa
+   * subpasta volta para a pasta de cima. Sem histórico do app — link colado,
+   * aba nova —, sobra o caminho da árvore, que é para onde a seta apontaria de
+   * qualquer forma.
+   */
+  function voltar() {
+    const temHistorico =
+      (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (temHistorico > 0) {
+      navigate(-1);
+      return;
+    }
+    navigate(pasta?.paiId ? `/rh/pastas/${pasta.paiId}` : '/rh/pastas');
+  }
+
   return (
     <Pagina>
+      <button
+        type="button"
+        onClick={voltar}
+        className="surgir mb-3 flex items-center gap-1.5 text-sm text-tinta-500 transition hover:text-tinta-800"
+      >
+        <IconeVoltar className="h-4 w-4" />
+        Voltar
+      </button>
+
       <CabecalhoPagina
         secao={
           pasta?.daEmpresa ? 'Pasta da empresa' : (pasta?.funcao ?? 'Pasta')
@@ -146,7 +175,7 @@ export function PastaRhAberta() {
               }}
               className="btn btn-neutro"
             >
-              Nova pasta aqui dentro
+              + Nova pasta
             </button>
             <button
               type="button"
@@ -186,7 +215,7 @@ export function PastaRhAberta() {
       {erro && !guardando && !editando && <Aviso tom="erro">{erro}</Aviso>}
 
       {subpastas.length > 0 && (
-        <div className="surgir mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="surgir mb-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
           {subpastas.map((p) => (
             <CartaoDaPasta key={p.id} pasta={p} />
           ))}

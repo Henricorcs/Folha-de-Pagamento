@@ -106,6 +106,15 @@ export function IconeCalculo({ className }: IconeProps) {
   );
 }
 
+/** A seta que volta uma tela. */
+export function IconeVoltar({ className }: IconeProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M15 5.5 8.5 12l6.5 6.5" />
+    </svg>
+  );
+}
+
 /** Uma pasta de arquivo: a estante de documentos do RH. */
 export function IconePasta({ className }: IconeProps) {
   return (
