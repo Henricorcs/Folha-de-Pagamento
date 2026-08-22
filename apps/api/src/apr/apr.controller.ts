@@ -253,6 +253,19 @@ export class AprController {
   ) {
     return this.apr.supervisionar(id, dto, autor(req));
   }
+
+  /**
+   * Apaga a APR de vez, com as cópias dela no RH.
+   *
+   * Só ADMIN, e nem para o RH: é a única ação do módulo que não deixa rastro, e
+   * cancelar — que deixa — está a um clique dela na mesma tela.
+   */
+  @Roles(UserRole.ADMIN)
+  @Delete(':id')
+  @HttpCode(200)
+  excluir(@Param('id') id: string, @Req() req: Request) {
+    return this.apr.excluir(id, autor(req));
+  }
 }
 
 /** O cabeçalho HTTP não carrega acento: a versão sem ele é a de reserva. */

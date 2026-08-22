@@ -1,4 +1,10 @@
-import { GravidadeApr, ModoAssinatura, StatusApr } from '@prisma/client';
+import { NotFoundException } from '@nestjs/common';
+import {
+  GravidadeApr,
+  ModoAssinatura,
+  StatusApr,
+  UserRole,
+} from '@prisma/client';
 import { AprService, SUBPASTA_DA_SEGURANCA } from './apr.service';
 
 /**
@@ -247,5 +253,99 @@ describe('a APR arquivada no RH', () => {
       where: { id: 'ex-2' },
       data: { documentoRhId: 'doc-2' },
     });
+  });
+});
+
+/**
+ * Apagar a APR é a única porta do módulo que não deixa rastro. O que se protege
+ * aqui é que ela não deixe rastro pela metade: uma APR apagada cuja folha
+ * continua na pasta de três pessoas vira um documento sem origem, que ninguém
+ * sabe mais de onde veio.
+ */
+describe('a APR apagada pelo admin', () => {
+  const ADMIN = { id: 'u-1', nome: 'Henrico', role: UserRole.ADMIN };
+
+  function montar(copias: {
+    daEmpresa: string | null;
+    dosExecutantes: (string | null)[];
+  }) {
+    const apagados: string[][] = [];
+
+    const tx = {
+      documentoRh: {
+        deleteMany: jest.fn(
+          async ({ where }: { where: { id: { in: string[] } } }) => {
+            apagados.push(where.id.in);
+            return { count: where.id.in.length };
+          },
+        ),
+      },
+      apr: { delete: jest.fn().mockResolvedValue({}) },
+    };
+
+    const prisma = {
+      apr: {
+        findUnique: jest.fn().mockResolvedValue({
+          numero: 42,
+          local: 'Rua das Palmeiras, poste 42',
+          status: StatusApr.CANCELADA,
+          documentoRhId: copias.daEmpresa,
+          executantes: copias.dosExecutantes.map((documentoRhId) => ({
+            documentoRhId,
+          })),
+        }),
+      },
+      $transaction: jest.fn(async (fn: (t: typeof tx) => Promise<unknown>) =>
+        fn(tx),
+      ),
+    };
+
+    const service = new AprService(
+      prisma as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    return { service, prisma, tx, apagados };
+  }
+
+  it('leva junto as cópias do RH: a da empresa e a de cada executante', async () => {
+    const { service, tx, apagados } = montar({
+      daEmpresa: 'doc-empresa',
+      // O do meio é o terceirizado, que nunca teve pasta.
+      dosExecutantes: ['doc-werick', null, 'doc-luan'],
+    });
+
+    const resultado = await service.excluir('apr-1', ADMIN);
+
+    expect(apagados).toEqual([['doc-empresa', 'doc-werick', 'doc-luan']]);
+    expect(tx.apr.delete).toHaveBeenCalledWith({ where: { id: 'apr-1' } });
+    expect(resultado).toEqual({
+      apagada: true,
+      numero: 42,
+      copiasRemovidas: 3,
+    });
+  });
+
+  it('não mexe na estante quando a APR nunca chegou a ser arquivada', async () => {
+    const { service, tx } = montar({ daEmpresa: null, dosExecutantes: [null] });
+
+    await service.excluir('apr-1', ADMIN);
+
+    expect(tx.documentoRh.deleteMany).not.toHaveBeenCalled();
+    expect(tx.apr.delete).toHaveBeenCalled();
+  });
+
+  it('avisa quando a APR já não existe, em vez de apagar o nada', async () => {
+    const { service, prisma, tx } = montar({
+      daEmpresa: null,
+      dosExecutantes: [],
+    });
+    prisma.apr.findUnique.mockResolvedValue(null);
+
+    await expect(service.excluir('apr-1', ADMIN)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(tx.apr.delete).not.toHaveBeenCalled();
   });
 });

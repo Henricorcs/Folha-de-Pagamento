@@ -199,6 +199,7 @@ export function Assinar() {
           controle={controle}
           onMudou={setTemTraco}
           disabled={assinar.isPending || modo === 'DIGITADA'}
+          titulo={nome.trim() || r.quemRecebe.nome}
         />
 
         {modo === 'DIGITADA' ? (

@@ -4,7 +4,7 @@ import {
   AssinaturaCanvas,
   type AssinaturaCanvasRef,
 } from '../../components/AssinaturaCanvas';
-import { IconeAlerta } from '../../components/icones';
+import { IconeAlerta, IconeLixeira } from '../../components/icones';
 import { Carregando, Janela, Selo } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
 import { abrirArquivo } from '../../lib/arquivo';
@@ -42,16 +42,21 @@ export function DetalheApr({
   id,
   onContinuar,
   onSair,
+  onExcluida,
 }: {
   id: string;
   /** Chamada ao clicar em "continuar preenchendo" um rascunho. */
   onContinuar?: (id: string) => void;
   onSair?: () => void;
+  /** Chamada depois de apagada: esta tela ficou sem assunto. */
+  onExcluida?: () => void;
 }) {
   const qc = useQueryClient();
   const { usuario } = useAuth();
   const [erro, setErro] = useState<string | null>(null);
-  const [janela, setJanela] = useState<'prorrogar' | 'cancelar' | 'supervisao' | null>(null);
+  const [janela, setJanela] = useState<
+    'prorrogar' | 'cancelar' | 'supervisao' | 'excluir' | null
+  >(null);
 
   const consulta = useQuery({
     queryKey: ['apr', id],
@@ -81,6 +86,19 @@ export function DetalheApr({
     onError: (e) => setErro(mensagemErro(e)),
   });
 
+  const excluir = useMutation({
+    mutationFn: async () => (await api.delete(`/apr/${id}`)).data,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['aprs'] });
+      qc.removeQueries({ queryKey: ['apr', id] });
+      (onExcluida ?? onSair)?.();
+    },
+    onError: (e) => {
+      setJanela(null);
+      setErro(mensagemErro(e));
+    },
+  });
+
   if (consulta.isLoading) return <Carregando texto="Carregando…" />;
   if (consulta.isError) {
     return (
@@ -94,6 +112,7 @@ export function DetalheApr({
   const rascunho = apr.status === 'RASCUNHO';
   const liberada = apr.status === 'LIBERADA';
   const supervisiona = usuario?.role === 'ADMIN' || usuario?.role === 'RH';
+  const admin = usuario?.role === 'ADMIN';
   const comCopia = apr.executantes.filter((e) => e.documentoRhId);
   const semPasta = apr.executantes.filter((e) => !e.documentoRhId);
 
@@ -232,6 +251,19 @@ export function DetalheApr({
             className="btn btn-perigo"
           >
             Cancelar
+          </button>
+        )}
+
+        {/* Só o ADMIN, e por último: é a ação que não deixa rastro, e ela mora
+            ao lado de "Cancelar", que é o caminho certo quase sempre. */}
+        {admin && (
+          <button
+            type="button"
+            onClick={() => setJanela('excluir')}
+            className="btn btn-sutil text-rose-600 dark:text-rose-300"
+          >
+            <IconeLixeira className="h-4 w-4" />
+            Excluir
           </button>
         )}
 
@@ -395,6 +427,43 @@ export function DetalheApr({
         />
       )}
 
+      {janela === 'excluir' && (
+        <Janela
+          titulo={`Excluir a APR nº ${apr.numero}`}
+          onFechar={() => setJanela(null)}
+        >
+          <p className="text-sm leading-relaxed text-tinta-600">
+            Some tudo: o que foi assinalado, as assinaturas da equipe e as
+            cópias do PDF guardadas no RH — a da pasta da empresa e a da pasta
+            de cada executante. Não dá para desfazer.
+          </p>
+          <p className="mt-3 text-sm leading-relaxed text-tinta-600">
+            Para um serviço que não aconteceu, o caminho é{' '}
+            <strong className="font-semibold text-tinta-800">cancelar</strong>:
+            a APR fica na estante dizendo que foi cancelada e por quê, que é o
+            que se espera de um documento exigido por norma. Excluir é para o
+            que não devia existir — a APR aberta em duplicidade, a de teste.
+          </p>
+          <div className="mt-5 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setJanela(null)}
+              className="btn btn-neutro"
+            >
+              Voltar
+            </button>
+            <button
+              type="button"
+              onClick={() => excluir.mutate()}
+              disabled={excluir.isPending}
+              className="btn btn-perigo"
+            >
+              {excluir.isPending ? 'Excluindo…' : 'Excluir definitivamente'}
+            </button>
+          </div>
+        </Janela>
+      )}
+
       {janela === 'supervisao' && (
         <JanelaDeSupervisao
           nomePadrao={usuario?.nome ?? ''}
@@ -513,6 +582,7 @@ function JanelaDeSupervisao({
         controle={controle}
         onMudou={setTemTraco}
         disabled={pendente}
+        titulo={nome.trim() || 'Supervisão'}
       />
 
       <button

@@ -303,6 +303,30 @@ export function IconeChecklist({ className }: IconeProps) {
   );
 }
 
+/** Setas para os quatro cantos: o quadro ocupando a tela inteira. */
+export function IconeExpandir({ className }: IconeProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M9.5 4.5H4.5V9.5" />
+      <path d="M14.5 4.5h5v5" />
+      <path d="M9.5 19.5H4.5v-5" />
+      <path d="M14.5 19.5h5v-5" />
+    </svg>
+  );
+}
+
+/** As mesmas setas voltando para o meio: sair da tela cheia. */
+export function IconeEncolher({ className }: IconeProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M4.5 9.5h5v-5" />
+      <path d="M19.5 9.5h-5v-5" />
+      <path d="M4.5 14.5h5v5" />
+      <path d="M19.5 14.5h-5v5" />
+    </svg>
+  );
+}
+
 /** Caneta sobre a linha: assinar. */
 export function IconeAssinatura({ className }: IconeProps) {
   return (

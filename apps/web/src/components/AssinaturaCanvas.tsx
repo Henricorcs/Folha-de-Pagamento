@@ -7,6 +7,7 @@ import {
   useState,
 } from 'react';
 import type { PointerEvent as ReactPointerEvent, RefObject } from 'react';
+import { IconeEncolher, IconeExpandir } from './icones';
 
 /**
  * O quadro onde a pessoa assina.
@@ -21,6 +22,10 @@ import type { PointerEvent as ReactPointerEvent, RefObject } from 'react';
  * O quadro cresce com a tela porque é assim que se assina: espalhando a mão. É
  * de propósito que ele fique enorme com o celular deitado — deitar o aparelho é
  * o jeito de ter largura, e largura é o que falta para caber um nome inteiro.
+ *
+ * E, para quem precisa de mais, há a tela cheia: o quadro ocupa o aparelho
+ * inteiro, sem o texto da janela em volta. Assinar num retângulo pequeno com o
+ * dedo é o que faz sair aquele rabisco que não parece a assinatura de ninguém.
  */
 
 export interface AssinaturaCanvasRef {
@@ -36,6 +41,9 @@ interface Props {
   /** Avisa a tela quando deixa de estar em branco (para soltar o botão). */
   onMudou?: (temTraco: boolean) => void;
   disabled?: boolean;
+  /** De quem é a assinatura. Aparece na barra da tela cheia, onde o resto da
+      janela não está mais à vista. */
+  titulo?: string;
 }
 
 /**
@@ -60,11 +68,18 @@ function prepararContexto(ctx: CanvasRenderingContext2D, escala: number): void {
   ctx.strokeStyle = '#0f172a';
 }
 
-export function AssinaturaCanvas({ controle, onMudou, disabled }: Props) {
+export function AssinaturaCanvas({
+  controle,
+  onMudou,
+  disabled,
+  titulo,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const raiz = useRef<HTMLDivElement>(null);
   const desenhando = useRef(false);
   const [temTraco, setTemTraco] = useState(false);
   const [altura, setAltura] = useState(alturaParaTela);
+  const [cheia, setCheia] = useState(false);
 
   // Guardado numa referência, e não só no estado: `mover` dispara a cada
   // pixel do traço, e sem isto o primeiro rabisco viraria centenas de avisos
@@ -75,6 +90,27 @@ export function AssinaturaCanvas({ controle, onMudou, disabled }: Props) {
     jaTemTraco.current = true;
     setTemTraco(true);
     onMudou?.(true);
+  }, [onMudou]);
+
+  /**
+   * Apaga o quadro.
+   *
+   * Vive aqui, e não só na ref, porque a barra da tela cheia precisa dele: lá o
+   * "Limpar" da janela de baixo ficou fora de alcance, e um quadro que não se
+   * apaga é um erro de assinatura que não se conserta.
+   */
+  const limpar = useCallback(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    // O clear vai em pixels reais; o resto do desenho trabalha em CSS px.
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
+    jaTemTraco.current = false;
+    setTemTraco(false);
+    onMudou?.(false);
   }, [onMudou]);
 
   /**
@@ -122,7 +158,7 @@ export function AssinaturaCanvas({ controle, onMudou, disabled }: Props) {
    */
   useLayoutEffect(() => {
     ajustar();
-  }, [ajustar, altura]);
+  }, [ajustar, altura, cheia]);
 
   /**
    * E os avisos de mudança, os três que existem, porque nenhum deles sozinho
@@ -154,23 +190,57 @@ export function AssinaturaCanvas({ controle, onMudou, disabled }: Props) {
     };
   }, [ajustar]);
 
+  /**
+   * Enquanto o quadro é a tela inteira.
+   *
+   * O Esc volta — e só volta daqui: sem a captura, ele chegaria primeiro à
+   * janela de baixo, que fecharia levando a assinatura junto. A página atrás
+   * não rola, e a tela cheia do aparelho (quando houve) se desfaz no caminho
+   * de volta, inclusive quando é a janela inteira que está sumindo.
+   */
+  useEffect(() => {
+    if (!cheia) return;
+
+    const aoTeclar = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      setCheia(false);
+    };
+    window.addEventListener('keydown', aoTeclar, true);
+
+    const overflowAnterior = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      window.removeEventListener('keydown', aoTeclar, true);
+      document.body.style.overflow = overflowAnterior;
+      if (document.fullscreenElement) {
+        void document.exitFullscreen().catch(() => undefined);
+      }
+    };
+  }, [cheia]);
+
+  /**
+   * O quadro ocupando o aparelho.
+   *
+   * Além do overlay, pede a tela cheia do próprio navegador: no celular é a
+   * barra de endereço que come a altura que falta. Falha calada de propósito —
+   * o iPhone não deixa um elemento comum entrar em tela cheia, e lá o quadro
+   * grande já resolve sozinho.
+   */
+  function abrirTelaCheia() {
+    setCheia(true);
+    const elemento = raiz.current;
+    if (elemento && typeof elemento.requestFullscreen === 'function') {
+      void elemento.requestFullscreen().catch(() => undefined);
+    }
+  }
+
   useImperativeHandle(controle, () => ({
     exportar: () =>
       temTraco ? (canvasRef.current?.toDataURL('image/png') ?? null) : null,
 
-    limpar: () => {
-      const canvas = canvasRef.current;
-      const ctx = canvas?.getContext('2d');
-      if (!canvas || !ctx) return;
-      // O clear vai em pixels reais; o resto do desenho trabalha em CSS px.
-      ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.restore();
-      jaTemTraco.current = false;
-      setTemTraco(false);
-      onMudou?.(false);
-    },
+    limpar,
 
     gerarDoNome: (nome: string) => {
       const canvas = canvasRef.current;
@@ -242,41 +312,98 @@ export function AssinaturaCanvas({ controle, onMudou, disabled }: Props) {
   }
 
   return (
-    <div className="relative">
-      <canvas
-        ref={canvasRef}
-        onPointerDown={comecar}
-        onPointerMove={mover}
-        onPointerUp={terminar}
-        onPointerLeave={terminar}
-        onPointerCancel={terminar}
-        /*
-         * Branco nos dois temas, e não `bg-papel`.
-         *
-         * O traço é tinta escura porque é isso que vai impresso no recibo e na
-         * APR — papel é branco. Seguindo o tema, o quadro escurecia junto e a
-         * assinatura virava tinta escura sobre fundo escuro: quem assinava não
-         * via a própria letra, e o "Limpar" era clicado no escuro.
-         */
-        style={{ height: altura, touchAction: 'none', background: '#ffffff' }}
-        className={`w-full rounded-2xl border-2 border-dashed ${
-          disabled
-            ? 'cursor-not-allowed border-tinta-100'
-            : 'cursor-crosshair border-tinta-200'
-        }`}
-      />
-
-      {/* A linha de assinatura fica sob o dedo, como a de um papel. Não
-          intercepta o toque — quem manda no ponteiro é o canvas. */}
-      <div className="pointer-events-none absolute inset-x-8 bottom-12 border-b border-slate-300" />
-
-      {!temTraco && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <span className="text-base text-slate-400">
-            Assine aqui com o dedo
+    /*
+     * O mesmo `div` nos dois modos, e nunca um portal: mudar o quadro de lugar
+     * na árvore refaz o canvas, e um canvas refeito nasce em branco — a
+     * assinatura de quem só queria ver maior iria embora no caminho.
+     */
+    <div
+      ref={raiz}
+      className={
+        cheia ? 'fixed inset-0 z-[60] flex flex-col gap-2 bg-white p-3' : ''
+      }
+    >
+      {cheia && (
+        /* Branco e cinza como o quadro: em tela cheia, o overlay é o papel, e
+           o tema da casa não entra aqui. */
+        <div className="flex shrink-0 items-center justify-between gap-3">
+          <span className="truncate text-[13px] font-semibold text-slate-700">
+            {titulo ?? 'Assinatura'}
           </span>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={limpar}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-[13px] font-semibold text-slate-600"
+            >
+              Limpar
+            </button>
+            <button
+              type="button"
+              onClick={() => setCheia(false)}
+              className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-[13px] font-semibold text-white"
+            >
+              <IconeEncolher className="h-4 w-4" />
+              Pronto
+            </button>
+          </div>
         </div>
       )}
+
+      <div className={`relative ${cheia ? 'min-h-0 flex-1' : ''}`}>
+        <canvas
+          ref={canvasRef}
+          onPointerDown={comecar}
+          onPointerMove={mover}
+          onPointerUp={terminar}
+          onPointerLeave={terminar}
+          onPointerCancel={terminar}
+          /*
+           * Branco nos dois temas, e não `bg-papel`.
+           *
+           * O traço é tinta escura porque é isso que vai impresso no recibo e
+           * na APR — papel é branco. Seguindo o tema, o quadro escurecia junto
+           * e a assinatura virava tinta escura sobre fundo escuro: quem
+           * assinava não via a própria letra, e o "Limpar" era clicado no
+           * escuro.
+           */
+          style={{
+            height: cheia ? '100%' : altura,
+            touchAction: 'none',
+            background: '#ffffff',
+          }}
+          className={`w-full rounded-2xl border-2 border-dashed ${
+            disabled
+              ? 'cursor-not-allowed border-tinta-100'
+              : 'cursor-crosshair border-tinta-200'
+          }`}
+        />
+
+        {/* A linha de assinatura fica sob o dedo, como a de um papel. Não
+            intercepta o toque — quem manda no ponteiro é o canvas. */}
+        <div className="pointer-events-none absolute inset-x-8 bottom-12 border-b border-slate-300" />
+
+        {!temTraco && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <span className="text-base text-slate-400">
+              Assine aqui com o dedo
+            </span>
+          </div>
+        )}
+
+        {/* No canto de cima, longe da linha onde a mão pousa. Some com o quadro
+            desligado: não há o que ampliar quando não há o que assinar. */}
+        {!cheia && !disabled && (
+          <button
+            type="button"
+            onClick={abrirTelaCheia}
+            className="absolute right-2 top-2 flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[12px] font-semibold text-slate-600 shadow-sm"
+          >
+            <IconeExpandir className="h-4 w-4" />
+            Tela cheia
+          </button>
+        )}
+      </div>
     </div>
   );
 }

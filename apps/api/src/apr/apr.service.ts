@@ -423,6 +423,56 @@ export class AprService {
   }
 
   /**
+   * Apaga a APR de vez, com as cópias que ela deixou no RH.
+   *
+   * É a única porta do módulo que não deixa rastro, e existe para o engano: a
+   * APR aberta em duplicidade, a de teste, a que nasceu no dia errado. O
+   * caminho normal de um serviço que não aconteceu continua sendo cancelar —
+   * ali ela fica na estante dizendo que foi cancelada e por quê, que é o que se
+   * espera de um documento exigido por norma. Só o ADMIN chega aqui (ver o
+   * controller).
+   *
+   * As cópias do RH vão junto: uma APR apagada cuja folha continua na pasta de
+   * três pessoas é pior do que não ter apagado nada — ela vira um documento sem
+   * origem, que ninguém sabe mais de onde veio nem por que está ali.
+   */
+  async excluir(id: string, autor: AutorApr) {
+    const apr = await this.prisma.apr.findUnique({
+      where: { id },
+      select: {
+        numero: true,
+        local: true,
+        status: true,
+        documentoRhId: true,
+        executantes: { select: { documentoRhId: true } },
+      },
+    });
+    if (!apr) throw new NotFoundException('Esta APR não existe mais.');
+
+    const copias = [
+      apr.documentoRhId,
+      ...apr.executantes.map((e) => e.documentoRhId),
+    ].filter((doc): doc is string => !!doc);
+
+    await this.prisma.$transaction(async (tx) => {
+      // Os documentos primeiro: quem aponta para eles é a APR e os executantes,
+      // com `SetNull`, e apagar a APR antes soltaria as cópias na estante sem
+      // ninguém sabendo mais quais eram.
+      if (copias.length > 0) {
+        await tx.documentoRh.deleteMany({ where: { id: { in: copias } } });
+      }
+      // Respostas e executantes saem em cascata — ver a migração.
+      await tx.apr.delete({ where: { id } });
+    });
+
+    this.logger.warn(
+      `APR nº ${apr.numero} (${apr.local}, ${apr.status}) apagada por ` +
+        `${autor.nome}, com ${copias.length} cópia(s) do RH.`,
+    );
+    return { apagada: true, numero: apr.numero, copiasRemovidas: copias.length };
+  }
+
+  /**
    * A assinatura de um executante, colhida no aparelho na hora.
    *
    * Só antes de liberar. Depois de liberada, todo mundo já assinou — é isso que

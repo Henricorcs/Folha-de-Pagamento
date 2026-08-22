@@ -185,8 +185,10 @@ pela NR-10. Transcrito do formulário impresso da casa, sem tirar nada dele.
 - [x] **Tela única do técnico** (`/campo`): sem barra lateral e sem escolha de
       módulo. Cinco passos que cabem numa tela de celular, salvando a cada
       passo — o sinal cai onde se trabalha
-- [x] **Assinatura de cada executante** no próprio aparelho, com a saída para
-      quem não assina de próprio punho (o papel diz qual das duas foi)
+- [x] **Assinatura de cada executante** no próprio aparelho, com o quadro em
+      tela cheia para quem precisa de espaço (assinar com o dedo num retângulo
+      pequeno é o que faz sair rabisco) e a saída para quem não assina de
+      próprio punho (o papel diz qual das duas foi)
 - [x] **Conferência de liberação**: a APR só libera o serviço com norma,
       atividade, risco e EPI marcados, o relato inteiro respondido e todo mundo
       assinado. As pendências voltam todas de uma vez
@@ -200,6 +202,10 @@ pela NR-10. Transcrito do formulário impresso da casa, sem tirar nada dele.
       orientada antes de subir. Terceirizado sem pasta fica só na da empresa
 - [x] **Perfil TECNICO**, cujo módulo não se distribui pela tela: ele abre a
       Segurança do Trabalho e mais nada, sempre
+- [x] **Excluir a APR** (só ADMIN), levando junto as cópias do RH — é para a
+      aberta em duplicidade e a de teste. O caminho de um serviço que não
+      aconteceu continua sendo cancelar, que deixa a APR na estante dizendo o
+      que houve
 - [ ] Prazo de validade dos treinamentos (NR-10/NR-35) por funcionário, com
       recusa de quem está vencido na hora de montar a equipe
 - [ ] Painel de riscos por período: o que mais se marca, onde, com que equipe

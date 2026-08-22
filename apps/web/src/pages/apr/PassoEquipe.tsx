@@ -344,6 +344,7 @@ function ColetarAssinaturaApr({
         controle={controle}
         onMudou={setTemTraco}
         disabled={assinar.isPending || modo === 'DIGITADA'}
+        titulo={executante.nome}
       />
 
       {modo === 'DIGITADA' ? (

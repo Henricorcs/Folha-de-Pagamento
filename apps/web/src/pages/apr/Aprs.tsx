@@ -256,7 +256,11 @@ export function AprAberta() {
           onPronta={() => setContinuando(false)}
         />
       ) : (
-        <DetalheApr id={id} onContinuar={() => setContinuando(true)} />
+        <DetalheApr
+          id={id}
+          onContinuar={() => setContinuando(true)}
+          onExcluida={() => navigate('/seguranca/aprs')}
+        />
       )}
     </Pagina>
   );
