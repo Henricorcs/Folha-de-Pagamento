@@ -81,7 +81,7 @@ export function DetalheApr({
     onError: (e) => setErro(mensagemErro(e)),
   });
 
-  if (consulta.isLoading) return <Carregando texto="Abrindo a APR…" />;
+  if (consulta.isLoading) return <Carregando texto="Carregando…" />;
   if (consulta.isError) {
     return (
       <p className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -141,7 +141,7 @@ export function DetalheApr({
         <section className="rounded-2xl border border-amber-300 bg-amber-50 p-4 dark:bg-amber-500/10">
           <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-300">
             <IconeAlerta className="h-3.5 w-3.5" />
-            Respondido &quot;não&quot; na conferência
+            Não conformidades no relato situacional
           </p>
           <ul className="mt-2.5 space-y-2.5">
             {apr.alertas.map((a) => (
@@ -161,7 +161,7 @@ export function DetalheApr({
       {rascunho && apr.pendencias.length > 0 && (
         <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:bg-amber-500/10">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-300">
-            Falta para liberar
+            Pendências para liberação
           </p>
           <ul className="mt-1.5 space-y-1 text-[13px] leading-snug text-amber-900 dark:text-amber-200">
             {apr.pendencias.map((p) => (
@@ -179,7 +179,7 @@ export function DetalheApr({
           disabled={abrirPdf.isPending}
           className="btn btn-primario"
         >
-          {abrirPdf.isPending ? 'Abrindo…' : 'Ver o papel (PDF)'}
+          {abrirPdf.isPending ? 'Abrindo…' : 'Visualizar PDF'}
         </button>
 
         {rascunho && onContinuar && (
@@ -188,7 +188,7 @@ export function DetalheApr({
             onClick={() => onContinuar(apr.id)}
             className="btn btn-acao"
           >
-            Continuar preenchendo
+            Continuar preenchimento
           </button>
         )}
 
@@ -199,7 +199,7 @@ export function DetalheApr({
             disabled={acao.isPending}
             className="btn btn-pagar"
           >
-            Encerrar o serviço
+            Encerrar
           </button>
         )}
 
@@ -219,7 +219,7 @@ export function DetalheApr({
             onClick={() => setJanela('supervisao')}
             className="btn btn-neutro"
           >
-            Assinar supervisão
+            Registrar supervisão
           </button>
         )}
 
@@ -229,7 +229,7 @@ export function DetalheApr({
             onClick={() => setJanela('cancelar')}
             className="btn btn-perigo"
           >
-            Cancelar APR
+            Cancelar
           </button>
         )}
 
@@ -248,7 +248,7 @@ export function DetalheApr({
 
       {/* --- A equipe --- */}
       <section className="card p-5">
-        <h2 className="titulo-bloco mb-3">Executantes</h2>
+        <h2 className="titulo-bloco mb-3">Executantes da tarefa</h2>
         <div className="grid gap-3 sm:grid-cols-2">
           {apr.executantes.map((e) => (
             <div
@@ -302,7 +302,7 @@ export function DetalheApr({
 
       {/* --- O que foi marcado --- */}
       <section className="card p-5">
-        <h2 className="titulo-bloco mb-3">O que foi marcado</h2>
+        <h2 className="titulo-bloco mb-3">Itens assinalados</h2>
         <div className="space-y-4">
           {BLOCOS.map((categoria) => {
             const itens = apr.respostas.filter(
@@ -332,7 +332,7 @@ export function DetalheApr({
         </div>
 
         <div className="mt-5 border-t border-tinta-200 pt-4">
-          <p className="eyebrow mb-1.5">A atividade, por etapas</p>
+          <p className="eyebrow mb-1.5">Descrição da atividade por etapas</p>
           <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-tinta-700">
             {apr.descricaoEtapas}
           </p>
@@ -341,8 +341,7 @@ export function DetalheApr({
 
       {janela === 'prorrogar' && (
         <JanelaDeMotivo
-          titulo="Prorrogar o serviço"
-          ajuda="O serviço passou do previsto e continua. Diga por quê — é a informação que falta quando alguém pergunta por que a equipe ficou até tarde."
+          titulo="Prorrogação"
           rotulo="Motivo da prorrogação"
           confirmar="Prorrogar"
           pendente={acao.isPending}
@@ -353,9 +352,8 @@ export function DetalheApr({
 
       {janela === 'cancelar' && (
         <JanelaDeMotivo
-          titulo="Cancelar esta APR"
-          ajuda="Cancelar não apaga: a APR fica registrada como cancelada, com o motivo, e o papel sai com a tarja."
-          rotulo="Por que está sendo cancelada"
+          titulo="Cancelamento da APR"
+          rotulo="Motivo do cancelamento"
           confirmar="Cancelar a APR"
           perigo
           pendente={acao.isPending}
@@ -381,7 +379,6 @@ export function DetalheApr({
 /** Prorrogar e cancelar pedem a mesma coisa: uma frase dizendo por quê. */
 function JanelaDeMotivo({
   titulo,
-  ajuda,
   rotulo,
   confirmar,
   perigo,
@@ -390,7 +387,6 @@ function JanelaDeMotivo({
   onFechar,
 }: {
   titulo: string;
-  ajuda: string;
   rotulo: string;
   confirmar: string;
   perigo?: boolean;
@@ -402,8 +398,7 @@ function JanelaDeMotivo({
 
   return (
     <Janela titulo={titulo} onFechar={onFechar}>
-      <p className="text-sm leading-relaxed text-tinta-600">{ajuda}</p>
-      <label className="rotulo mt-4" htmlFor="motivo">
+      <label className="rotulo" htmlFor="motivo">
         {rotulo}
       </label>
       <textarea
@@ -447,10 +442,11 @@ function JanelaDeSupervisao({
   const [temTraco, setTemTraco] = useState(false);
 
   return (
-    <Janela titulo="Assinar a supervisão" onFechar={onFechar}>
+    <Janela titulo="Supervisão" onFechar={onFechar}>
       <p className="text-sm leading-relaxed text-tinta-600">
-        Assinando, você declara ter conferido esta análise de risco — o que a
-        equipe marcou, o que respondeu na conferência e quem assinou.
+        Ao assinar, o supervisor declara ter conferido esta análise preliminar
+        de risco, os itens assinalados, o relato situacional e as assinaturas
+        dos executantes.
       </p>
 
       <label className="rotulo mt-4" htmlFor="sup-nome">
@@ -489,7 +485,7 @@ function JanelaDeSupervisao({
         disabled={!temTraco || nome.trim().length < 3 || pendente}
         className="btn btn-primario mt-5 w-full py-3"
       >
-        {pendente ? 'Enviando…' : 'Confirmar supervisão'}
+        {pendente ? 'Registrando…' : 'Registrar supervisão'}
       </button>
     </Janela>
   );

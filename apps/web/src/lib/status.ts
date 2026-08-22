@@ -127,22 +127,18 @@ export const RESPOSTAS_RELATO: { valor: RespostaRelato; label: string }[] = [
   { valor: 'NAO_SE_APLICA', label: 'N.A.' },
 ];
 
-/** O nome de cada bloco do formulário, como sai na tela e no papel. */
+/**
+ * O nome de cada bloco do formulário.
+ *
+ * É o titulo do bloco correspondente no formulário impresso, palavra por
+ * palavra. Quem conhece o papel tem de reconhecer a tela sem precisar traduzir
+ * nada — e é o mesmo texto que sai impresso de volta.
+ */
 export const CATEGORIA_APR_LABEL: Record<CategoriaItemApr, string> = {
-  NORMA: 'Normas envolvidas',
+  NORMA: 'Normas regulamentadoras envolvidas no processo',
   ATIVIDADE: 'Atividade a ser executada',
   RISCO: 'Riscos da atividade',
-  FERRAMENTA: 'Máquinas, equipamentos e ferramentas',
-  PROTECAO: 'EPI e EPC de uso obrigatório',
+  FERRAMENTA: 'Máquinas, equipamentos e ferramentas utilizadas no processo',
+  PROTECAO: 'Equipamentos de proteção individual e coletivos de uso obrigatório',
   RELATO: 'Relato situacional',
-};
-
-/** A frase de ajuda de cada bloco — o que se espera que a pessoa faça ali. */
-export const CATEGORIA_APR_AJUDA: Record<CategoriaItemApr, string> = {
-  NORMA: 'Quais normas regem este serviço.',
-  ATIVIDADE: 'O que a equipe vai fazer.',
-  RISCO: 'Tudo a que a equipe fica exposta neste serviço.',
-  FERRAMENTA: 'O que vai ser usado no processo.',
-  PROTECAO: 'O que é obrigatório vestir e montar antes de começar.',
-  RELATO: 'A conferência de antes de subir. Responda uma a uma.',
 };

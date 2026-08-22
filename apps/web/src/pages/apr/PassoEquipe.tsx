@@ -67,11 +67,7 @@ export function PassoEquipe({
       {equipe.length === 0 && (
         <div className="rounded-2xl border border-dashed border-tinta-300 px-5 py-10 text-center">
           <p className="text-sm font-semibold text-tinta-500">
-            Ninguém na equipe ainda
-          </p>
-          <p className="mx-auto mt-1 max-w-xs text-[13px] text-tinta-400">
-            Todo mundo que vai executar precisa estar aqui e assinar antes de
-            começar.
+            Nenhum executante informado
           </p>
         </div>
       )}
@@ -132,10 +128,10 @@ export function PassoEquipe({
                     ),
                   )
                 }
-                aria-label={`Tirar ${pessoa.nome} da equipe`}
+                aria-label={`Remover ${pessoa.nome}`}
                 className="btn btn-perigo btn-p shrink-0"
               >
-                Tirar
+                Remover
               </button>
             )}
           </div>
@@ -148,15 +144,8 @@ export function PassoEquipe({
         className="btn btn-neutro w-full justify-center py-3"
       >
         <IconeMais className="h-4 w-4" />
-        Acrescentar quem vai executar
+        Adicionar executante
       </button>
-
-      {equipe.length > 0 && (
-        <p className="ajuda text-center">
-          Passe o aparelho: cada um assina o próprio nome antes de o serviço
-          começar.
-        </p>
-      )}
 
       {adicionando && (
         <EscolherPessoa
@@ -205,14 +194,14 @@ function EscolherPessoa({
     : disponiveis;
 
   return (
-    <Janela titulo="Quem vai executar" onFechar={onFechar}>
+    <Janela titulo="Executantes da tarefa" onFechar={onFechar}>
       <input
         type="search"
         className="campo"
         value={busca}
         onChange={(e) => setBusca(e.target.value)}
-        placeholder="Procurar pelo nome ou apelido…"
-        aria-label="Procurar pessoa"
+        placeholder="Localizar por nome"
+        aria-label="Localizar executante"
       />
 
       <div className="mt-4 max-h-[45vh] overflow-y-auto rolagem-fina">
@@ -251,7 +240,7 @@ function EscolherPessoa({
 
         {lista.length === 0 && (
           <p className="py-6 text-center text-sm text-tinta-400">
-            Ninguém com esse nome no cadastro.
+            Nenhum resultado.
           </p>
         )}
       </div>
@@ -259,7 +248,7 @@ function EscolherPessoa({
       {/* Quem não está no cadastro: o terceirizado que apareceu no serviço. */}
       <div className="mt-5 border-t border-tinta-200 pt-4">
         <label className="rotulo" htmlFor="nome-livre">
-          Não está na lista? Escreva o nome
+          Executante não cadastrado
         </label>
         <div className="flex gap-2">
           <input
@@ -276,7 +265,7 @@ function EscolherPessoa({
             onClick={() => onEscolher({ nome: nomeLivre.trim() })}
             className="btn btn-primario shrink-0"
           >
-            Incluir
+            Adicionar
           </button>
         </div>
       </div>
@@ -332,9 +321,9 @@ function ColetarAssinaturaApr({
   return (
     <Janela titulo={executante.nome} onFechar={onFechar}>
       <p className="text-sm leading-relaxed text-tinta-600">
-        Assinando, {primeiroNome(executante.nome)} declara ter participado da
-        análise de risco deste serviço, conhecer os riscos marcados e estar de
-        posse dos EPIs listados.
+        Ao assinar, {executante.nome} declara ter participado desta análise
+        preliminar de risco, ter conhecimento dos riscos identificados e estar
+        de posse dos equipamentos de proteção relacionados.
       </p>
 
       <div className="mt-4 flex items-center justify-between">
@@ -360,16 +349,15 @@ function ColetarAssinaturaApr({
       {modo === 'DIGITADA' ? (
         <>
           <p className="ajuda">
-            A assinatura acima foi escrita pelo sistema com o nome informado. A
-            APR vai dizer isso — que ela foi gerada a pedido de quem não assina
-            de próprio punho.
+            Assinatura gerada pelo sistema a partir do nome, a pedido de quem
+            não assina de próprio punho. O documento registra essa condição.
           </p>
           <button
             type="button"
             onClick={() => trocarModo('DESENHADA')}
             className="mt-2 text-sm font-semibold text-brand-600 underline underline-offset-2 dark:text-brand-300"
           >
-            Prefiro assinar com o dedo
+            Assinar de próprio punho
           </button>
         </>
       ) : (
@@ -378,7 +366,7 @@ function ColetarAssinaturaApr({
           onClick={() => trocarModo('DIGITADA')}
           className="mt-2.5 text-sm text-tinta-500 underline underline-offset-2"
         >
-          Não sei assinar — escreva meu nome
+          Não assino de próprio punho
         </button>
       )}
 
@@ -401,8 +389,4 @@ function formatHora(iso: string): string {
     dateStyle: 'short',
     timeStyle: 'short',
   }).format(new Date(iso));
-}
-
-function primeiroNome(nome: string): string {
-  return nome.trim().split(/\s+/)[0] ?? nome;
 }

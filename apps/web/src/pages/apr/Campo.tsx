@@ -111,11 +111,7 @@ export function CampoInicio() {
         Nova análise de risco
       </button>
 
-      <p className="text-center text-[13px] leading-relaxed text-tinta-500">
-        Preencha antes de começar o serviço. A equipe assina aqui no aparelho.
-      </p>
-
-      {lista.isLoading && <Carregando texto="Buscando as suas…" />}
+      {lista.isLoading && <Carregando texto="Carregando…" />}
 
       {lista.isError && (
         <p className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -125,7 +121,7 @@ export function CampoInicio() {
 
       {rascunhos.length > 0 && (
         <section>
-          <h2 className="eyebrow mb-2">Não terminadas</h2>
+          <h2 className="eyebrow mb-2">Em preenchimento</h2>
           <div className="space-y-2">
             {rascunhos.map((a) => (
               <CartaoApr key={a.id} apr={a} />
@@ -136,7 +132,7 @@ export function CampoInicio() {
 
       {resto.length > 0 && (
         <section>
-          <h2 className="eyebrow mb-2">As suas APRs</h2>
+          <h2 className="eyebrow mb-2">Análises registradas</h2>
           <div className="space-y-2">
             {resto.map((a) => (
               <CartaoApr key={a.id} apr={a} />
@@ -148,11 +144,7 @@ export function CampoInicio() {
       {!lista.isLoading && aprs.length === 0 && (
         <div className="rounded-2xl border border-dashed border-tinta-300 px-5 py-10 text-center">
           <p className="text-sm font-semibold text-tinta-500">
-            Nenhuma APR sua ainda
-          </p>
-          <p className="mx-auto mt-1 max-w-xs text-[13px] text-tinta-400">
-            A primeira leva uns minutos; a partir daí, o formulário já vem com
-            tudo na tela.
+            Nenhuma análise de risco registrada
           </p>
         </div>
       )}

@@ -11,7 +11,7 @@ import {
   Selo,
 } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
-import { CATEGORIA_APR_AJUDA, CATEGORIA_APR_LABEL } from '../../lib/status';
+import { CATEGORIA_APR_LABEL } from '../../lib/status';
 import type { CategoriaItemApr, ItemApr, ModeloApr } from '../../lib/types';
 
 /**
@@ -128,14 +128,14 @@ export function Formularios() {
     onError: (e) => avisar(mensagemErro(e), true),
   });
 
-  if (modelos.isLoading) return <Carregando texto="Abrindo os formulários…" />;
+  if (modelos.isLoading) return <Carregando texto="Carregando…" />;
 
   return (
     <Pagina>
       <CabecalhoPagina
         secao="Segurança do Trabalho"
         titulo="Formulários"
-        descricao="O que a APR pergunta: os riscos que se marcam, os EPIs que se conferem e as perguntas do relato. Mexer aqui vale para a próxima APR — as que já foram assinadas guardam o texto que a equipe viu."
+        descricao="Conteúdo do formulário da APR. As alterações valem para as próximas análises; as já assinadas preservam o texto vigente na data."
         acoes={
           <>
             <button
@@ -170,7 +170,7 @@ export function Formularios() {
               aria-pressed={m.id === modelo?.id}
               className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                 m.id === modelo?.id
-                  ? 'bg-tinta-900 text-white'
+                  ? 'bg-barra text-white'
                   : 'border border-tinta-200 bg-papel text-tinta-600 hover:border-tinta-300'
               }`}
             >
@@ -200,7 +200,7 @@ export function Formularios() {
         </div>
       )}
 
-      {itens.isLoading && <Carregando texto="Lendo o catálogo…" />}
+      {itens.isLoading && <Carregando texto="Carregando…" />}
 
       {modelo && itens.data && (
         <div className="space-y-5">
@@ -272,10 +272,6 @@ function BlocoDoCatalogo({
         </span>
       }
     >
-      <p className="mb-3 text-[13px] text-tinta-500">
-        {CATEGORIA_APR_AJUDA[categoria]}
-      </p>
-
       <ul className="lista-dividida">
         {itens.map((item) => (
           <li
@@ -441,7 +437,6 @@ function NovoFormulario({
             onChange={(e) => setNome(e.target.value)}
             placeholder="Espaço confinado"
           />
-          <p className="ajuda">Como ele aparece na hora de escolher.</p>
         </div>
 
         <div>
@@ -455,7 +450,6 @@ function NovoFormulario({
             onChange={(e) => setTitulo(e.target.value)}
             placeholder="ANÁLISE DE RISCO PARA ESPAÇO CONFINADO (NR-33)"
           />
-          <p className="ajuda">Sai no alto do papel, por extenso.</p>
         </div>
 
         <div>
@@ -489,10 +483,6 @@ function NovoFormulario({
                 </option>
               ))}
             </select>
-            <p className="ajuda">
-              Riscos, EPIs, ferramentas e perguntas vêm junto — depois é só
-              tirar o que não serve.
-            </p>
           </div>
         )}
       </div>
@@ -539,9 +529,8 @@ function EditarTextos({
   return (
     <Janela titulo="Orientações e plano de resgate" onFechar={onFechar}>
       <p className="text-sm leading-relaxed text-tinta-600">
-        Não são campos a preencher: são o que a empresa manda fazer, e vão
-        impressos na APR para quem assina ter lido. As APRs já assinadas
-        guardam a versão que a equipe viu.
+        Texto fixo impresso na APR. As análises já assinadas preservam a versão
+        vigente na data da assinatura.
       </p>
 
       <div className="mt-5 space-y-4">
@@ -591,7 +580,6 @@ function EditarTextos({
             value={telefones}
             onChange={(e) => setTelefones(e.target.value)}
           />
-          <p className="ajuda">Sai no rodapé de todas as páginas do papel.</p>
         </div>
       </div>
 

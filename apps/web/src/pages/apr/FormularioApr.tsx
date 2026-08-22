@@ -6,7 +6,7 @@ import { api, mensagemErro } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { combina, semAcento } from '../../lib/busca';
 import {
-  CATEGORIA_APR_AJUDA,
+  CATEGORIA_APR_LABEL,
   GRAVIDADE_LABEL,
   RESPOSTAS_RELATO,
 } from '../../lib/status';
@@ -48,12 +48,19 @@ import {
  * visível no rodapé do último passo.
  */
 
+/**
+ * As etapas do preenchimento.
+ *
+ * Só o nome de cada uma. A legenda explicativa que havia aqui saiu junto com
+ * as demais: este é um documento de segurança do trabalho, e o formulário
+ * impresso que ele substitui nomeia os campos sem instruir quem preenche.
+ */
 const PASSOS = [
-  { titulo: 'O serviço', ajuda: 'Onde, quem coordena e o que vai ser feito' },
-  { titulo: 'Riscos', ajuda: 'A que a equipe fica exposta' },
-  { titulo: 'Equipamentos', ajuda: 'Ferramentas, EPIs e EPCs' },
-  { titulo: 'Conferência', ajuda: 'O que se olha antes de subir' },
-  { titulo: 'Equipe', ajuda: 'Quem vai executar, e a assinatura de cada um' },
+  'Identificação do serviço',
+  'Riscos da atividade',
+  'Equipamentos e proteções',
+  'Relato situacional',
+  'Executantes',
 ] as const;
 
 /** O que ela guarda de cada pergunta do relato. */
@@ -328,15 +335,13 @@ export function FormularioApr({
       {passo === 2 && (
         <>
           <BlocoDeMarcar
-            titulo="Ferramentas e equipamentos"
-            ajuda={CATEGORIA_APR_AJUDA.FERRAMENTA}
+            titulo={CATEGORIA_APR_LABEL.FERRAMENTA}
             itens={itensDe('FERRAMENTA')}
             marcacoes={marcacoes}
             setMarcacoes={setMarcacoes}
           />
           <BlocoDeMarcar
-            titulo="EPI e EPC obrigatórios"
-            ajuda={CATEGORIA_APR_AJUDA.PROTECAO}
+            titulo={CATEGORIA_APR_LABEL.PROTECAO}
             itens={itensDe('PROTECAO')}
             marcacoes={marcacoes}
             setMarcacoes={setMarcacoes}
@@ -390,8 +395,6 @@ function Cabecalho({
   numero?: number;
   onVoltar: () => void;
 }) {
-  const atual = PASSOS[passo];
-
   return (
     <header className="mb-5">
       <div className="flex items-center gap-3">
@@ -409,17 +412,16 @@ function Cabecalho({
             {numero ? ` · APR nº ${numero}` : ''}
           </p>
           <h1 className="font-display text-[22px] font-semibold leading-tight tracking-[-0.02em] text-tinta-900">
-            {atual.titulo}
+            {PASSOS[passo]}
           </h1>
         </div>
       </div>
-      <p className="mt-1.5 text-[13px] text-tinta-500">{atual.ajuda}</p>
 
       {/* A régua de progresso: cinco traços, e o de agora aceso. */}
       <div className="mt-4 flex gap-1.5">
         {PASSOS.map((p, i) => (
           <span
-            key={p.titulo}
+            key={p}
             className={`h-1 flex-1 rounded-full transition ${
               i <= passo ? 'bg-brand-500' : 'bg-tinta-200'
             }`}
@@ -543,47 +545,39 @@ function PassoServico(p: {
     <div className="space-y-6">
       <div>
         <label className="rotulo" htmlFor="local">
-          Onde é o serviço
+          Local da atividade
         </label>
         <input
           id="local"
           className="campo"
           value={p.local}
           onChange={(e) => p.setLocal(e.target.value)}
-          placeholder="Rua, número, referência, nº do poste"
           autoComplete="off"
         />
-        <p className="ajuda">
-          É o campo que responde &quot;onde eles estavam?&quot; se algo
-          acontecer.
-        </p>
       </div>
 
       <div>
         <label className="rotulo" htmlFor="coordenador">
-          Quem coordena a equipe
+          Coordenador responsável
         </label>
         <input
           id="coordenador"
           className="campo"
           value={p.coordenador}
           onChange={(e) => p.setCoordenador(e.target.value)}
-          placeholder="Nome do responsável"
           autoComplete="off"
         />
       </div>
 
       <MarcarEmLinha
-        titulo="Normas envolvidas"
-        ajuda={CATEGORIA_APR_AJUDA.NORMA}
+        titulo={CATEGORIA_APR_LABEL.NORMA}
         itens={p.normas}
         marcacoes={p.marcacoes}
         setMarcacoes={p.setMarcacoes}
       />
 
       <MarcarEmLinha
-        titulo="Atividade a ser executada"
-        ajuda={CATEGORIA_APR_AJUDA.ATIVIDADE}
+        titulo={CATEGORIA_APR_LABEL.ATIVIDADE}
         itens={p.atividades}
         marcacoes={p.marcacoes}
         setMarcacoes={p.setMarcacoes}
@@ -591,21 +585,14 @@ function PassoServico(p: {
 
       <div>
         <label className="rotulo" htmlFor="etapas">
-          A atividade, por etapas
+          Descrição da atividade por etapas, de forma sequencial
         </label>
         <textarea
           id="etapas"
           className="campo min-h-[140px] resize-y"
           value={p.etapas}
           onChange={(e) => p.setEtapas(e.target.value)}
-          placeholder={
-            '1) Isolar a área com cones e fita zebrada\n' +
-            '2) Revisar o poste procurando fuga de energia\n' +
-            '3) Amarrar a escada e subir com o trava-quedas\n' +
-            '4) …'
-          }
         />
-        <p className="ajuda">Na ordem em que vão ser feitas, uma por linha.</p>
       </div>
 
       <div>
@@ -636,17 +623,16 @@ function PassoServico(p: {
             );
           })}
         </div>
-        <p className="ajuda">O pior que pode acontecer neste serviço.</p>
       </div>
 
       <details className="rounded-xl border border-tinta-200 bg-papel px-4 py-3">
         <summary className="cursor-pointer text-sm font-semibold text-tinta-600">
-          Horário e previsão
+          Período de execução
         </summary>
         <div className="mt-4 space-y-4">
           <div>
             <label className="rotulo" htmlFor="inicio">
-              Início
+              Data e hora de início
             </label>
             <input
               id="inicio"
@@ -655,12 +641,11 @@ function PassoServico(p: {
               value={p.inicioEm}
               onChange={(e) => p.setInicioEm(e.target.value)}
             />
-            <p className="ajuda">Já vem preenchido com agora.</p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="rotulo" htmlFor="prev-ini">
-                Previsão — de
+                Previsão de execução — de
               </label>
               <input
                 id="prev-ini"
@@ -672,7 +657,7 @@ function PassoServico(p: {
             </div>
             <div>
               <label className="rotulo" htmlFor="prev-fim">
-                Previsão — até
+                Previsão de execução — até
               </label>
               <input
                 id="prev-fim"
@@ -725,8 +710,8 @@ function PassoRiscos({
         className="campo"
         value={busca}
         onChange={(e) => setBusca(e.target.value)}
-        placeholder="Procurar risco…"
-        aria-label="Procurar risco"
+        placeholder="Localizar risco"
+        aria-label="Localizar risco"
       />
 
       {marcados.length > 0 && (
@@ -792,7 +777,7 @@ function PassoConferencia({
   return (
     <div className="space-y-3">
       <p className="text-[13px] text-tinta-500">
-        {respondidas} de {itens.length} respondidas.
+        {respondidas} de {itens.length} respondidas
       </p>
 
       {itens.map((item, indice) => {
@@ -847,7 +832,7 @@ function PassoConferencia({
             {negativa && item.exigeProvidencia && (
               <div className="mt-3">
                 <label className="rotulo" htmlFor={`prov-${item.id}`}>
-                  O que foi feito a respeito
+                  Providência adotada
                 </label>
                 <textarea
                   id={`prov-${item.id}`}
@@ -862,7 +847,6 @@ function PassoConferencia({
                       },
                     }))
                   }
-                  placeholder="Ex.: reposicionamos a escada e conferimos a distância com a vara de manobra."
                 />
               </div>
             )}

@@ -23,13 +23,11 @@ export type DefinirMarcacoes = React.Dispatch<
 /** Um bloco com título e a grade de itens embaixo. */
 export function BlocoDeMarcar({
   titulo,
-  ajuda,
   itens,
   marcacoes,
   setMarcacoes,
 }: {
   titulo: string;
-  ajuda: string;
   itens: ItemApr[];
   marcacoes: Record<string, Marcacao>;
   setMarcacoes: React.Dispatch<React.SetStateAction<Record<string, Marcacao>>>;
@@ -38,10 +36,9 @@ export function BlocoDeMarcar({
 
   return (
     <section className="mb-7">
-      <h2 className="font-display text-[15px] font-semibold text-tinta-900">
+      <h2 className="mb-3 font-display text-[15px] font-semibold leading-snug text-tinta-900">
         {titulo}
       </h2>
-      <p className="mb-3 text-[13px] text-tinta-500">{ajuda}</p>
       <Grade itens={itens} marcacoes={marcacoes} setMarcacoes={setMarcacoes} />
     </section>
   );
@@ -50,13 +47,11 @@ export function BlocoDeMarcar({
 /** O mesmo, em versão curta: título pequeno e itens em linha. */
 export function MarcarEmLinha({
   titulo,
-  ajuda,
   itens,
   marcacoes,
   setMarcacoes,
 }: {
   titulo: string;
-  ajuda: string;
   itens: ItemApr[];
   marcacoes: Record<string, Marcacao>;
   setMarcacoes: React.Dispatch<React.SetStateAction<Record<string, Marcacao>>>;
@@ -67,7 +62,6 @@ export function MarcarEmLinha({
     <div>
       <span className="rotulo">{titulo}</span>
       <Grade itens={itens} marcacoes={marcacoes} setMarcacoes={setMarcacoes} />
-      <p className="ajuda">{ajuda}</p>
     </div>
   );
 }

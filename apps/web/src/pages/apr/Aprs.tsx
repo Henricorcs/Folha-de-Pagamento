@@ -70,7 +70,7 @@ export function Aprs() {
       <CabecalhoPagina
         secao="Segurança do Trabalho"
         titulo="Análises de Risco"
-        descricao="A APR de cada serviço: o que a equipe marcou, o que ela conferiu antes de subir e quem assinou."
+        descricao="Análise preliminar de risco por serviço executado."
         acoes={
           <button
             type="button"
@@ -85,21 +85,20 @@ export function Aprs() {
 
       <div className="surgir surgir-1 mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Indicador
-          rotulo="Em campo agora"
+          rotulo="Em execução"
           valor={emAndamento}
-          detalhe="Liberadas e ainda sem encerramento"
+          detalhe="Liberadas sem encerramento registrado"
           acento
         />
         <Indicador
-          rotulo="Com &quot;não&quot; na conferência"
+          rotulo="Não conformidades"
           valor={comAlerta}
-          detalhe="Alguma pergunta do relato foi respondida com não"
-          alerta={comAlerta > 0 ? 'Vale abrir e ler a providência' : undefined}
+          detalhe="Relato situacional com resposta negativa"
         />
         <Indicador
           rotulo="Sem supervisão"
           valor={semSupervisao}
-          detalhe="Liberadas que ninguém conferiu e assinou embaixo"
+          detalhe="Liberadas sem assinatura da supervisão"
         />
       </div>
 
@@ -111,9 +110,16 @@ export function Aprs() {
               type="button"
               onClick={() => setStatus(f.valor)}
               aria-pressed={status === f.valor}
+              /*
+               * `bg-barra`, e não `bg-tinta-900`: a escala `tinta` vira do
+               * avesso no tema escuro, então `tinta-900` — o texto mais forte
+               * no claro — vira quase branco lá. O filtro marcado saía branco
+               * sobre branco, ilegível. `barra` é a tinta que fica escura nos
+               * dois temas, a mesma do `.btn-acao`.
+               */
               className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                 status === f.valor
-                  ? 'bg-tinta-900 text-white'
+                  ? 'bg-barra text-white'
                   : 'border border-tinta-200 bg-papel text-tinta-600 hover:border-tinta-300'
               }`}
             >
@@ -126,13 +132,13 @@ export function Aprs() {
           className="campo max-w-xs"
           value={busca}
           onChange={(e) => setBusca(e.target.value)}
-          placeholder="Local, coordenador, número, executante…"
-          aria-label="Procurar APR"
+          placeholder="Local, coordenador, número ou executante"
+          aria-label="Localizar APR"
         />
       </div>
 
       <Bloco semPadding>
-        {lista.isLoading && <Carregando texto="Buscando as APRs…" />}
+        {lista.isLoading && <Carregando texto="Carregando…" />}
 
         {lista.isError && (
           <p className="px-5 py-6 text-sm text-rose-700">
@@ -141,10 +147,7 @@ export function Aprs() {
         )}
 
         {!lista.isLoading && aprs.length === 0 && (
-          <Vazio titulo="Nenhuma APR por aqui">
-            As análises de risco que os técnicos preencherem em campo aparecem
-            nesta lista.
-          </Vazio>
+          <Vazio titulo="Nenhuma análise de risco registrada" />
         )}
 
         {aprs.length > 0 && (
@@ -153,7 +156,7 @@ export function Aprs() {
               <thead>
                 <tr>
                   <th className="th">APR</th>
-                  <th className="th">Local e equipe</th>
+                  <th className="th">Local e executantes</th>
                   <th className="th">Riscos</th>
                   <th className="th">Quando</th>
                   <th className="th">Situação</th>
@@ -191,7 +194,7 @@ export function Aprs() {
                           até {formatDataHora(a.fimEm)}
                         </span>
                       ) : a.status === 'LIBERADA' ? (
-                        <span className="block text-amber-700">em campo</span>
+                        <span className="block text-amber-700">em execução</span>
                       ) : null}
                     </td>
                     <td className="td">
@@ -204,7 +207,7 @@ export function Aprs() {
                         </Selo>
                         {a.alertas > 0 && (
                           <span
-                            title={`${a.alertas} pergunta(s) respondida(s) com "não"`}
+                            title={`${a.alertas} não conformidade(s) no relato situacional`}
                             className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
                           >
                             <IconeAlerta className="h-3 w-3" />
@@ -241,7 +244,7 @@ export function AprAberta() {
     <Pagina>
       <CabecalhoPagina
         secao="Segurança do Trabalho"
-        titulo={continuando ? 'Preenchendo a APR' : 'Análise de risco'}
+        titulo={continuando ? 'Preenchimento da APR' : 'Análise de risco'}
         voltar={() =>
           continuando ? setContinuando(false) : navigate('/seguranca/aprs')
         }
