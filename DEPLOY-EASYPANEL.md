@@ -56,6 +56,34 @@ Isso cria o admin com `ADMIN_EMAIL` / `ADMIN_SENHA`. Daí em diante os demais
 logins saem pela própria aplicação, em **Usuários** (só administradores veem a
 tela) — o seed serve só para o primeiro acesso.
 
+### Abrir os logins de campo da equipe
+
+A equipe inteira precisa entrar para preencher a APR antes de subir no poste, e
+abrir trinta logins na tela, um a um, é meia hora de digitação com um erro de
+e-mail no meio. No **Console** do serviço `api`:
+
+```bash
+npm run logins:campo -- --previa
+```
+
+Isso mostra quem ganharia login e com que endereço, sem escrever nada. A lista
+vem do cadastro: entra quem está **ativo** e ainda não tem login, com perfil
+**Técnico de campo** (abre a Segurança do Trabalho e mais nada). O endereço é o
+primeiro nome + `@ilnet.com.br`; quando duas pessoas dividem o primeiro nome,
+cada uma leva o segundo junto (`marco.aurelio@`), porque um `marco@` só serviria
+a um dos três.
+
+Conferida a lista, tire o `--previa`:
+
+```bash
+npm run logins:campo
+```
+
+A senha inicial é `12345678` para todos, e cada um troca a sua em **Minha
+conta**. Dá para rodar de novo quantas vezes quiser — quem já tem login é
+pulado, e ninguém tem a senha mexida. `SENHA_PADRAO=...` troca a senha inicial e
+`PULAR="fulano@ilnet.com.br"` deixa alguém de fora.
+
 ## 3. Serviço Web
 
 **+ Service → App**, nome `web`.

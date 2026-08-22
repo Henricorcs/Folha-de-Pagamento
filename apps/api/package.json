@@ -12,6 +12,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "ts-node prisma/seed.ts",
+    "logins:campo": "ts-node prisma/logins-de-campo.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint \"src/**/*.ts\" --max-warnings 0"
