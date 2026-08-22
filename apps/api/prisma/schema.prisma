@@ -1858,6 +1858,14 @@ model Apr {
   motivoCancelamento String?   @map("motivo_cancelamento")
   canceladaEm        DateTime? @map("cancelada_em")
 
+  /// Quando o PDF foi aberto pela primeira vez, ainda em rascunho.
+  ///
+  /// As orientações de segurança e o plano de resgate só existem no papel — no
+  /// fim dele —, e não em campo nenhum da tela. Sem provar que o PDF foi
+  /// aberto, a liberação vira um formulário preenchido sem ninguém ter lido o
+  /// que o documento manda fazer em caso de acidente.
+  visualizouPdfEm DateTime? @map("visualizou_pdf_em")
+
   /// O PDF desta APR arquivado na pasta da empresa, no RH.
   ///
   /// A APR liberada é um documento da casa, e a casa já tem um lugar onde se

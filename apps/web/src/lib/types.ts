@@ -1726,6 +1726,11 @@ export interface Apr {
   motivoCancelamento: string | null;
   canceladaEm: string | null;
   /**
+   * Quando o PDF foi aberto pela primeira vez, ainda em rascunho. Null = ainda
+   * não foi — e a liberação não passa sem isso (ver `pendencias`).
+   */
+  visualizouPdfEm: string | null;
+  /**
    * Preenchido = o PDF já está na pasta da empresa, no RH. A cópia de cada
    * executante fica na pasta dele — ver `ExecutanteApr.documentoRhId`.
    */

@@ -38,6 +38,8 @@ export interface AprParaConferir {
   gravidade: GravidadeApr | null;
   respostas: RespostaParaConferir[];
   executantes: ExecutanteParaConferir[];
+  /** Quando o PDF foi aberto pela primeira vez. Null = ainda não foi. */
+  visualizouPdfEm: Date | null;
 }
 
 /** Quantas letras de descrição já contam como uma etapa descrita. */
@@ -69,6 +71,14 @@ export function pendenciasParaLiberar(apr: AprParaConferir): string[] {
   pendencias.push(...pendenciasDasMarcacoes(apr.respostas));
   pendencias.push(...pendenciasDoRelato(apr.respostas));
   pendencias.push(...pendenciasDaEquipe(apr.executantes));
+
+  if (!apr.visualizouPdfEm) {
+    pendencias.push(
+      'Abra o PDF e leia as orientações de segurança e o plano de resgate ' +
+        'e emergência, no final do documento — é obrigatório antes de ' +
+        'liberar o serviço.',
+    );
+  }
 
   return pendencias;
 }

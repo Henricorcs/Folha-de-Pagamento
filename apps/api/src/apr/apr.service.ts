@@ -547,9 +547,25 @@ export class AprService {
 
   // --- O papel --------------------------------------------------------------
 
-  /** O PDF, montado agora a partir do retrato congelado. */
+  /**
+   * O PDF, montado agora a partir do retrato congelado.
+   *
+   * Enquanto ainda é rascunho, a primeira vez que alguém abre o PDF fica
+   * marcada — é o que prova, na liberação, que o documento foi de fato aberto
+   * e não só preenchido. Depois de liberada a marca já não muda mais nada
+   * (ver `pendenciasParaLiberar`), então não há por que atualizá-la de novo.
+   */
   async pdf(id: string, autor: AutorApr): Promise<{ nome: string; conteudo: Buffer }> {
     const apr = await this.exigir(id, autor);
+
+    if (apr.status === StatusApr.RASCUNHO && !apr.visualizouPdfEm) {
+      apr.visualizouPdfEm = new Date();
+      await this.prisma.apr.update({
+        where: { id },
+        data: { visualizouPdfEm: apr.visualizouPdfEm },
+      });
+    }
+
     return {
       nome: nomeDoArquivo(apr),
       conteudo: await gerarAprPdf(paraOPdf(apr)),
@@ -868,6 +884,7 @@ export class AprService {
         nome: e.nome,
         assinadoEm: e.assinadoEm,
       })),
+      visualizouPdfEm: apr.visualizouPdfEm,
     });
   }
 

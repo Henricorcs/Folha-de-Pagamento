@@ -55,6 +55,7 @@ function aprCompleta(): AprParaConferir {
     executantes: [
       { nome: 'João da Silva', assinadoEm: new Date('2026-08-21T09:00:00Z') },
     ],
+    visualizouPdfEm: new Date('2026-08-21T08:30:00Z'),
   };
 }
 
@@ -228,6 +229,15 @@ describe('pendenciasParaLiberar', () => {
     ]);
   });
 
+  it('exige ter aberto o PDF ao menos uma vez', () => {
+    const apr = aprCompleta();
+    apr.visualizouPdfEm = null;
+
+    expect(pendenciasParaLiberar(apr)).toEqual([
+      expect.stringContaining('orientações de segurança'),
+    ]);
+  });
+
   it('devolve tudo o que falta de uma vez, e não a primeira pendência', () => {
     const apr: AprParaConferir = {
       local: '',
@@ -236,10 +246,12 @@ describe('pendenciasParaLiberar', () => {
       gravidade: null,
       respostas: [],
       executantes: [],
+      visualizouPdfEm: null,
     };
 
-    // Local, coordenador, etapas, gravidade, as quatro categorias e a equipe.
-    expect(pendenciasParaLiberar(apr)).toHaveLength(9);
+    // Local, coordenador, etapas, gravidade, as quatro categorias, a equipe
+    // e ter aberto o PDF.
+    expect(pendenciasParaLiberar(apr)).toHaveLength(10);
   });
 });
 

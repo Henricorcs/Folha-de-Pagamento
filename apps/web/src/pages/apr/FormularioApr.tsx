@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconeAlerta, IconeVoltar } from '../../components/icones';
 import { Carregando } from '../../components/ui';
 import { api, mensagemErro } from '../../lib/api';
+import { abrirArquivo } from '../../lib/arquivo';
 import { useAuth } from '../../lib/auth';
 import { combina, semAcento } from '../../lib/busca';
 import {
@@ -358,15 +359,27 @@ export function FormularioApr({
       )}
 
       {passo === 4 && (
-        <PassoEquipe
-          aprId={id}
-          equipe={equipe}
-          setEquipe={setEquipe}
-          pessoas={pessoas.data ?? []}
-          executantes={rascunho.data?.executantes ?? []}
-          onSalvarEquipe={() => salvar.mutateAsync()}
-          onErro={setErro}
-        />
+        <>
+          <PassoEquipe
+            aprId={id}
+            equipe={equipe}
+            setEquipe={setEquipe}
+            pessoas={pessoas.data ?? []}
+            executantes={rascunho.data?.executantes ?? []}
+            onSalvarEquipe={() => salvar.mutateAsync()}
+            onErro={setErro}
+          />
+          {id && (
+            <AvisoLeituraPdf
+              aprId={id}
+              numero={rascunho.data?.numero}
+              visualizouPdfEm={rascunho.data?.visualizouPdfEm ?? null}
+              onVisualizado={() =>
+                qc.invalidateQueries({ queryKey: ['apr', id] })
+              }
+            />
+          )}
+        </>
       )}
 
       <Rodape
@@ -854,6 +867,93 @@ function PassoConferencia({
         );
       })}
     </div>
+  );
+}
+
+// --- Passo 5: a leitura obrigatória do PDF -----------------------------------
+
+/**
+ * O aviso que trava a liberação até o PDF ser aberto.
+ *
+ * As orientações de segurança e o plano de resgate e emergência só existem no
+ * fim do papel — não há campo nenhum na tela que os mostre. Marcar a equipe
+ * inteira e colher as assinaturas sem ninguém ter aberto o documento seria
+ * preencher um formulário sem ler o que ele manda fazer em caso de acidente.
+ * Por isso o servidor recusa liberar sem isto (ver `pendenciasParaLiberar`) —
+ * este bloco só deixa o motivo explícito antes do técnico esbarrar nele.
+ */
+function AvisoLeituraPdf({
+  aprId,
+  numero,
+  visualizouPdfEm,
+  onVisualizado,
+}: {
+  aprId: string;
+  numero?: number;
+  visualizouPdfEm: string | null;
+  onVisualizado: () => void;
+}) {
+  const [erro, setErro] = useState<string | null>(null);
+  const lido = !!visualizouPdfEm;
+
+  const abrir = useMutation({
+    mutationFn: () => abrirArquivo(`/apr/${aprId}/pdf`, `APR-${numero ?? aprId}.pdf`),
+    onSuccess: () => {
+      setErro(null);
+      onVisualizado();
+    },
+    onError: (e) => setErro(mensagemErro(e)),
+  });
+
+  return (
+    <section
+      className={`mt-6 rounded-2xl border p-4 ${
+        lido
+          ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10'
+          : 'border-amber-300 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10'
+      }`}
+    >
+      <p
+        className={`flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider ${
+          lido
+            ? 'text-emerald-800 dark:text-emerald-300'
+            : 'text-amber-800 dark:text-amber-300'
+        }`}
+      >
+        <IconeAlerta className="h-3.5 w-3.5" />
+        Leitura obrigatória antes de liberar
+      </p>
+      <p className="mt-1.5 text-[13px] leading-relaxed text-tinta-700">
+        Abra o PDF completo desta APR e leia as{' '}
+        <strong className="font-semibold text-tinta-900">
+          orientações de segurança e o plano de resgate e emergência
+        </strong>
+        , que ficam no final do documento. Não é possível liberar o serviço
+        sem visualizar o PDF.
+      </p>
+
+      <button
+        type="button"
+        onClick={() => abrir.mutate()}
+        disabled={abrir.isPending}
+        className={`btn mt-3 w-full py-2.5 ${lido ? 'btn-neutro' : 'btn-primario'}`}
+      >
+        {abrir.isPending
+          ? 'Abrindo…'
+          : lido
+            ? 'Visualizar o PDF novamente'
+            : 'Abrir o PDF e ler as instruções'}
+      </button>
+
+      {lido && (
+        <p className="mt-2 text-[12px] font-semibold text-emerald-700 dark:text-emerald-300">
+          ✓ PDF visualizado
+        </p>
+      )}
+      {erro && (
+        <p className="mt-2 text-[12px] text-rose-700 dark:text-rose-300">{erro}</p>
+      )}
+    </section>
   );
 }
 
