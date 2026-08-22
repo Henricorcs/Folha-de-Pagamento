@@ -193,8 +193,11 @@ pela NR-10. Transcrito do formulário impresso da casa, sem tirar nada dele.
 - [x] **Providência obrigatória** em quem responde "Não" no relato — o único
       acréscimo ao papel, onde esse "Não" ia embora sem deixar dito o que foi
       feito
-- [x] **PDF timbrado** gerado do retrato congelado, e arquivado sozinho na
-      pasta da empresa no RH (`Empresa / Análises de Risco (APR) / AAAA-MM`)
+- [x] **PDF timbrado** gerado do retrato congelado, e arquivado sozinho no RH em
+      duas pastas: a da empresa, mês a mês (`Empresa / Análises de Risco (APR) /
+      AAAA-MM`), e a de cada executante do cadastro (`Fulano / Segurança do
+      Trabalho`) — é lá que se procura a prova de que aquela pessoa foi
+      orientada antes de subir. Terceirizado sem pasta fica só na da empresa
 - [x] **Perfil TECNICO**, cujo módulo não se distribui pela tela: ele abre a
       Segurança do Trabalho e mais nada, sempre
 - [ ] Prazo de validade dos treinamentos (NR-10/NR-35) por funcionário, com

@@ -1630,6 +1630,14 @@ model DocumentoRh {
   /// A APR de que este documento é a cópia arquivada, quando é o caso.
   apr Apr?
 
+  /// O executante de quem este documento é a cópia da APR, quando é o caso.
+  ///
+  /// A mesma folha existe duas vezes na estante de propósito: uma na pasta da
+  /// empresa, que responde "quais serviços houve em agosto?", e uma na pasta de
+  /// cada pessoa, que responde "onde está a prova de que o Fulano foi orientado
+  /// antes de subir?". São perguntas diferentes, feitas por gente diferente.
+  executanteApr ExecutanteApr?
+
   @@unique([pastaId, tipo, competencia])
   @@index([pastaId])
   @@index([loteId])
@@ -1850,12 +1858,15 @@ model Apr {
   motivoCancelamento String?   @map("motivo_cancelamento")
   canceladaEm        DateTime? @map("cancelada_em")
 
-  /// O PDF desta APR arquivado na estante do RH.
+  /// O PDF desta APR arquivado na pasta da empresa, no RH.
   ///
   /// A APR liberada é um documento da casa, e a casa já tem um lugar onde se
   /// procura documento: a pasta da empresa, no RH. O papel continua sendo
   /// gerado sob demanda a partir do retrato congelado — o arquivo de lá é
   /// cópia, para quem procura pelo caminho de lá.
+  ///
+  /// Esta é a cópia do arquivo geral, ordenada por mês. A de cada pessoa fica
+  /// na pasta dela — ver `ExecutanteApr.documentoRh`.
   ///
   /// `SetNull`: quem apagar o documento pela tela do RH não desfaz a APR, só
   /// desfaz a cópia. A próxima mudança arquiva de novo.
@@ -1942,6 +1953,18 @@ model ExecutanteApr {
   /// De onde veio a assinatura, para o caso de alguém contestar.
   ip        String?
   userAgent String? @map("user_agent")
+
+  /// A cópia da APR guardada na pasta desta pessoa, no RH.
+  ///
+  /// Vai para "Segurança do Trabalho" dentro da pasta dela, junto do contrato e
+  /// do exame — é ali que se procura quando o cliente, o sindicato ou a
+  /// fiscalização pergunta o que aquela pessoa assinou antes do serviço.
+  /// Terceirizado que apareceu no dia não tem pasta, e fica só na da empresa.
+  ///
+  /// `SetNull`: apagar o documento pela tela do RH não tira ninguém da equipe
+  /// nem desfaz a APR — a próxima mudança arquiva de novo.
+  documentoRh   DocumentoRh? @relation(fields: [documentoRhId], references: [id], onDelete: SetNull)
+  documentoRhId String?      @unique @map("documento_rh_id")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

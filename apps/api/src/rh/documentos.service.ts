@@ -273,6 +273,68 @@ export class DocumentosRhService {
   }
 
   /**
+   * A pasta de uma pessoa na estante, criada se ainda não existir.
+   *
+   * A pasta de funcionário nasce sozinha quando alguém abre a tela do RH — e
+   * quem arquiva a APR de um serviço não passou por lá. Sem isto, a cópia do
+   * técnico dependeria de alguém ter aberto a estante antes dele.
+   *
+   * Quem não está no cadastro só tem pasta se alguém a criou à mão; aí ela é
+   * achada pelo CPF. Não achando nenhuma, devolve nulo de propósito: abrir
+   * pasta para o terceirizado que apareceu num serviço encheria a estante de
+   * gente que não é da casa, e quem procura o papel dele procura na empresa.
+   */
+  async pastaDaPessoa(pessoa: {
+    funcionarioId?: string | null;
+    cpf?: string | null;
+  }): Promise<string | null> {
+    if (pessoa.funcionarioId) {
+      const dela = await this.prisma.pastaRh.findUnique({
+        where: { funcionarioId: pessoa.funcionarioId },
+        select: { id: true },
+      });
+      if (dela) return dela.id;
+
+      const cadastro = await this.prisma.funcionario.findUnique({
+        where: { id: pessoa.funcionarioId },
+        select: { id: true, nome: true, cpfCnpj: true },
+      });
+      if (cadastro) {
+        try {
+          const criada = await this.prisma.pastaRh.create({
+            data: {
+              nome: cadastro.nome,
+              funcionarioId: cadastro.id,
+              cpf: soDigitos(cadastro.cpfCnpj) || null,
+            },
+            select: { id: true },
+          });
+          return criada.id;
+        } catch {
+          // Duas APRs da mesma pessoa arquivando no mesmo instante: a segunda
+          // perde a corrida do @unique e reusa a pasta que a primeira criou.
+          const agora = await this.prisma.pastaRh.findUnique({
+            where: { funcionarioId: pessoa.funcionarioId },
+            select: { id: true },
+          });
+          if (agora) return agora.id;
+        }
+      }
+    }
+
+    const cpf = soDigitos(pessoa.cpf);
+    if (!cpf) return null;
+
+    // Só na estante: o CPF numa subpasta é herança da pasta de cima, e guardar
+    // o documento de alguém dentro da divisória de outro é perdê-lo.
+    const porCpf = await this.prisma.pastaRh.findFirst({
+      where: { cpf, paiId: null },
+      select: { id: true },
+    });
+    return porCpf?.id ?? null;
+  }
+
+  /**
    * Até onde a árvore pode ir.
    *
    * Três níveis dão "Fulano / Recibos de pagamento / 2026", que é mais fundo do

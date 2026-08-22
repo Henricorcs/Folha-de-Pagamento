@@ -1679,6 +1679,12 @@ export interface ExecutanteApr {
   assinaturaPng: string | null;
   assinadoEm: string | null;
   modo: ModoAssinatura;
+  /**
+   * Preenchido = a cópia do PDF já está em "Segurança do Trabalho", dentro da
+   * pasta desta pessoa no RH. Vazio para quem não tem pasta na estante — o
+   * terceirizado que apareceu no serviço.
+   */
+  documentoRhId: string | null;
 }
 
 /** Uma APR inteira, como a tela de detalhe a recebe. */
@@ -1719,7 +1725,10 @@ export interface Apr {
 
   motivoCancelamento: string | null;
   canceladaEm: string | null;
-  /** Preenchido = o PDF já está na pasta da empresa, no RH. */
+  /**
+   * Preenchido = o PDF já está na pasta da empresa, no RH. A cópia de cada
+   * executante fica na pasta dele — ver `ExecutanteApr.documentoRhId`.
+   */
   documentoRhId: string | null;
 
   respostas: RespostaApr[];

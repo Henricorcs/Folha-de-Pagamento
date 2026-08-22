@@ -58,6 +58,18 @@ export interface Origem {
 /** As duas prorrogações que o formulário impresso prevê. */
 const MAXIMO_DE_PRORROGACOES = 2;
 
+/**
+ * A divisória da APR dentro da pasta de cada pessoa.
+ *
+ * O nome é o do assunto, e não o do documento, porque é o assunto que vai
+ * crescer: a ficha de EPI, o ASO, o certificado da NR-35 e a ordem de serviço
+ * são da mesma gaveta, e o dia em que entrarem vão encontrá-la aberta.
+ */
+export const SUBPASTA_DA_SEGURANCA = 'Segurança do Trabalho';
+
+/** Como a APR se chama na estante. É por ele que a tela do RH agrupa. */
+const TIPO_NO_RH = 'Análise de Risco (APR)';
+
 const COM_TUDO = {
   respostas: { orderBy: [{ categoria: 'asc' }, { ordem: 'asc' }] },
   executantes: { orderBy: { createdAt: 'asc' } },
@@ -495,11 +507,19 @@ export class AprService {
   }
 
   /**
-   * Guarda o PDF na estante do RH, na pasta da empresa.
+   * Guarda o PDF na estante do RH: na pasta da empresa e na de cada executante.
    *
-   * A APR liberada é um documento da casa, e a casa já tem um lugar onde se
-   * procura documento. O papel continua sendo gerado sob demanda daqui — o
-   * arquivo de lá é cópia, para quem procura pelo caminho de lá.
+   * Duas cópias da mesma folha, e cada uma responde a uma pergunta diferente. A
+   * da empresa, ordenada por mês, responde "quais serviços houve em agosto?". A
+   * que fica em "Segurança do Trabalho" dentro da pasta de cada um responde
+   * "cadê a prova de que o Fulano foi orientado antes de subir no poste?" — a
+   * pergunta do dia em que alguém cobra, e que se vai procurar na pasta dele,
+   * não na do serviço.
+   *
+   * O papel continua sendo gerado sob demanda daqui, a partir do retrato
+   * congelado; os arquivos de lá são cópia, para quem procura pelo caminho de
+   * lá. O PDF é montado uma vez e guardado quantas forem as pastas: são os
+   * mesmos bytes, e gerá-lo por pessoa custaria o mesmo desenho cinco vezes.
    *
    * Nunca derruba quem a chamou. Uma falha ao arquivar é uma cópia que não
    * saiu; recusar a liberação por causa dela deixaria a equipe parada na rua
@@ -513,35 +533,95 @@ export class AprService {
       });
 
       const pdf = await gerarAprPdf(paraOPdf(apr));
-      const pastaId = await this.pastaDoMes(apr.inicioEm);
+      const arquivo = `data:application/pdf;base64,${pdf.toString('base64')}`;
 
-      // O arquivo guardado não se troca por baixo do mesmo título (regra do
-      // RH, e boa): a cópia velha sai e a nova entra.
-      if (apr.documentoRhId) {
-        await this.documentos
-          .apagar(apr.documentoRhId)
-          .catch(() => undefined);
-      }
-
-      const doc = await this.documentos.guardar({
-        pastaId,
-        titulo: tituloNoRh(apr),
-        tipo: 'Análise de Risco (APR)',
-        descricao:
-          `${apr.tipoTrabalho} · ${apr.local} · coordenação de ` +
-          `${apr.coordenador} · ${apr.executantes.length} executante(s)`,
-        arquivoNome: nomeDoArquivo(apr),
-        arquivo: `data:application/pdf;base64,${pdf.toString('base64')}`,
-      });
-
-      await this.prisma.apr.update({
-        where: { id },
-        data: { documentoRhId: doc.id },
-      });
+      await this.arquivarNaEmpresa(apr, arquivo);
+      await this.arquivarComAEquipe(apr, arquivo);
     } catch (erro) {
       this.logger.warn(
         `Não consegui arquivar a APR ${id} na pasta do RH: ${String(erro)}`,
       );
+    }
+  }
+
+  /** A cópia do arquivo geral: "Empresa / Análises de Risco (APR) / 2026-08". */
+  private async arquivarNaEmpresa(
+    apr: AprComTudo,
+    arquivo: string,
+  ): Promise<void> {
+    const pastaId = await this.pastaDoMes(apr.inicioEm);
+
+    // O arquivo guardado não se troca por baixo do mesmo título (regra do
+    // RH, e boa): a cópia velha sai e a nova entra.
+    if (apr.documentoRhId) {
+      await this.documentos.apagar(apr.documentoRhId).catch(() => undefined);
+    }
+
+    const doc = await this.documentos.guardar({
+      pastaId,
+      titulo: tituloNoRh(apr),
+      tipo: TIPO_NO_RH,
+      descricao:
+        `${apr.tipoTrabalho} · ${apr.local} · coordenação de ` +
+        `${apr.coordenador} · ${apr.executantes.length} executante(s)`,
+      arquivoNome: nomeDoArquivo(apr),
+      arquivo,
+    });
+
+    await this.prisma.apr.update({
+      where: { id: apr.id },
+      data: { documentoRhId: doc.id },
+    });
+  }
+
+  /**
+   * A cópia de cada executante, em "Segurança do Trabalho" dentro da pasta
+   * dele — a mesma gaveta do contrato e do exame.
+   *
+   * Uma pessoa por vez, cada uma no seu `try`: a pasta de um que deu problema
+   * não pode custar a cópia dos outros três. Quem não tem pasta na estante — o
+   * terceirizado que apareceu no serviço — fica só na cópia da empresa; ver
+   * `pastaDaPessoa`.
+   */
+  private async arquivarComAEquipe(
+    apr: AprComTudo,
+    arquivo: string,
+  ): Promise<void> {
+    for (const executante of apr.executantes) {
+      try {
+        const dele = await this.documentos.pastaDaPessoa(executante);
+        if (!dele) continue;
+
+        const destino = await this.documentos.garantirSubpasta(
+          dele,
+          SUBPASTA_DA_SEGURANCA,
+        );
+
+        if (executante.documentoRhId) {
+          await this.documentos
+            .apagar(executante.documentoRhId)
+            .catch(() => undefined);
+        }
+
+        const doc = await this.documentos.guardar({
+          pastaId: destino,
+          titulo: tituloNoRh(apr),
+          tipo: TIPO_NO_RH,
+          descricao: descricaoDoExecutante(apr, executante),
+          arquivoNome: nomeDoArquivo(apr),
+          arquivo,
+        });
+
+        await this.prisma.executanteApr.update({
+          where: { id: executante.id },
+          data: { documentoRhId: doc.id },
+        });
+      } catch (erro) {
+        this.logger.warn(
+          `APR nº ${apr.numero}: não consegui guardar a cópia na pasta de ` +
+            `${executante.nome}: ${String(erro)}`,
+        );
+      }
     }
   }
 
@@ -681,6 +761,16 @@ export class AprService {
       await tx.executanteApr.deleteMany({
         where: { id: { in: sair.map((e) => e.id) } },
       });
+
+      // Quem saiu da equipe leva junto a cópia que estava na pasta dele. Uma
+      // APR na gaveta de quem não foi ao serviço é pior que nenhuma: ela diz
+      // que a pessoa estava lá.
+      const copias = sair
+        .map((e) => e.documentoRhId)
+        .filter((id): id is string => !!id);
+      if (copias.length > 0) {
+        await tx.documentoRh.deleteMany({ where: { id: { in: copias } } });
+      }
     }
 
     const entrar = novos.filter((e) => !jaTem.has(chave(e)));
@@ -795,6 +885,35 @@ function competencia(data: Date): string {
 function tituloNoRh(apr: { numero: number; local: string; status: StatusApr }) {
   const cancelada = apr.status === StatusApr.CANCELADA ? ' (CANCELADA)' : '';
   return `APR nº ${apr.numero} — ${apr.local}${cancelada}`;
+}
+
+/**
+ * O que a linha da pasta dela diz sobre esta APR.
+ *
+ * Na pasta da pessoa, o que importa é o serviço e a assinatura: quem abre esta
+ * gaveta está conferindo o que ela assinou, e não quantos foram ao poste. A
+ * data sai no fuso de casa — o container roda em UTC, e a APR assinada às nove
+ * da noite viraria a do dia seguinte.
+ */
+function descricaoDoExecutante(
+  apr: { tipoTrabalho: string; local: string; coordenador: string },
+  executante: { assinadoEm: Date | null; modo: ModoAssinatura },
+): string {
+  const assinatura = executante.assinadoEm
+    ? `assinada em ${executante.assinadoEm.toLocaleString('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })}${executante.modo === ModoAssinatura.DIGITADA ? ' (gerada do nome)' : ''}`
+    : 'sem assinatura';
+
+  return (
+    `${apr.tipoTrabalho} · ${apr.local} · coordenação de ` +
+    `${apr.coordenador} · ${assinatura}`
+  );
 }
 
 function nomeDoArquivo(apr: { numero: number; inicioEm: Date }): string {

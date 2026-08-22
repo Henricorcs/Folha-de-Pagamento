@@ -94,6 +94,8 @@ export function DetalheApr({
   const rascunho = apr.status === 'RASCUNHO';
   const liberada = apr.status === 'LIBERADA';
   const supervisiona = usuario?.role === 'ADMIN' || usuario?.role === 'RH';
+  const comCopia = apr.executantes.filter((e) => e.documentoRhId);
+  const semPasta = apr.executantes.filter((e) => !e.documentoRhId);
 
   return (
     <div className="space-y-5">
@@ -298,6 +300,37 @@ export function DetalheApr({
             </div>
           </div>
         )}
+
+        {/*
+          Onde o papel foi parar.
+
+          A APR liberada já está guardada quando esta tela abre, e quem
+          preencheu não tem como saber disso — a linha existe para que ninguém
+          suba a mesma folha à mão na pasta de ninguém.
+        */}
+        {apr.documentoRhId && (
+          <p className="mt-4 border-t border-tinta-200 pt-3 text-[12px] leading-snug text-tinta-500">
+            Guardada no RH: na pasta da empresa
+            {comCopia.length > 0 && (
+              <>
+                {' '}
+                e em{' '}
+                <span className="font-semibold text-tinta-700">
+                  Segurança do Trabalho
+                </span>{' '}
+                dentro da pasta de {listarNomes(comCopia.map((e) => e.nome))}
+              </>
+            )}
+            .
+            {semPasta.length > 0 && (
+              <>
+                {' '}
+                Sem cópia na pasta de {listarNomes(semPasta.map((e) => e.nome))}
+                : quem não tem pasta na estante fica só na da empresa.
+              </>
+            )}
+          </p>
+        )}
       </section>
 
       {/* --- O que foi marcado --- */}
@@ -374,6 +407,12 @@ export function DetalheApr({
       )}
     </div>
   );
+}
+
+/** "Fulano, Beltrano e Sicrano" — a lista como se fala. */
+function listarNomes(nomes: string[]): string {
+  if (nomes.length <= 1) return nomes[0] ?? '';
+  return `${nomes.slice(0, -1).join(', ')} e ${nomes[nomes.length - 1]}`;
 }
 
 /** Prorrogar e cancelar pedem a mesma coisa: uma frase dizendo por quê. */
